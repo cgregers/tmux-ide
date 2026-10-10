@@ -1,6 +1,7 @@
 import { WindowSplitLayoutUnavailable } from "../terminal/mirror/window-split-authority.ts";
 import { streamTmuxInteractions } from "./tmux-server-interaction-events.ts";
 import { mountTmuxServerNativeBackingRoute } from "./tmux-server-native-backing.ts";
+import { mountTmuxServerEditorContextRoute } from "./tmux-server-editor-context.ts";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { projectApplicationShellResource } from "./resources/application-shell.ts";
@@ -40,7 +41,7 @@ const workspaceSchema = z
   .min(1)
   .max(160)
   .refine((value) => !/[\0\r\n]/u.test(value));
-async function boundedJson(request: Request): Promise<unknown> {
+async function boundedJson(request: Request, limit = 64 * 1024): Promise<unknown> {
   if (!request.body) throw new TypeError("Missing body");
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -50,7 +51,7 @@ async function boundedJson(request: Request): Promise<unknown> {
       const next = await reader.read();
       if (next.done) break;
       size += next.value.byteLength;
-      if (size > 64 * 1024) {
+      if (size > limit) {
         void reader.cancel().catch(() => undefined);
         throw new TypeError("Body too large");
       }
@@ -129,6 +130,11 @@ export function mountTmuxServerRoutes(app: Hono, options: TmuxServerRoutesOption
     }),
   );
   const scoped = `${base}/:serverId/:generation`;
+  mountTmuxServerEditorContextRoute(app, {
+    scopedPath: scoped,
+    owners: options.owners,
+    readBody: (request) => boundedJson(request, 8 * 1024),
+  });
   // Structured read only: this never acquires a channel or changes tmux geometry.
   app.post(
     `${scoped}/split-layout/:workspaceName`,

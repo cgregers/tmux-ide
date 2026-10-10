@@ -1,4 +1,7 @@
 import {
+  PaneEditorContextTargetSchemaZ,
+  PaneEditorContextResponseSchemaZ,
+  type PaneEditorContextTarget,
   WindowLinkTargetSchemaZ,
   WindowSplitLayoutResourceSchemaZ,
   type WindowLinkTarget,
@@ -161,6 +164,25 @@ export function createTmuxServerClient(
       const response = TmuxServerSessionsResourceSchemaZ.parse(await scopedRequest("sessions"));
       assertScope(response.server);
       return response;
+    },
+    /** Authenticated directory observation only; does not open an editor or acquire input. */
+    async paneEditorContext(input: PaneEditorContextTarget, signal?: AbortSignal) {
+      const parsed = PaneEditorContextTargetSchemaZ.safeParse(input);
+      if (!parsed.success) throw new TypeError("Invalid editor context target");
+      const target = parsed.data;
+      if (target.generation !== scope.generation) throw new TmuxServerClientError("scope-mismatch");
+      signal?.throwIfAborted();
+      const raw = await scopedRequest("pane-editor-context", target, undefined, signal);
+      const response = PaneEditorContextResponseSchemaZ.safeParse(raw);
+      if (!response.success) throw new TypeError("Invalid editor context response");
+      assertScope(response.data.server);
+      if (
+        Object.entries(target).some(
+          ([key, value]) => response.data.context[key as keyof PaneEditorContextTarget] !== value,
+        )
+      )
+        throw new TmuxServerClientError("scope-mismatch");
+      return response.data;
     },
     async openSession(liveSessionId: string) {
       const raw = await scopedRequest(`sessions/${encodeURIComponent(liveSessionId)}/open`, {});

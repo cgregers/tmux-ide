@@ -1,11 +1,10 @@
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import {
-  TerminalAttachmentSemanticPaneIdSchemaZ,
-  WorkspaceCatalogLiveSessionIdSchemaZ,
-  WorkspaceIdSchemaZ,
+  PaneEditorContextTargetSchemaZ,
   WorkspacePaneCwdSchemaZ,
-  type WorkspacePaneCwd,
+  type PaneEditorContextTarget,
+  type PaneEditorContextObservation,
 } from "@tmux-ide/contracts";
 import type { LiveSessionSummary } from "../command-center/discovery.ts";
 import type {
@@ -15,22 +14,7 @@ import type {
 import type { WorkspaceRegistry } from "./workspace-registry.ts";
 import { materializePaneCwd, normalizePaneCwd } from "./workspace-state.ts";
 
-const TargetSchema = z
-  .object({
-    generation: z.uuid(),
-    workspaceName: WorkspaceIdSchemaZ,
-    liveSessionId: WorkspaceCatalogLiveSessionIdSchemaZ,
-    semanticPaneId: TerminalAttachmentSemanticPaneIdSchemaZ,
-  })
-  .strict();
-
-export type PaneEditorContextTarget = z.infer<typeof TargetSchema>;
-
-/** Local observation only; never a transferable authorization to launch an editor. */
-export interface PaneEditorContextObservation extends PaneEditorContextTarget {
-  readonly cwd: WorkspacePaneCwd;
-  readonly directory: string;
-}
+export type { PaneEditorContextTarget, PaneEditorContextObservation } from "@tmux-ide/contracts";
 
 interface Options {
   readonly generation: string;
@@ -47,7 +31,7 @@ export function createPaneEditorContextResolver(options: Options) {
     input: PaneEditorContextTarget,
     cancellation?: AbortSignal,
   ): Promise<PaneEditorContextObservation> => {
-    const target = TargetSchema.parse(input);
+    const target = PaneEditorContextTargetSchemaZ.parse(input);
     // A supplied signal selects a fresh inventory read, not an existing flight.
     const signal = cancellation
       ? AbortSignal.any([cancellation, AbortSignal.timeout(5_000)])
