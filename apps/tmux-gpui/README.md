@@ -251,6 +251,14 @@ and retires on background, navigation or helper failure. These reads do not reop
 sessions or grant terminal input. Native source validation is recorded separately
 from the running demo build.
 
+The pane menu includes **Open folder in VS Code** for the selected pane's live
+working directory. It requires local daemon discovery and an installed VS Code;
+an explicit private host file does not establish that its filesystem is local.
+The action rechecks the selected pane and daemon binding before opening a folder.
+If it fails, reselect the pane before retrying. This requests an external editor;
+it does not send a shell command or change the pane's working directory.
+Physical editor-launch qualification is still pending.
+
 Project presentation remains future work. Other catalog updates are explicit through Refresh. After a daemon replacement, select Refresh sessions,
 then choose a session and pane again. For explicit files, update connection details
 first. The browser process stays open. Recovery is explicit through Refresh and

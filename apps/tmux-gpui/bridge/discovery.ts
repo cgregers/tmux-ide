@@ -12,6 +12,16 @@ import {
 import { listTmuxServers } from "../../../packages/daemon-client/src/tmux-server-client.ts";
 import { hostSchema, type PreviewHost } from "./config.ts";
 
+export interface LocalPreviewHostProof {
+  assertCurrent(): void;
+  verify(signal?: AbortSignal): Promise<void>;
+}
+// Provenance is process-private. Parsing a host file or copying its fields cannot mint it.
+const localHosts = new WeakMap<PreviewHost, LocalPreviewHostProof>();
+export function localPreviewHostProof(host: PreviewHost): LocalPreviewHostProof | null {
+  return localHosts.get(host) ?? null;
+}
+
 const discoveryMessages = Object.freeze({
   "no-daemon":
     "No usable local daemon was found. If tmux-ide is installed, run tmux-ide --headless in a terminal and keep it running, then Refresh sessions.",
@@ -93,9 +103,47 @@ export async function discoverPreviewHost(
   const current = inspectCanonicalDaemonInfoPath(path);
   if (current.status !== "valid" || JSON.stringify(current.info) !== JSON.stringify(info))
     throw new DaemonDiscoveryError("record-changed");
-  return hostSchema.parse({
+  const host = hostSchema.parse({
     baseUrl,
     ownerToken: info.authToken,
     scope: { serverId: online[0]!.serverId, generation: online[0]!.generation },
   });
+  const captured = JSON.stringify(info);
+  const assertCurrent = () => {
+    const current = inspectCanonicalDaemonInfoPath(path);
+    if (current.status !== "valid" || JSON.stringify(current.info) !== captured)
+      throw new DaemonDiscoveryError("record-changed");
+    try {
+      process.kill(info.pid, 0);
+    } catch {
+      throw new DaemonDiscoveryError("unavailable");
+    }
+  };
+  localHosts.set(host, {
+    assertCurrent,
+    async verify(signal) {
+      assertCurrent();
+      signal?.throwIfAborted();
+      const response = await request(new URL("/identity", baseUrl), {
+        redirect: "error",
+        cache: "no-store",
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(2500)])
+          : AbortSignal.timeout(2500),
+      });
+      if (!response.ok) throw new DaemonDiscoveryError("unavailable");
+      const identity = DaemonIdentitySchema.parse(await response.json());
+      if (
+        identity.instanceId !== info.instanceId ||
+        identity.pid !== info.pid ||
+        identity.startedAt !== info.startedAt ||
+        identity.protocolVersion !== info.protocolVersion ||
+        identity.environmentId !== info.environmentId
+      )
+        throw new DaemonDiscoveryError("identity-changed");
+      signal?.throwIfAborted();
+      assertCurrent();
+    },
+  });
+  return host;
 }

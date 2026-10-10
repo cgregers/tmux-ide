@@ -222,3 +222,35 @@ fn opening_menu_and_editor_does_not_resize_terminal_canvas(cx: &mut TestAppConte
 }
 
 mod split;
+
+#[gpui::test]
+fn editor_uses_captured_target_once_and_rejects_changed_selection(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(64);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    receiver.try_iter().for_each(drop);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let original = view.browser_state.clone();
+            view.input_interrupted = true;
+            view.open_pane_actions(window, cx);
+            view.open_pane_editor(window, cx);
+            let command = receiver.try_recv().unwrap();
+            let expected_token = original.pane_actions.as_ref().unwrap().token.clone();
+            assert_eq!(
+                serde_json::to_value(command).unwrap(),
+                serde_json::json!({
+                    "type":"open-editor", "request":7, "id":"pane-a", "token":expected_token
+                })
+            );
+            view.open_pane_editor(window, cx);
+            assert!(receiver.try_recv().is_err());
+            assert!(view.input_interrupted);
+            view.browser_state = original;
+            view.open_pane_actions(window, cx);
+            view.browser_state.selected_pane = Some("other".into());
+            view.open_pane_editor(window, cx);
+            assert!(receiver.try_recv().is_err());
+            assert!(view.pane_actions.is_none());
+        })
+    });
+}

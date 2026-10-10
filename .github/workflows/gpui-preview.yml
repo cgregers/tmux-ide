@@ -41,6 +41,7 @@ jobs:
           node --import tsx apps/tmux-gpui/bridge/session-create-smoke.mjs
           node --import tsx apps/tmux-gpui/bridge/session-open-smoke.mjs
           node --import tsx apps/tmux-gpui/bridge/editor-context-smoke.mjs
+          node --import tsx apps/tmux-gpui/bridge/editor-action-smoke.mjs
           TMUX_GPUI_TEST_LONG_SESSION_NAME=1 node --import tsx apps/tmux-gpui/bridge/session-open-smoke.mjs
           node --import tsx apps/tmux-gpui/bridge/startup-recovery-smoke.mjs
           node --import tsx apps/tmux-gpui/bridge/discovery-recovery-smoke.mjs

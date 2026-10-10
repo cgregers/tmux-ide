@@ -4,14 +4,18 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { DAEMON_WIRE_PROTOCOL_VERSION } from "../../../packages/contracts/src/index.ts";
+import {
+  DAEMON_WIRE_PROTOCOL_VERSION,
+  type CanonicalDaemonInfo,
+} from "../../../packages/contracts/src/index.ts";
 import {
   discoverPreviewHost,
+  localPreviewHostProof,
   DaemonCompatibilityError,
   DaemonDiscoveryError,
 } from "./discovery.ts";
 
-async function fixture(run: (path: string, info: any) => Promise<void>) {
+async function fixture(run: (path: string, info: CanonicalDaemonInfo) => Promise<void>) {
   const dir = await mkdtemp(join(tmpdir(), "gpui-discovery-"));
   const path = join(dir, "daemon.json");
   const info = {
@@ -144,6 +148,7 @@ test("matching old and future protocols reject before authenticated discovery", 
       assert.ok(failure instanceof DaemonCompatibilityError);
       assert.match(failure.message, /incompatible/i);
       assert.ok(failure.message.includes(String(protocolVersion)));
+      assert.ok(info.authToken);
       assert.ok(!failure.message.includes(info.authToken));
     });
   }
@@ -208,4 +213,32 @@ test("all public discovery guidance fits the native status limit", () => {
     assert.ok(error.message.length > 0 && Buffer.byteLength(error.message) <= 240);
     assert.ok(!error.message.includes("undefined"));
   }
+});
+
+test("local editor provenance cannot be minted from a copied host and is revoked by record or identity change", async () => {
+  await fixture(async (path, info) => {
+    let identity = { ...info, ok: true };
+    const host = await discoverPreviewHost(path, async (url) =>
+      String(url).endsWith("/identity")
+        ? reply(identity)
+        : reply({
+            version: 1,
+            servers: [
+              {
+                serverId: `tmux-server.${"a".repeat(32)}`,
+                generation: randomUUID(),
+                label: "local",
+                state: "online",
+              },
+            ],
+          }),
+    );
+    assert.equal(localPreviewHostProof({ ...host }), null);
+    const proof = localPreviewHostProof(host)!;
+    await proof.verify();
+    identity = { ...identity, instanceId: randomUUID() };
+    await assert.rejects(proof.verify(), /identity changed/);
+    await writeFile(path, JSON.stringify({ ...info, instanceId: randomUUID() }));
+    assert.throws(() => proof.assertCurrent(), /record changed/);
+  });
 });

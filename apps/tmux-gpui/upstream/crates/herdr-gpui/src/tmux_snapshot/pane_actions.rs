@@ -164,6 +164,29 @@ impl SnapshotView {
         };
         self.queue_pane_action(action, window, cx);
     }
+    fn open_pane_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.refresh_pane_actions(cx);
+        let Some(menu) = self.pane_actions.as_ref() else {
+            return;
+        };
+        let command = browser::Command::OpenEditor {
+            request: menu.target.request,
+            id: menu.target.actions.id.clone(),
+            token: menu.target.actions.token.clone(),
+        };
+        if self
+            .browser_commands
+            .as_ref()
+            .is_some_and(|sender| sender.try_send(command).is_ok())
+        {
+            // Admission only: the bridge resolves cwd and reports launch status.
+            self.browser_state.pane_actions = None;
+            self.close_pane_actions(window, cx);
+        } else if let Some(menu) = &mut self.pane_actions {
+            menu.error = Some("Action queue unavailable — cancel and reselect the pane.");
+            cx.notify();
+        }
+    }
     fn split_pane(
         &mut self,
         direction: SplitDirection,
@@ -310,6 +333,19 @@ impl SnapshotView {
                         })),
                 );
             }
+            panel = panel.child(
+                div()
+                    .id("pane-action-open-editor")
+                    .debug_selector(|| "pane-action-open-editor".into())
+                    .min_h(px(crate::config::Config::default().ui.line_height() + 12.))
+                    .px_2()
+                    .flex()
+                    .items_center()
+                    .cursor_pointer()
+                    .hover(move |row| row.bg(rgb(active)))
+                    .child("Open folder in VS Code")
+                    .on_click(cx.listener(|view, _, window, cx| view.open_pane_editor(window, cx))),
+            );
             for (direction, id, label) in [
                 (
                     SplitDirection::Right,

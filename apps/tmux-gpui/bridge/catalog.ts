@@ -4,14 +4,28 @@ import { randomUUID } from "node:crypto";
 import { createTmuxServerClient } from "../../../packages/daemon-client/src/tmux-server-client.ts";
 import { connectionSchema, hostSchema, type PreviewHost } from "./config.ts";
 import type { HomeAgentCatalogSession } from "../../../packages/presentation/src/home-agent-roster.ts";
+import { localPreviewHostProof } from "./discovery.ts";
 
 export function createPreviewCatalog(hostInput: PreviewHost) {
+  const localProof = localPreviewHostProof(hostInput);
   const host = hostSchema.parse(hostInput);
   const client = createTmuxServerClient(
     { ...host, hostClientId: `gpui-catalog:${randomUUID()}`, origin: "tmux-ide://app" },
     host.scope,
   );
   return {
+    localProof,
+    paneEditorContext(
+      workspaceName: string,
+      liveSessionId: string,
+      semanticPaneId: string,
+      signal?: AbortSignal,
+    ) {
+      return client.paneEditorContext(
+        { generation: host.scope.generation, workspaceName, liveSessionId, semanticPaneId },
+        signal,
+      );
+    },
     dispose: () => client.dispose(),
     async homeSessions(): Promise<HomeAgentCatalogSession[]> {
       const list = await catalogStage("list-sessions", () => client.sessions());

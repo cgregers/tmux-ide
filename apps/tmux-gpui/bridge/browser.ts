@@ -24,6 +24,7 @@ import {
 } from "./resize-gesture.ts";
 import { createSessionOwner, sessionCreateSchema } from "./session-create.ts";
 import { paneActionSchema, paneActionsSchema } from "./pane-actions.ts";
+import { openEditorSchema, openSelectedPaneEditor } from "./local-editor.ts";
 import { paneResizeSchema, resizePresentationMatches } from "./pane-resize.ts";
 import { CatalogStageError } from "./catalog-errors.ts";
 import { createAppearanceOwner } from "./appearance.ts";
@@ -49,6 +50,7 @@ import { createPreviewCatalog, sessionChoice } from "./catalog.ts";
 import { hostSchema, readPrivateConfig, connectionSchema } from "./config.ts";
 
 const commandSchema = z.union([
+  openEditorSchema,
   openWorkspaceAgentSchema,
   openAgentSchema,
   sessionCreateSchema,
@@ -132,6 +134,9 @@ let pendingPaneSplit:
     })
   | null = null;
 let paneActions: z.infer<typeof paneActionsSchema> | null = null;
+let editorPending = false;
+let editorConsumed: string | null = null;
+let editorMessage: { request: number; id: string; text: string } | null = null;
 let snapshot: unknown = null;
 let copyRegion: unknown = null;
 let regions: unknown[] = [];
@@ -274,7 +279,10 @@ function publish() {
       preferredPane: foreground && sessionCatalogComplete ? initialPane : null,
       selectedSession,
       selectedPane,
-      status,
+      status:
+        inputReady && editorMessage?.request === request && editorMessage.id === selectedPane
+          ? editorMessage.text
+          : status,
       snapshot,
       copyRegion: snapshot ? copyRegion : null,
       regions: snapshot ? regions : [],
@@ -726,7 +734,54 @@ async function command(value: unknown) {
     publish();
     return;
   }
+  if (cmd.type === "open-editor") {
+    const key = `${cmd.request}\0${cmd.id}\0${cmd.token}`;
+    const owner = catalog;
+    const pane = panes.find((candidate) => candidate.semanticPaneId === cmd.id);
+    const session = selectedSession;
+    const capturedPresence = presenceRevision;
+    const helper = active;
+    const current = () =>
+      !stopped &&
+      catalog === owner &&
+      active === helper &&
+      surface === "workspace" &&
+      request === cmd.request &&
+      selectedSession === session &&
+      selectedPane === cmd.id &&
+      paneActions?.id === cmd.id &&
+      paneActions.token === cmd.token &&
+      foreground &&
+      presenceRevision === capturedPresence &&
+      inputReady &&
+      snapshot !== null;
+    if (editorPending || editorConsumed === key || !owner || !pane || !session || !current())
+      return;
+    editorPending = true;
+    editorConsumed = key;
+    status = "Opening selected pane folder in VS Code";
+    editorMessage = { request: cmd.request, id: cmd.id, text: status };
+    publish();
+    // Do not block stdin: presence/navigation must be able to revoke an in-flight read.
+    void openSelectedPaneEditor({
+      proof: owner.localProof,
+      current,
+      read: (signal) => owner.paneEditorContext(pane.workspaceName, session, cmd.id, signal),
+    })
+      .then((message) => {
+        if (current()) {
+          status = message;
+          editorMessage = { request: cmd.request, id: cmd.id, text: message };
+          publish();
+        }
+      })
+      .finally(() => {
+        editorPending = false;
+      });
+    return;
+  }
   if (cmd.type === "pane-action") {
+    editorMessage = null;
     if (
       surface !== "workspace" ||
       cmd.request !== request ||

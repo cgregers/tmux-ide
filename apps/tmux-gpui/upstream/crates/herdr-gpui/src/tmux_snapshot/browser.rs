@@ -154,6 +154,12 @@ pub(super) enum Command {
         request: u64,
         name: String,
     },
+    #[serde(rename = "open-editor")]
+    OpenEditor {
+        request: u64,
+        id: String,
+        token: String,
+    },
     #[serde(rename = "pane-action")]
     PaneAction {
         request: u64,
