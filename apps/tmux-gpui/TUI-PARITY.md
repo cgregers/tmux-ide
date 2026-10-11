@@ -93,9 +93,12 @@ its telemetry adapter and consumes the same owner; the public subpath brings in
 no TUI modules. This is a Node-only API and does not belong in host-neutral clients.
 
 The bridge now has a tested `remote-route.ts` adapter that borrows one verified
-SSH epoch, rejects stale inventory, and cancels on retirement. It is not wired
-into navigation yet. Next bind route retirement to browser catalog/child cleanup,
-then add the native machine dialog. Reuse SavedMachineSchema and scoped clients;
+SSH epoch, rejects stale inventory, and cancels on retirement. The browser now
+accepts a private SSH machine file through `host-source.ts`, reuses the shared
+owner on Home refresh, and clears its catalog/input/child when the route retires.
+An isolated process fixture covers connection, refresh and disconnect; real SSH
+and physical remote-terminal acceptance remain pending. Next add the native
+machine dialog and saved-machine navigation. Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
 Cancellation, child cleanup, sanitized failures, generation mismatches and late
 completion after a machine switch must remain fenced through the native adapter.

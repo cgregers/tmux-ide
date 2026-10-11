@@ -3,9 +3,11 @@ import { Buffer } from "node:buffer";
 import { setTimeout, clearTimeout } from "node:timers";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
+import { URL, fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline";
 import { stopFixtureChild } from "./fixture-child.mjs";
@@ -151,3 +153,141 @@ test("startup failure is reported at child exit without exposing diagnostic cont
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test(
+  "remote browser refresh reuses transport and transport loss clears the published route",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "gpui-remote-browser-"));
+    let child, lines, fatal, wake;
+    const fail = (message) => {
+      fatal ??= new Error(message);
+      wake?.();
+    };
+    try {
+      const { DAEMON_WIRE_PROTOCOL_VERSION } =
+        await import("../../../packages/contracts/src/index.ts");
+      const daemon = {
+        pid: 1234,
+        port: 4000,
+        protocolVersion: DAEMON_WIRE_PROTOCOL_VERSION,
+        productVersion: "2.9.5",
+        instanceId: randomUUID(),
+        startedAt: new Date().toISOString(),
+        bindHostname: "127.0.0.1",
+        authToken: "PRIVATE_TEST_SENTINEL",
+      };
+      const scope = {
+        serverId: `tmux-server.${randomUUID().replaceAll("-", "")}`,
+        generation: randomUUID(),
+      };
+      await writeFile(join(directory, "fixture.json"), JSON.stringify({ daemon, scope }), {
+        mode: 0o600,
+      });
+      const fixture = fileURLToPath(new URL("./remote-browser-fixture.cjs", import.meta.url));
+      await writeFile(
+        join(directory, "ssh"),
+        `#!${process.execPath}\nrequire(${JSON.stringify(fixture)});\n`,
+        { mode: 0o700 },
+      );
+      const config = join(directory, "host.json");
+      await writeFile(config, JSON.stringify({ sshTarget: "fixture-only" }), { mode: 0o600 });
+      child = spawn(
+        process.execPath,
+        ["--import", "tsx", "apps/tmux-gpui/bridge/browser.ts", config],
+        {
+          stdio: ["pipe", "pipe", "pipe"],
+          env: {
+            ...isolatedEnvironment(directory),
+            PATH: `${directory}:${dirname(process.execPath)}`,
+            GPUI_TEST_REMOTE_DIRECTORY: directory,
+          },
+        },
+      );
+      const closed = new Promise((resolve) =>
+        child.once("close", (code, signal) => resolve([code, signal])),
+      );
+      child.on("error", () => fail("Remote browser spawn failed"));
+      child.stdin.on("error", () => fail("Remote browser input failed"));
+      let outputBytes = 0;
+      for (const stream of [child.stdout, child.stderr]) {
+        stream.on("error", () => fail("Remote browser output failed"));
+        stream.on("data", (chunk) => {
+          outputBytes += chunk.length;
+          if (outputBytes > 262144) {
+            fail("Remote browser output exceeded fixture limit");
+            child.kill("SIGTERM");
+          }
+        });
+      }
+      lines = createInterface({ input: child.stdout });
+      const events = [];
+      lines.on("line", (line) => {
+        if (fatal) return;
+        if (line.includes(daemon.authToken)) return fail("Private credential escaped publication");
+        if (events.length >= 128) return fail("Too many fixture publications");
+        try {
+          events.push(JSON.parse(line));
+        } catch {
+          return fail("Invalid fixture publication");
+        }
+        wake?.();
+      });
+      async function until(predicate) {
+        let timer;
+        try {
+          return await Promise.race([
+            (async () => {
+              for (;;) {
+                if (fatal) throw fatal;
+                while (events.length) {
+                  const event = events.shift();
+                  if (predicate(event)) return event;
+                }
+                await new Promise((resolve) => {
+                  wake = resolve;
+                });
+                wake = undefined;
+              }
+            })(),
+            new Promise((_, reject) => {
+              timer = setTimeout(
+                () => reject(new Error("Expected remote publication missing")),
+                15000,
+              );
+            }),
+          ]);
+        } finally {
+          clearTimeout(timer);
+        }
+      }
+      await until((event) => event.home.phase === "live" && event.request === 0);
+      child.stdin.write(JSON.stringify({ type: "refresh", request: 1 }) + "\n");
+      await until((event) => event.home.phase === "live" && event.request === 1);
+      assert.equal((await readFile(join(directory, "transport.log"), "utf8")).trim(), "opened");
+      await writeFile(join(directory, "disconnect"), "");
+      const event = await until((event) => event.home.phase === "unavailable");
+      assert.equal(event.home.phase, "unavailable");
+      assert.equal(event.inputReady, false);
+      assert.equal(event.selectedSession, null);
+      assert.equal(event.selectedPane, null);
+      assert.deepEqual(event.sessions, []);
+      assert.match(event.status, /Machine connection changed/);
+      child.stdin.end();
+      const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
+      try {
+        assert.deepEqual(await closed, [0, null]);
+      } finally {
+        clearTimeout(timer);
+      }
+    } finally {
+      lines?.close();
+      try {
+        await stopFixtureChild(child);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    }
+    if (fatal) throw fatal;
+  },
+);

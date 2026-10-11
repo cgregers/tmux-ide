@@ -205,6 +205,16 @@ apps/tmux-gpui/scripts/browse-preview.sh
 apps/tmux-gpui/scripts/browse-preview.sh /absolute/path/private-host.json
 ```
 
+The native browser also accepts a private `0600` machine file containing
+`{"sshTarget":"my-ssh-alias"}` and an optional `expectedEnvironmentId` UUID.
+This development path reuses the TUI's SSH connection owner, key authentication,
+host verification and guarded loopback relay. The remote machine must already run
+a compatible tmux-ide daemon and have exactly one online tmux server. Home refresh
+reuses the connection; connection retirement clears selection and terminal input.
+Closing the preview disposes its transport, not the remote daemon or tmux sessions.
+The native Add Machine dialog and saved-machine picker are still pending; this
+path has process-fixture coverage, not physical remote-terminal qualification.
+
 With no argument, the launcher discovers an existing local daemon from its canonical
 record and verifies endpoint identity and the shared wire-protocol compatibility
 before authenticating. An incompatible protocol shows a safe error and requires

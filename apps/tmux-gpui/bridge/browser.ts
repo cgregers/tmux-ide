@@ -28,11 +28,7 @@ import { openEditorSchema, openSelectedPaneEditor } from "./local-editor.ts";
 import { paneResizeSchema, resizePresentationMatches } from "./pane-resize.ts";
 import { CatalogStageError } from "./catalog-errors.ts";
 import { createAppearanceOwner } from "./appearance.ts";
-import {
-  discoverPreviewHost,
-  DaemonCompatibilityError,
-  DaemonDiscoveryError,
-} from "./discovery.ts";
+import { DaemonCompatibilityError, DaemonDiscoveryError } from "./discovery.ts";
 import { scrollSchema } from "./history.ts";
 import { surfacesSchema } from "./window-canvas.ts";
 import { createWindowPresentation } from "./window-presentation.ts";
@@ -47,7 +43,9 @@ import { fileURLToPath } from "node:url";
 import { spawn, type ChildProcess } from "node:child_process";
 import { z } from "zod";
 import { createPreviewCatalog, sessionChoice } from "./catalog.ts";
-import { hostSchema, readPrivateConfig, connectionSchema } from "./config.ts";
+import { connectionSchema } from "./config.ts";
+import { createPreviewHostSource } from "./host-source.ts";
+import { RemoteRouteError } from "./remote-route.ts";
 
 const commandSchema = z.union([
   openEditorSchema,
@@ -95,14 +93,19 @@ const commandSchema = z.union([
 const MAX_FRAME = 8 * 1024 * 1024;
 const appearance = createAppearanceOwner();
 const sessionCreate = createSessionOwner();
+let hostSource: ReturnType<typeof createPreviewHostSource> | undefined;
+let machineRouteRevision = 0;
 async function readHost() {
   try {
     if (process.argv.length !== 3) throw new Error("Invalid browser arguments");
-    return process.argv[2] === "--local"
-      ? await discoverPreviewHost()
-      : hostSchema.parse(readPrivateConfig(process.argv[2]!));
+    hostSource ??= createPreviewHostSource(process.argv[2]!, retireMachineRoute);
+    return await hostSource.read();
   } catch (error) {
-    if (error instanceof DaemonCompatibilityError || error instanceof DaemonDiscoveryError)
+    if (
+      error instanceof DaemonCompatibilityError ||
+      error instanceof DaemonDiscoveryError ||
+      error instanceof RemoteRouteError
+    )
       throw error;
     // Parser errors can include pieces of the private JSON document.
     process.stderr.write("Could not read private native-browser host configuration\n");
@@ -329,9 +332,31 @@ async function retire() {
     clearTimeout(timer);
   }
 }
+function retireMachineRoute() {
+  if (stopped) return;
+  machineRouteRevision++;
+  retireAgents();
+  catalog?.dispose();
+  catalog = undefined;
+  sessions = [];
+  panes = [];
+  layouts = [];
+  selectedSession = null;
+  selectedPane = null;
+  initialPane = null;
+  sessionCatalogComplete = false;
+  inputReady = false;
+  snapshot = null;
+  paneActions = null;
+  homePhase = "unavailable";
+  status = "Machine connection changed — refresh sessions to reconnect";
+  void retire();
+  publish();
+}
 async function stop() {
   if (stopped) return;
   stopped = true;
+  hostSource?.dispose();
   retireAgents();
   catalog?.dispose();
   await retire();
@@ -342,14 +367,16 @@ process.on("SIGINT", () => void stop());
 process.on("SIGTERM", () => void stop());
 process.stdout.on("error", () => void stop());
 async function refresh(token: number) {
+  const routeRevision = machineRouteRevision;
+  catalog?.dispose();
+  catalog = undefined;
   const discovered = await readHost();
-  if (stopped || request !== token) return;
+  if (stopped || request !== token || routeRevision !== machineRouteRevision) return;
   const fresh = createPreviewCatalog(discovered);
   sessionCreate.reset();
-  catalog?.dispose();
   catalog = fresh;
-  const list = await catalog.sessions();
-  if (stopped || request !== token) return;
+  const list = await fresh.sessions();
+  if (stopped || request !== token || catalog !== fresh) return;
   if (list.length > 512) throw new Error("Too many sessions for preview");
   sessions = list.map(sessionChoice);
   homePhase = "live";
@@ -364,13 +391,21 @@ async function openPane(
   splitConfirmation?: { window: string; createdPane: string; current: () => boolean },
   requiredCurrent?: () => boolean,
 ) {
+  const owningCatalog = catalog;
   const directory = await mkdtemp(join(tmpdir(), "tmux-gpui-pane-"));
   let handedOff = false;
   const presentation = createWindowPresentation(config.semanticPaneId);
   try {
     const path = join(directory, "connection.json");
     await writeFile(path, JSON.stringify(config), { mode: 0o600 });
-    if (stopped || token !== request || (requiredCurrent && !requiredCurrent())) return;
+    if (
+      stopped ||
+      token !== request ||
+      !owningCatalog ||
+      catalog !== owningCatalog ||
+      (requiredCurrent && !requiredCurrent())
+    )
+      return;
     const child = spawn(
       process.execPath,
       [
@@ -1042,8 +1077,9 @@ async function command(value: unknown) {
   if (cmd.type === "session") {
     if (!sessions.some((s) => s.id === cmd.id)) throw new Error("Unknown session");
     if (!catalog) throw new Error("Catalog unavailable");
-    const choices = await catalog.panes(cmd.id);
-    if (stopped || token !== request) return;
+    const selectedCatalog = catalog;
+    const choices = await selectedCatalog.panes(cmd.id);
+    if (stopped || token !== request || catalog !== selectedCatalog) return;
     if (choices.length > 512) throw new Error("Too many panes for preview");
     panes = choices;
     selectedSession = cmd.id;
@@ -1070,7 +1106,8 @@ try {
     status =
       error instanceof DaemonCompatibilityError ||
       error instanceof DaemonDiscoveryError ||
-      error instanceof CatalogStageError
+      error instanceof CatalogStageError ||
+      error instanceof RemoteRouteError
         ? error.message
         : "Connection unavailable — start the daemon and refresh";
     publish();
@@ -1097,7 +1134,8 @@ try {
         status =
           error instanceof DaemonCompatibilityError ||
           error instanceof DaemonDiscoveryError ||
-          error instanceof CatalogStageError
+          error instanceof CatalogStageError ||
+          error instanceof RemoteRouteError
             ? error.message
             : "Connection or selection unavailable — refresh the catalog";
         publish();
