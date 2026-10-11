@@ -5,11 +5,12 @@ delivery goal. Proper icons, buttons, tabs, pane headers and sidebars are part o
 parity acceptance, not a later cosmetic pass. Embedded browser and VS Code follow
 this milestone; they must not displace missing TUI workflows.
 
-Baseline: 11 October 2026, GPUI branch `codex/tmux-gpui-bootstrap` at `fceac5a4`.
-The native terminal foundation works, but the native application is not yet a full
-equivalent of the TUI. Full parity includes the surrounding workspace, Files/editor,
-Changes, fleet, settings and keyboard workflows. A preview release is a separate,
-smaller milestone. Unchecked items include both missing work and incomplete acceptance.
+Scope corrected by the user on 11 October 2026: the current TUI no longer includes
+Files/editor or Changes. Do not implement those surfaces for parity or count them
+as v1 blockers. The remaining product scope is fleet management and Home/F5
+workflows. Preserve and regression-test the working terminal foundation, then
+complete packaged-app and release qualification. Embedded browser/VS Code and
+other earlier expansion ideas are deferred beyond this v1.
 
 ## Acceptance rule
 
@@ -64,24 +65,11 @@ Physical full-visible-pane Unicode copy has exact-byte evidence; broader selecti
 - [ ] Verify alternate-screen apps, cursor-only updates, colors, decorations and wide characters.
 - [ ] Ensure no discarded input is replayed following disconnect or stale target recovery.
 
-## 4 Files and built-in editor
+## Removed legacy scope
 
-Missing as a native workspace surface. “Open folder in VS Code” is an external-editor
-action and does not satisfy this section.
-
-- [ ] Native Files tree with TUI filtering, expand/collapse, changed-file navigation and selection.
-- [ ] Native file tabs and editor/read-only surfaces matching TUI capabilities.
-- [ ] Match open/save, dirty-buffer prompts, binary/large-file handling and permission errors.
-- [ ] Match pane/project context changes without showing or saving to a stale project.
-- [ ] Match supported rich previews with explicit unavailable/unsupported states.
-- [ ] Qualify external VS Code launch from the selected local pane's current directory.
-
-## 5 Changes and integrations
-
-- [ ] Native Changes view matching TUI repository/file status and diff navigation.
-- [ ] Inventory and port each reachable TUI Git action with the same confirmations and error behavior.
-- [ ] Verify repo/worktree switching and refresh against the selected live workspace.
-- [ ] Track requested Herdr GitHub integration separately from TUI parity; specify its actions before porting.
+Files/editor and Changes are not current TUI surfaces and are excluded from this
+milestone. External VS Code behavior already present must remain correct; building
+an embedded editor, Git Changes UI or new integration is not required for v1.
 
 ## 6 Remote machines and agent activity
 
@@ -159,7 +147,7 @@ before any code reuse; Herdr's license does not cover Zed code.
 
 ## 10 Embedded browser and VS Code
 
-Explicit native product scope, beyond the TUI parity baseline. The external VS Code
+Deferred future product ideas, explicitly outside the current v1 milestone. The external VS Code
 launcher does not satisfy this requirement. See [upstream research](HERDR-DESIGN-RESEARCH.md).
 
 - [ ] Adapt Herdr browser tabs and native webview lifecycle to native workspace groups.
@@ -173,16 +161,18 @@ launcher does not satisfy this requirement. See [upstream research](HERDR-DESIGN
 
 ## Execution order
 
-1. Establish native tokens, icons and shared controls; migrate shell/sidebar/tabs
-   and complete the palette/action inventory.
-2. Finish pane/window controls and terminal correctness acceptance.
-3. Add Files/editor and Changes as native workspace surfaces.
-4. Complete fleet, agent workflows, settings and persistence.
-5. Run full side-by-side acceptance and distribution gates.
+1. Complete fleet management: saved-machine list, add/save/edit/remove,
+   enable/disable, selection and recovery, preserving daemon ownership and identity.
+2. Complete Home/F5 workflows against the current TUI: machine grouping/filtering,
+   agent attention/navigation, relevant commands and native dialogs/shared controls.
+3. Run regression checks for the existing terminal/pane/window behavior and qualify
+   real local/remote workflows without risking production sessions.
+4. Complete packaged-app, install/update and preview-release acceptance.
 
-Keep each implementation card narrow. Existing GP03–GP08 cards retain their current
-preview acceptance; this checklist expands the full-parity target without declaring
-those cards complete. Performance comparisons remain a separate measured workstream.
+Keep each implementation card narrow. Existing GP03–GP08 acceptance remains open
+where its required evidence is missing. Older checklist items outside fleet/Home/F5
+are historical audit ideas, not automatic scope additions or v1 blockers. Performance
+comparisons remain a separate measured workstream.
 
 ## Source map
 
