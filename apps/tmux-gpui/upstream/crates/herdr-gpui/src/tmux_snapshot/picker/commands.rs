@@ -2,6 +2,7 @@
 use super::{Row, Target, browser};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::tmux_snapshot) enum Action {
+    ToggleSidebar,
     Home,
     Terminals,
     AddMachine,
@@ -17,9 +18,25 @@ impl Action {
         self != Self::Appearance || state.appearance.is_some()
     }
 }
+#[cfg(test)]
 pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
+    command_rows_with_sidebar(state, query, false)
+}
+pub(super) fn command_rows_with_sidebar(
+    state: &browser::State,
+    query: &str,
+    hidden: bool,
+) -> Vec<Row> {
     let query: String = query.chars().take(256).collect::<String>().to_lowercase();
     let mut rows: Vec<Row> = [
+        (
+            Action::ToggleSidebar,
+            if hidden {
+                "Show sidebar · F10"
+            } else {
+                "Hide sidebar · F10"
+            },
+        ),
         (Action::Home, "Home · F1"),
         (Action::Terminals, "Terminals · F2"),
         (Action::AddMachine, "Connect to machine…"),
@@ -77,7 +94,7 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
     rows
 }
 pub(in crate::tmux_snapshot) fn shortcut(key: &gpui::Keystroke) -> bool {
-    matches!(key.key.as_str(), "f1" | "f2" | "f5" | "f6" | "f7")
+    matches!(key.key.as_str(), "f1" | "f2" | "f5" | "f6" | "f7" | "f10")
         && !key.modifiers.platform
         && !key.modifiers.control
         && !key.modifiers.alt

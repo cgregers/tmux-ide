@@ -1,9 +1,32 @@
+import { z } from "zod";
 import { randomUUID } from "node:crypto";
-import { WorkspacePaneCreateMutationResultSchemaZ } from "../../../packages/contracts/src/workspace-pane-creation.ts";
+import {
+  WorkspacePaneCreateMutationResultSchemaZ,
+  WorkspacePaneDisplayTitleSchemaZ,
+} from "../../../packages/contracts/src/workspace-pane-creation.ts";
 import type { createTmuxServerClient } from "../../../packages/daemon-client/src/tmux-server-client.ts";
 import type { PaneStreamRuntimeClient } from "../../../packages/daemon-client/src/pane-stream-client.ts";
 import type { PaneActionTarget } from "./pane-actions.ts";
 import type { Layout } from "./topology.ts";
+export const newAgentSchema = z
+  .object({
+    name: WorkspacePaneDisplayTitleSchemaZ,
+    harness: z.enum(["claude", "codex"]),
+  })
+  .strict();
+export type NewAgent = z.infer<typeof newAgentSchema>;
+export function matchesCreation(
+  resource: z.infer<typeof WorkspacePaneCreateMutationResultSchemaZ>["resource"],
+  agent?: NewAgent,
+) {
+  return agent
+    ? resource.kind === "agent" &&
+        resource.displayTitle === agent.name &&
+        resource.harnessProfileId === agent.harness &&
+        resource.role === "implementer" &&
+        resource.missionId === null
+    : resource.kind === "terminal";
+}
 export const newWindowReceiptSchema = WorkspacePaneCreateMutationResultSchemaZ;
 export type NewWindowTarget = PaneActionTarget & { session: string; presenceRevision: number };
 /** Scoped owner action, never a multiplexer intent or an unscoped/default-server request. */
@@ -13,7 +36,9 @@ export function createNewWindowExecutor() {
     client: Pick<ReturnType<typeof createTmuxServerClient>, "createPane">,
     runtime: Pick<PaneStreamRuntimeClient, "ownsConnectionAuthority" | "requestAuthority">,
     current: () => NewWindowTarget | null,
+    agentInput?: NewAgent,
   ) => {
+    const agent = agentInput === undefined ? undefined : newAgentSchema.parse(agentInput);
     const captured = current();
     if (!captured || consumed === captured.token || !runtime.ownsConnectionAuthority("input"))
       return null;
@@ -45,7 +70,14 @@ export function createNewWindowExecutor() {
       operationId,
       {
         workspaceName: target.workspace,
-        kind: "terminal",
+        ...(agent
+          ? {
+              kind: "agent" as const,
+              displayTitle: agent.name,
+              harnessProfileId: agent.harness,
+              role: "implementer" as const,
+            }
+          : { kind: "terminal" as const }),
         placement: { kind: "window" },
       },
       target.session,
@@ -63,7 +95,7 @@ export function createNewWindowExecutor() {
       result.daemonInstanceId === target.generation &&
       result.outcome === "created" &&
       result.resource.workspaceName === target.workspace &&
-      result.resource.kind === "terminal" &&
+      matchesCreation(result.resource, agent) &&
       result.resource.semanticPaneId !== target.id
       ? result
       : null;

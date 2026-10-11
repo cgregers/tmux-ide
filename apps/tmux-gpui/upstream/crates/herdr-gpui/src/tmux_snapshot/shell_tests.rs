@@ -99,6 +99,7 @@ fn browser_fixture(
         pane_actions: None,
         new_session: None,
         new_session_queued: None,
+        sidebar_hidden: false,
         window_reveal: Default::default(),
         resize_gesture: Default::default(),
         last_resize: None,

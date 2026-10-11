@@ -13,6 +13,7 @@ mod tests;
 
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
+    Sidebar,
     Plus,
     Trash,
     Close,
@@ -27,6 +28,7 @@ impl Icon {
         match self {
             Self::Trash => "icons/trash.svg",
             Self::Close => "icons/close.svg",
+            Self::Sidebar => "icons/panel-left.svg",
             Self::Plus => "icons/plus.svg",
             Self::Home => "icons/tmux-home.svg",
             Self::Terminal => "icons/terminal.svg",

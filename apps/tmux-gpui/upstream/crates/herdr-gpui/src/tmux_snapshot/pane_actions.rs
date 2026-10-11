@@ -4,12 +4,23 @@ use crate::search_input::SearchInput;
 use gpui::{prelude::*, *};
 use serde::Serialize;
 
+#[derive(Clone, Copy, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum Harness {
+    Claude,
+    Codex,
+}
 #[derive(Serialize)]
 #[serde(tag = "action", rename_all = "lowercase")]
 pub(super) enum Action {
     #[serde(rename = "new-window")]
     NewWindow,
     Close,
+    #[serde(rename = "new-agent")]
+    NewAgent {
+        name: String,
+        harness: Harness,
+    },
     Rename {
         name: String,
     },

@@ -1,5 +1,10 @@
 import { closePane, confirmsClosedPane } from "./close-pane.ts";
-import { confirmsNewWindow, newWindowReceiptSchema } from "./new-window.ts";
+import {
+  confirmsNewWindow,
+  newWindowReceiptSchema,
+  matchesCreation,
+  type NewAgent,
+} from "./new-window.ts";
 import { completeFleetServerSelection } from "./fleet-server-selection.ts";
 import { createOnFleetRoute } from "./fleet-server-create.ts";
 import { applyHomeAgentFilter, homeAgentFilterSchema } from "./home-agent-filter.ts";
@@ -276,7 +281,12 @@ let pendingClose: {
   presenceRevision: number;
   submitted: boolean;
 } | null = null;
-let pendingNewWindow: { token: string; window: string; presenceRevision: number } | null = null;
+let pendingNewWindow: {
+  token: string;
+  window: string;
+  presenceRevision: number;
+  agent?: NewAgent;
+} | null = null;
 let paneActions: z.infer<typeof paneActionsSchema> | null = null;
 let editorPending = false;
 let editorConsumed: string | null = null;
@@ -1038,7 +1048,7 @@ async function openPane(
             if (
               receipt.result.daemonInstanceId !== config.scope.generation ||
               receipt.result.resource.workspaceName !== config.workspaceName ||
-              receipt.result.resource.kind !== "terminal" ||
+              !matchesCreation(receipt.result.resource, captured.agent) ||
               receipt.result.outcome !== "created" ||
               receipt.result.resource.semanticPaneId === config.semanticPaneId
             )
@@ -1057,7 +1067,7 @@ async function openPane(
             snapshot = null;
             inputReady = false;
             paneActions = null;
-            status = "Loading new terminal window";
+            status = captured.agent ? "Loading new agent window" : "Loading new terminal window";
             publish();
             const current = splitRefreshGuard(() => ({
               request,
@@ -1506,13 +1516,21 @@ async function command(value: unknown) {
     paneActions = null;
     if (cmd.action === "close")
       pendingClose = { token: cmd.token, id: cmd.id, presenceRevision, submitted: false };
-    if (cmd.action === "split" || cmd.action === "new-window") {
+    if (cmd.action === "split" || cmd.action === "new-window" || cmd.action === "new-agent") {
       const window = layouts.find((layout) =>
         layout.panes.some((pane) => pane.pane === cmd.id),
       )?.semanticWindowId;
       if (!window) throw new Error("Split window unavailable");
       if (cmd.action === "split") pendingPaneSplit = { ...cmd, window, presenceRevision };
-      else pendingNewWindow = { token: cmd.token, window, presenceRevision };
+      else
+        pendingNewWindow = {
+          token: cmd.token,
+          window,
+          presenceRevision,
+          ...(cmd.action === "new-agent"
+            ? { agent: { name: cmd.name, harness: cmd.harness } }
+            : {}),
+        };
     }
     publish();
     active.child.stdin.write(line);
@@ -1969,7 +1987,6 @@ function launchRefresh(token: number) {
   void refresh(token).catch((error) => {
     if (stopped || request !== token) return;
     homePhase = "unavailable";
-    if (fleet && surface === "home") startAgents();
     status =
       error instanceof DaemonCompatibilityError ||
       error instanceof DaemonDiscoveryError ||
@@ -1978,6 +1995,8 @@ function launchRefresh(token: number) {
       error instanceof MachineRegistryError
         ? error.message
         : "Connection unavailable — start the daemon and refresh";
+    // Observation can publish synchronously; install the failure guidance first.
+    if (fleet && surface === "home") startAgents();
     publish();
   });
 }

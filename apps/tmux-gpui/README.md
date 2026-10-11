@@ -63,6 +63,14 @@ cargo fmt --all -- --check
 The pinned toolchain is in `upstream/rust-toolchain.toml`. See `VALIDATION.md` for the checks actually run. This is an experimental development preview, not a supported general-purpose
 tmux GUI.
 
+## Sidebar visibility
+
+Use the sidebar icon in the application bar, press **F10** (or **Fn-F10** if macOS
+uses the function row for media controls), or choose **Show sidebar / Hide
+sidebar** from **F5**. The terminal expands into the freed space through the
+existing daemon resize path. The current pane stays selected. The preference
+lasts for the app session; Home keeps its normal sidebar-free layout.
+
 ## Preview release gates
 
 See [INTEGRATION.md](INTEGRATION.md). Native session/pane selection, multi-pane

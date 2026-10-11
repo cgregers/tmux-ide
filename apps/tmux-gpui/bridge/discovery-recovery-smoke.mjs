@@ -1,12 +1,61 @@
+import process from "node:process";
+import console from "node:console";
+import { Buffer } from "node:buffer";
+import { setTimeout } from "node:timers";
 // Real isolated discovery recovery: start the browser before the owned daemon. No GUI.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { once } from "node:events";
+import { access, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { stopFixtureChild } from "./fixture-child.mjs";
 import { resolve, join, isAbsolute } from "node:path";
 import { createScratchFleet } from "../../../scripts/lib/product-fixtures/scratch-fleet.ts";
 import { startDaemon } from "../../../scripts/lib/product-fixtures/daemon.ts";
 
+const privateCli = process.env.TMUX_GPUI_TEST_CLI;
+if (privateCli !== undefined) {
+  assert.ok(isAbsolute(privateCli), "TMUX_GPUI_TEST_CLI must be absolute");
+  assert.ok((await stat(privateCli)).isFile(), "Private CLI must be a regular file");
+  await access(privateCli, constants.R_OK);
+}
+async function startFixtureDaemon(fleet) {
+  if (privateCli === undefined) return startDaemon(fleet);
+  const child = spawn(process.execPath, [privateCli, "--headless"], {
+    env: { ...process.env, ...fleet.environment },
+    stdio: "ignore",
+  });
+  let childError;
+  child.on("error", (error) => {
+    childError = error;
+  });
+  try {
+    const deadline = Date.now() + 45000;
+    for (;;) {
+      if (childError) throw childError;
+      assert.ok(child.exitCode === null && child.signalCode === null, "Private daemon exited");
+      assert.ok(Date.now() < deadline, "Private daemon startup deadline");
+      let record;
+      try {
+        record = JSON.parse(await readFile(join(fleet.daemonInfoDir, "daemon.json"), "utf8"));
+      } catch {
+        /* Await the owned atomic discovery record. */
+      }
+      if (record?.pid === child.pid && typeof record.authToken === "string" && record.instanceId)
+        return { record, stop: () => stopFixtureChild(child) };
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  } catch (error) {
+    try {
+      await stopFixtureChild(child);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Private daemon startup failed", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+}
 const app = process.env.TMUX_GPUI_TEST_APP;
 if (app && !isAbsolute(app)) throw new Error("TMUX_GPUI_TEST_APP must be absolute");
 
@@ -101,7 +150,7 @@ try {
   assert.equal(latest.inputReady, false);
   const connection = latest.connection;
   const before = fleet.captureWindowPanes(fleet.sessionNames[0]);
-  daemon = await startDaemon(fleet);
+  daemon = await startFixtureDaemon(fleet);
   send({ type: "refresh", request: 1 });
   await until(() => latest?.request === 1 && latest.home.phase === "live");
   assert.equal(latest.connection, connection);
@@ -167,7 +216,7 @@ try {
       /unavailable/i.test(latest.status),
   );
   assert.equal(latest.connection, connection);
-  daemon = await startDaemon(fleet);
+  daemon = await startFixtureDaemon(fleet);
   assert.notEqual(daemon.record.instanceId, firstInstance);
   send({ type: "refresh", request: 4 });
   await until(() => latest?.request === 4 && latest.home.phase === "live");
@@ -198,18 +247,7 @@ try {
   failures.push(error);
 } finally {
   for (const cleanup of [
-    async () => {
-      if (browser && browser.exitCode === null && browser.signalCode === null) {
-        const done = once(browser, "close");
-        browser.kill("SIGTERM");
-        const timer = setTimeout(() => browser.kill("SIGKILL"), 2000);
-        try {
-          await done;
-        } finally {
-          clearTimeout(timer);
-        }
-      }
-    },
+    () => stopFixtureChild(browser),
     async () => {
       if (daemon) await daemon.stop();
     },

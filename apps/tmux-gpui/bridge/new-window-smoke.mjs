@@ -5,7 +5,7 @@ import process from "node:process";
 import console from "node:console";
 import { setTimeout } from "node:timers";
 import { execFileSync, spawn } from "node:child_process";
-import { access, stat, writeFile, readFile } from "node:fs/promises";
+import { access, stat, writeFile, readFile, mkdir } from "node:fs/promises";
 import { constants } from "node:fs";
 import { resolve, join, isAbsolute } from "node:path";
 import { createScratchFleet } from "../../../scripts/lib/product-fixtures/scratch-fleet.ts";
@@ -14,6 +14,12 @@ import { listTmuxServers } from "../../../packages/daemon-client/src/tmux-server
 import { stopFixtureChild } from "./fixture-child.mjs";
 const cli = process.env.TMUX_GPUI_TEST_CLI;
 assert.ok(cli && isAbsolute(cli), "Explicit private TMUX_GPUI_TEST_CLI required");
+const harness = process.env.TMUX_GPUI_TEST_AGENT;
+assert.ok(
+  harness === undefined || ["claude", "codex"].includes(harness),
+  "TMUX_GPUI_TEST_AGENT must be claude or codex",
+);
+const agentName = "Fixture agent ; literal";
 const app = process.env.TMUX_GPUI_TEST_APP;
 if (app !== undefined) {
   assert.ok(isAbsolute(app), "TMUX_GPUI_TEST_APP must be absolute");
@@ -27,6 +33,10 @@ if (app !== undefined) {
 for (const key of Object.keys(process.env)) {
   if (
     key.startsWith("TMUX_IDE_") ||
+    key.startsWith("CLAUDE") ||
+    key.startsWith("CODEX") ||
+    key.startsWith("ANTHROPIC") ||
+    key.startsWith("OPENAI") ||
     ["TMUX", "TMUX_PANE", "TMUX_TMPDIR", "NODE_OPTIONS", "NODE_PATH"].includes(key)
   )
     delete process.env[key];
@@ -36,9 +46,10 @@ const fleet = await createScratchFleet({
   windowsPerSession: 1,
   slug: "gpui-new-window",
 });
+const fixtureEnvironment = { ...fleet.environment };
 const run = (...args) =>
   execFileSync(fleet.environment.TMUX_IDE_TMUX_BIN, ["-S", fleet.socketPath, ...args], {
-    env: { ...process.env, ...fleet.environment },
+    env: { ...process.env, ...fixtureEnvironment },
     encoding: "utf8",
     timeout: 5000,
   }).trim();
@@ -64,8 +75,32 @@ async function until(predicate) {
   }
 }
 try {
+  if (harness) {
+    const bin = join(fleet.root, "inert-harnesses");
+    await mkdir(bin, { mode: 0o700 });
+    const quote = (value) => "'" + value.replaceAll("'", "'\"'\"'") + "'";
+    for (const name of ["claude", "codex"]) {
+      await writeFile(
+        join(bin, name),
+        '#!/bin/sh\ncase "$1" in --version|-v) printf \'' +
+          name +
+          " 1.0.0\\n'; exit 0;; esac\nprintf '%s\\n' '" +
+          name +
+          '\' "$@" >> ' +
+          quote(join(fleet.root, "harness-invocations")) +
+          "\nexec /bin/sh -i\n",
+        { mode: 0o700, flag: "wx" },
+      );
+    }
+    process.env.PATH = bin + ":" + process.env.PATH;
+    fixtureEnvironment.PATH = process.env.PATH;
+    run("set-option", "-g", "default-shell", "/bin/sh");
+    run("set-environment", "-g", "PATH", process.env.PATH);
+    for (const session of run("list-sessions", "-F", "#{session_id}").split("\n"))
+      run("set-environment", "-t", session, "PATH", process.env.PATH);
+  }
   daemon = spawn(process.execPath, [cli, "--headless"], {
-    env: { ...process.env, ...fleet.environment },
+    env: { ...process.env, ...fixtureEnvironment },
     stdio: "ignore",
   });
   daemon.on("error", (error) => {
@@ -109,7 +144,7 @@ try {
       ? [join(app, "Contents/Resources/bridge/browser.bundle.mjs"), config]
       : ["--import", "tsx", resolve("apps/tmux-gpui/bridge/browser.ts"), config],
     {
-      env: { ...process.env, ...fleet.environment, ...(app ? { PATH: "/usr/bin:/bin" } : {}) },
+      env: { ...process.env, ...fixtureEnvironment, ...(app ? { PATH: "/usr/bin:/bin" } : {}) },
       ...(app ? { cwd: fleet.root } : {}),
       stdio: ["pipe", "pipe", "pipe"],
     },
@@ -158,8 +193,19 @@ try {
     request: 2,
     id: original,
     token: latest.paneActions.token,
-    action: "new-window",
+    ...(harness ? { action: "new-agent", name: agentName, harness } : { action: "new-window" }),
   };
+  if (harness) {
+    send({ ...command, name: " invalid" });
+    send({ ...command, harness: "sh" });
+    send({ type: "presence", active: true, revision: 2 });
+    await until(() => latest?.presenceRevision === 2 && latest.paneActions);
+    assert.deepEqual(
+      run("list-panes", "-a", "-F", "#{pane_id}|#{pane_pid}|#{pane_birth_id}").split("\n"),
+      before,
+    );
+    command.token = latest.paneActions.token;
+  }
   send(command);
   send(command);
   await until(
@@ -175,6 +221,32 @@ try {
   const createdNative = nativeRows.filter((row) => row.split("|")[1] === created);
   assert.equal(createdNative.length, 1);
   const nativePane = createdNative[0].split("|")[0];
+  if (harness) {
+    assert.equal(run("display-message", "-p", "-t", nativePane, "#{@tmux_ide_harness}"), harness);
+    assert.equal(run("display-message", "-p", "-t", nativePane, "#{@ide_name}"), agentName);
+    assert.equal(run("display-message", "-p", "-t", nativePane, "#{@ide_type}"), "agent");
+    assert.equal(run("display-message", "-p", "-t", nativePane, "#{@ide_role}"), "implementer");
+    assert.equal(run("display-message", "-p", "-t", nativePane, "#{@tmux_ide_mission}"), "");
+    await until(() => {
+      try {
+        return (
+          execFileSync("/bin/cat", [join(fleet.root, "harness-invocations")], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+          }).split("\n")[0] === harness
+        );
+      } catch {
+        return false;
+      }
+    });
+  }
+  if (harness) {
+    assert.equal(
+      await readFile(join(fleet.root, "harness-invocations"), "utf8"),
+      harness + "\n",
+      "Exactly the inert harness executed once, with no name interpolated into argv",
+    );
+  }
   const marker = "GPUI_NEW_WINDOW_INPUT_OK";
   send({
     type: "input",
@@ -201,11 +273,13 @@ try {
   for (const identity of before)
     assert.ok(after.includes(identity), "Original source identity preserved");
   send(command);
-  send({ type: "presence", active: true, revision: 2 });
-  await until(() => latest?.presenceRevision === 2);
+  send({ type: "presence", active: true, revision: 3 });
+  await until(() => latest?.presenceRevision === 3);
   assert.equal(run("list-windows", "-t", sessionLabel, "-F", "#{window_id}").split("\n").length, 2);
   result = {
     passed: true,
+    harness: harness ?? null,
+    structuredAgentMetadata: !!harness,
     distinctCreatedWindowSelected: true,
     exactNewPaneInput: true,
     exactOneCreation: true,

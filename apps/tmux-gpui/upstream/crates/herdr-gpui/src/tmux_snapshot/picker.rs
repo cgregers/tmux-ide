@@ -5,12 +5,16 @@ mod fleet_servers;
 mod machine;
 mod machine_edit;
 mod machine_remove;
+mod new_agent;
 mod pane_close;
 mod pane_commands;
 mod saved_machines;
+mod sidebar_visibility;
 use super::{SnapshotView, browser, browser_ui::Selection};
 use crate::search_input::{Changed, SearchInput};
-use commands::{Action, command_rows};
+use commands::Action;
+#[cfg(test)]
+use commands::command_rows;
 use gpui::{prelude::*, *};
 use nucleo_matcher::{
     Config, Matcher, Utf32String,
@@ -78,6 +82,7 @@ pub(super) struct Picker {
     removal: Option<machine_remove::Confirmation>,
     edit: Option<machine_edit::Form>,
     closing: Option<pane_close::Confirmation>,
+    agent: Option<new_agent::Form>,
     search: Entity<SearchInput>,
     _changed: Subscription,
     rows: Vec<Row>,
@@ -385,6 +390,7 @@ impl SnapshotView {
             removal: None,
             edit: None,
             closing: None,
+            agent: None,
             search,
             _changed: changed,
             rows: if mode == Mode::Attention {
@@ -396,7 +402,7 @@ impl SnapshotView {
             } else if mode == Mode::Machine {
                 Vec::new()
             } else if mode == Mode::Commands {
-                command_rows(&self.browser_state, "")
+                commands::command_rows_with_sidebar(&self.browser_state, "", self.sidebar_hidden)
             } else if mode == Mode::Theme {
                 theme_rows(&self.browser_state, "")
             } else {
@@ -443,7 +449,11 @@ impl SnapshotView {
         } else if picker.mode == Mode::Machine {
             Vec::new()
         } else if picker.mode == Mode::Commands {
-            command_rows(&self.browser_state, picker.search.read(cx).text())
+            commands::command_rows_with_sidebar(
+                &self.browser_state,
+                picker.search.read(cx).text(),
+                self.sidebar_hidden,
+            )
         } else if picker.mode == Mode::Theme {
             theme_rows(&self.browser_state, picker.search.read(cx).text())
         } else {
@@ -489,21 +499,26 @@ impl SnapshotView {
             return;
         }
         if let Target::PaneAction { captured, action } = &target {
-            if self
-                .picker
-                .as_ref()
-                .is_none_or(|picker| picker.mode != Mode::Commands || picker.closing.is_some())
-                || self.new_session.is_some()
+            if self.picker.as_ref().is_none_or(|picker| {
+                picker.mode != Mode::Commands || picker.closing.is_some() || picker.agent.is_some()
+            }) || self.new_session.is_some()
                 || self.pane_actions.is_some()
             {
                 return;
             }
             if let Some(captured) = captured {
+                if matches!(action, pane_commands::Action::NewAgent) {
+                    self.begin_new_agent(captured.clone(), window, cx);
+                    return;
+                }
                 if matches!(action, pane_commands::Action::Close) {
                     self.begin_pane_close(captured.clone(), window, cx);
                     return;
                 }
-                if self.dispatch_captured_pane_action(captured, action.wire(), window, cx) {
+                let Some(action) = action.wire() else {
+                    return;
+                };
+                if self.dispatch_captured_pane_action(captured, action, window, cx) {
                     self.close_picker(window, cx);
                 } else if let Some(picker) = &mut self.picker {
                     picker.error = Some("Action queue unavailable — cancel and reselect the pane.");
@@ -522,9 +537,22 @@ impl SnapshotView {
             }
             return;
         }
+        if let Target::Command(Action::ToggleSidebar) = &target
+            && (!self.marked.is_empty()
+                || self.picker.as_ref().is_none_or(|p| {
+                    p.mode != Mode::Commands
+                        || p.agent.is_some()
+                        || p.closing.is_some()
+                        || p.edit.is_some()
+                        || p.removal.is_some()
+                }))
+        {
+            return;
+        }
         if let Target::Command(action) = target {
             self.close_picker(window, cx);
             match action {
+                Action::ToggleSidebar => self.toggle_sidebar(cx),
                 Action::SavedMachines => self.open_saved_machines(window, cx),
                 Action::ManageMachines => self.open_machine_management(window, cx),
                 Action::AddMachine => self.open_picker_mode(Mode::Machine, window, cx),
@@ -655,6 +683,10 @@ impl SnapshotView {
             self.pane_close_key(event, window, cx);
             return;
         }
+        if self.picker.as_ref().is_some_and(|p| p.agent.is_some()) {
+            self.new_agent_key(event, window, cx);
+            return;
+        }
         if self.machine_edit_composing(cx) {
             return;
         }
@@ -665,6 +697,14 @@ impl SnapshotView {
             return;
         }
         let key = &event.keystroke;
+        if key.key == "f10" && commands::shortcut(key) {
+            if !event.is_held && self.picker.is_none() && self.marked.is_empty() {
+                self.toggle_sidebar(cx);
+            }
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
         if commands::shortcut(key) {
             match key.key.as_str() {
                 "f1" => self.dispatch_application_tab(
@@ -813,6 +853,9 @@ impl SnapshotView {
         )
     }
     pub(super) fn picker_render(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.picker.as_ref().is_some_and(|p| p.agent.is_some()) {
+            return self.new_agent_render(cx);
+        }
         if self.picker.as_ref().is_some_and(|p| p.closing.is_some()) {
             return self.pane_close_render(cx);
         }

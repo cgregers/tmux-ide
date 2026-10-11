@@ -607,7 +607,7 @@ impl SnapshotView {
         }
         let theme = self.theme();
         let is_home = self.browser_state.surface == browser::Surface::Home;
-        let show_sidebar = !is_home || self.picker_in_sidebar();
+        let show_sidebar = (!is_home && !self.sidebar_hidden) || self.picker_in_sidebar();
         let viewport = window.viewport_size();
         let chrome_height =
             crate::titlebar::HEIGHT + super::workspace_chrome::APPLICATION_TABS_HEIGHT;

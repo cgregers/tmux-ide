@@ -4,14 +4,16 @@ use crate::tmux_snapshot::pane_actions;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::tmux_snapshot) enum Action {
     NewWindow,
+    NewAgent,
     Close,
     Zoom(bool),
     SplitRight,
     SplitDown,
 }
 impl Action {
-    pub(super) fn wire(self) -> pane_actions::Action {
-        match self {
+    pub(super) fn wire(self) -> Option<pane_actions::Action> {
+        Some(match self {
+            Self::NewAgent => return None,
             Self::Close => pane_actions::Action::Close,
             Self::NewWindow => pane_actions::Action::NewWindow,
             Self::Zoom(true) => pane_actions::Action::Zoom {
@@ -26,7 +28,7 @@ impl Action {
             Self::SplitDown => pane_actions::Action::Split {
                 direction: pane_actions::SplitDirection::Down,
             },
-        }
+        })
     }
 }
 pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
@@ -40,6 +42,7 @@ pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
         .is_some_and(|actions| actions.zoomed);
     [
         (Action::NewWindow, "New terminal window"),
+        (Action::NewAgent, "New agent…"),
         (Action::Close, "Close pane…"),
         (
             Action::Zoom(!zoomed),

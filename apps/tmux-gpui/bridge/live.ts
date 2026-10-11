@@ -580,17 +580,24 @@ try {
               });
             continue;
           }
-          if (paneAction.data.action === "new-window") {
+          if (paneAction.data.action === "new-window" || paneAction.data.action === "new-agent") {
             const revision = admittedPresenceRevision;
             actionBusy = true;
             newWindowReceipt = null;
             output(latest.snapshot);
-            void executeNewWindow(client, runtime, () => {
-              const value = target();
-              return value && admittedPresenceRevision === revision
-                ? { ...value, session: config.liveSessionId, presenceRevision: revision }
-                : null;
-            })
+            void executeNewWindow(
+              client,
+              runtime,
+              () => {
+                const value = target();
+                return value && admittedPresenceRevision === revision
+                  ? { ...value, session: config.liveSessionId, presenceRevision: revision }
+                  : null;
+              },
+              paneAction.data.action === "new-agent"
+                ? { name: paneAction.data.name, harness: paneAction.data.harness }
+                : undefined,
+            )
               .then((result) => {
                 actionFailed = !result;
                 if (result) newWindowReceipt = { token: paneAction.data.token, result };

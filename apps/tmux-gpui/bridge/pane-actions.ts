@@ -1,3 +1,4 @@
+import { newAgentSchema } from "./new-window.ts";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import type { PaneStreamRuntimeClient } from "../../../packages/daemon-client/src/pane-stream-client.ts";
@@ -17,6 +18,7 @@ const base = {
 };
 export const paneActionSchema = z.discriminatedUnion("action", [
   z.object({ ...base, action: z.literal("new-window") }).strict(),
+  newAgentSchema.extend({ ...base, action: z.literal("new-agent") }).strict(),
   z.object({ ...base, action: z.literal("close") }).strict(),
   z.object({ ...base, action: z.literal("split"), direction: z.enum(["right", "down"]) }).strict(),
   z
@@ -81,7 +83,8 @@ export function createPaneActionExecutor() {
     command: PaneAction,
   ): Promise<boolean | WorkspaceWindowSplitResult> => {
     const input = paneActionSchema.parse(command);
-    if (input.action === "new-window" || input.action === "close") return false; // Separate scoped owner-action protocol.
+    if (input.action === "new-window" || input.action === "new-agent" || input.action === "close")
+      return false; // Separate scoped owner-action protocol.
     const expected = current();
     if (
       !expected ||

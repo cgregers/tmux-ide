@@ -132,6 +132,25 @@ impl SnapshotView {
                 })),
             );
         }
+        tabs = tabs.child(div().flex_1()).child(
+            controls::button(
+                "sidebar-toggle",
+                None,
+                "Show / hide sidebar · F10",
+                controls::Icon::Sidebar,
+                &theme,
+            )
+            .on_click(cx.listener(move |view, _, _, cx| {
+                if view.browser_request == request
+                    && view.picker.is_none()
+                    && view.new_session.is_none()
+                    && view.pane_actions.is_none()
+                    && view.marked.is_empty()
+                {
+                    view.toggle_sidebar(cx);
+                }
+            })),
+        );
         tabs.into_any_element()
     }
 
