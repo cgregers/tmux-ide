@@ -93,6 +93,12 @@ and per-machine identity scopes. The native `bridge/fleet.ts` adapter now projec
 bounded, credential-free groups and issues exact-route selection tokens. Returned
 selections retire on navigation, catalog failure or connection replacement.
 Ordinary sessions without a workspace remain selectable for daemon promotion.
+The agent observer, authenticated event transport and multi-machine aggregation
+owner are now renderer-neutral under the daemon's Node-only `machine-agents`
+subpath. TUI adapters retain selected-machine discovery and singleton defaults;
+native callers must supply their manager. This extraction does not yet replace
+the GPUI browser's single-host agent publication. Fleet-wide native projection,
+bounded coverage and exact agent-selection tokens remain the next integration.
 Local/remote discovery can resolve an explicitly selected server ID and generation;
 private SSH host files now support that scope without reconnecting the transport.
 The default local browser now owns the shared fleet manager and publishes groups

@@ -40,6 +40,10 @@
     "./connection-owner": {
       "types": "./dist/lib/daemon-connection-owner.d.ts",
       "default": "./dist/lib/daemon-connection-owner.js"
+    },
+    "./machine-agents": {
+      "types": "./dist/lib/machine-agents.d.ts",
+      "default": "./dist/lib/machine-agents.js"
     }
   },
   "files": [
