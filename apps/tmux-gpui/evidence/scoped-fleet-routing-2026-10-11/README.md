@@ -29,3 +29,6 @@ logs are retained; corrected tests accept the appropriate rejection layer.
 Browser fleet publication/Rust protocol and grouped Home/F5 UI remain pending.
 This qualifies controlled route construction, not real SSH or physical multi-server
 interaction. No card closed and no release or production session mutation.
+
+Captured log trailing whitespace was normalized after the staged diff check
+flagged whitespace-only assertion separator lines. Diagnostic content is retained.

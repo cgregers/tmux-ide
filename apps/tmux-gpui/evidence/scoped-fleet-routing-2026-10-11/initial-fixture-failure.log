@@ -45,9 +45,9 @@
 test at apps/tmux-gpui/bridge/discovery.test.ts:1:6342
 ✖ explicit local server scope never falls back to another or restarted server (4.747084ms)
   AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
-  
+
   Caught error:
-  
+
   [
     {
       "expected": "null",
@@ -95,9 +95,9 @@ test at apps/tmux-gpui/bridge/discovery.test.ts:1:6342
 test at apps/tmux-gpui/bridge/remote-route.test.ts:1:7216
 ✖ explicit remote server scope selects its exact generation without first-server fallback (1.046ms)
   AssertionError [ERR_ASSERTION]: The validation function is expected to return "true". Received false
-  
+
   Caught error:
-  
+
   RemoteRouteError: Machine connection is unavailable. Reconnect the machine and try again.
       at async TestContext.<anonymous> (/Users/thijs/.codex/worktrees/retire-web-desktop/tmux-ide/apps/tmux-gpui/bridge/remote-route.test.ts:308:7)
       at async Test.run (node:internal/test_runner/test:1409:7)

@@ -13,9 +13,9 @@
 test at apps/tmux-gpui/bridge/scope-repro-59ibqpsp.ts:1:4149
 ✖ ordinary tmux sessions remain selectable before daemon workspace promotion (6.790917ms)
   AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
-  
+
     assert.ok(token)
-  
+
       at TestContext.<anonymous> (/Users/thijs/.codex/worktrees/retire-web-desktop/tmux-ide/apps/tmux-gpui/bridge/scope-repro-59ibqpsp.ts:170:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
