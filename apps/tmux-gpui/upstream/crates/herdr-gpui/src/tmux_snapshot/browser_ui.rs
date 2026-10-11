@@ -207,6 +207,10 @@ impl SnapshotView {
         if self.picker.is_some() || self.pane_actions.is_some() || self.new_session.is_some() {
             return;
         }
+        // Let the shell consume F5 before terminal input readiness or forwarding.
+        if super::picker::commands::shortcut(&event.keystroke) {
+            return;
+        }
         if self.divider.is_some() && !event.keystroke.modifiers.platform {
             if event.keystroke.key == "escape" {
                 self.divider = None;

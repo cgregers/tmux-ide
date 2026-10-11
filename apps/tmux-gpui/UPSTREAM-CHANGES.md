@@ -1,5 +1,11 @@
 # Changes from the pinned upstream revision
 
+- `tmux_snapshot/picker/commands.rs` adds the initial native F5 command vocabulary
+  (Home, sessions, appearance and refresh), reusing the existing Herdr SearchInput
+  adapter and tmux action owners. Terminal key forwarding yields F5 to the shell;
+  request fences and popup/composition ownership remain in the existing picker.
+  This is a partial command menu, not full TUI palette parity.
+
 - `tmux_snapshot/controls.rs` introduces shared native icon-and-label tabs using
   existing theme colors and the attributed Herdr terminal SVG. `workspace_chrome.rs`
   uses them for app navigation and tmux window tabs. `icons.rs` registers the new

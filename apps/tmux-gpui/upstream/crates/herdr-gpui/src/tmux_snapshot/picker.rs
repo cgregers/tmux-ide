@@ -1,6 +1,8 @@
 //! Bounded catalog switcher. Labels are searchable display text, never command targets.
+pub(super) mod commands;
 use super::{SnapshotView, browser, browser_ui::Selection};
 use crate::search_input::{Changed, SearchInput};
+use commands::{Action, command_rows};
 use gpui::{prelude::*, *};
 use nucleo_matcher::{
     Config, Matcher, Utf32String,
@@ -12,6 +14,7 @@ pub(super) enum Target {
     Session(String),
     Pane(String),
     Theme(String),
+    Command(Action),
 }
 #[derive(Clone)]
 pub(super) struct Row {
@@ -22,6 +25,7 @@ pub(super) struct Row {
 enum Mode {
     Navigation,
     Theme,
+    Commands,
 }
 pub(super) struct Picker {
     mode: Mode,
@@ -83,6 +87,7 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
 }
 fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::Command(action) => action.available(state),
         Target::Session(id) => state.sessions.iter().any(|c| &c.id == id),
         Target::Pane(id) => state.panes.iter().any(|c| &c.id == id),
         Target::Theme(id) => state
@@ -92,6 +97,9 @@ fn current(state: &browser::State, target: &Target) -> bool {
     }
 }
 impl SnapshotView {
+    pub(super) fn open_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_picker_mode(Mode::Commands, window, cx);
+    }
     pub(super) fn open_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_picker_mode(Mode::Navigation, window, cx);
     }
@@ -113,10 +121,10 @@ impl SnapshotView {
         let search = cx.new(|cx| {
             let mut input = SearchInput::new(cx).with_max_bytes(1024);
             input.set_placeholder(
-                if mode == Mode::Theme {
-                    "Search themes…"
-                } else {
-                    "Search sessions and panes…"
+                match mode {
+                    Mode::Theme => "Search themes…",
+                    Mode::Commands => "Search commands…",
+                    Mode::Navigation => "Search sessions and panes…",
                 },
                 cx,
             );
@@ -133,7 +141,9 @@ impl SnapshotView {
             error: None,
             search,
             _changed: changed,
-            rows: if mode == Mode::Theme {
+            rows: if mode == Mode::Commands {
+                command_rows(&self.browser_state, "")
+            } else if mode == Mode::Theme {
                 theme_rows(&self.browser_state, "")
             } else {
                 rows(&self.browser_state, "")
@@ -153,15 +163,18 @@ impl SnapshotView {
             input.set_appearance(crate::config::Config::default().ui, theme, cx)
         });
         if self.browser_commands.is_none()
-            || (picker.mode == Mode::Navigation
+            || (picker.mode != Mode::Theme
                 && (picker.request != self.browser_request
-                    || (self.browser_state.sessions.is_empty()
+                    || (picker.mode == Mode::Navigation
+                        && self.browser_state.sessions.is_empty()
                         && self.browser_state.panes.is_empty())))
         {
             self.picker = None;
             return;
         }
-        picker.rows = if picker.mode == Mode::Theme {
+        picker.rows = if picker.mode == Mode::Commands {
+            command_rows(&self.browser_state, picker.search.read(cx).text())
+        } else if picker.mode == Mode::Theme {
             theme_rows(&self.browser_state, picker.search.read(cx).text())
         } else {
             rows(&self.browser_state, picker.search.read(cx).text())
@@ -177,10 +190,20 @@ impl SnapshotView {
         if self
             .picker
             .as_ref()
-            .is_none_or(|p| p.mode == Mode::Navigation && p.request != self.browser_request)
+            .is_none_or(|p| p.mode != Mode::Theme && p.request != self.browser_request)
             || self.browser_commands.is_none()
             || !current(&self.browser_state, &target)
         {
+            return;
+        }
+        if let Target::Command(action) = target {
+            self.close_picker(window, cx);
+            match action {
+                Action::Home => self.select(Selection::Home, window, cx),
+                Action::Sessions => self.open_picker(window, cx),
+                Action::Appearance => self.open_theme_picker(window, cx),
+                Action::Refresh => self.select(Selection::Refresh, window, cx),
+            }
             return;
         }
         if let Target::Theme(id) = target {
@@ -202,7 +225,7 @@ impl SnapshotView {
             match target {
                 Target::Session(id) => Selection::Session(id),
                 Target::Pane(id) => Selection::Pane(id),
-                Target::Theme(_) => return,
+                Target::Theme(_) | Target::Command(_) => return,
             },
             window,
             cx,
@@ -230,6 +253,12 @@ impl SnapshotView {
             return;
         }
         let key = &event.keystroke;
+        if commands::shortcut(key) {
+            self.open_commands(window, cx);
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
         if key.modifiers.platform && !key.modifiers.control && !key.modifiers.alt && key.key == "k"
         {
             self.open_picker(window, cx);
@@ -278,6 +307,9 @@ impl SnapshotView {
             .flex()
             .flex_col()
             .gap_1()
+            .when(picker.mode == Mode::Commands, |panel| {
+                panel.child(div().px_2().py_1().child("Commands · F5"))
+            })
             .child(picker.search.clone());
         if picker.mode == Mode::Theme
             && let Some(a) = &self.browser_state.appearance

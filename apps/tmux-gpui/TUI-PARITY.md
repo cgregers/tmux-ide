@@ -22,9 +22,18 @@ GPUI owns presentation, not a second source of terminal or fleet truth.
 ## 1 Native shell and navigation
 
 Present: Home/Terminals, session sidebar, window strip, pane headers, switcher and theme picker.
+The first F5 slice adds searchable Home, Switch session, Appearance and Refresh
+commands using the existing picker. It has keyboard/input-isolation tests and
+physical light/dark verification. The centered palette design and full TUI action
+vocabulary remain unfinished. Shared icon tabs and sidebar buttons landed in
+`2b83924c`; see `evidence/native-controls-2026-10-11/` and `evidence/native-f5-2026-10-11/`.
 
 - [ ] Match TUI information hierarchy: machine, session, window, pane and agent status.
 - [ ] Match Home search, machine filter, All/Working/Needs attention and jump-to-agent workflows.
+  First slice can filter loaded agents by name/session label and existing status/attention
+  fields without a bridge change. Preserve roster coverage, unavailable rows, opaque
+  identities and revision fences. Broader team/project/machine search needs additional
+  published data; session cards should not disappear under an agents-only filter.
 - [ ] Complete sidebar show/hide, grouping, overflow, long labels and keyboard navigation.
 - [ ] Add full command palette with the TUI action vocabulary and contextual availability.
 - [ ] Match help, shortcut reference and relevant user-facing connection diagnostics.
@@ -76,6 +85,13 @@ action and does not satisfy this section.
 ## 6 Remote machines and agent activity
 
 Native preview is primarily local; a local demo does not qualify fleet parity.
+
+Next machine slice: make the existing Node SSH transport/authority owner reusable
+outside TUI internals, with TUI behavior preserved. The native adapter should reuse
+SavedMachineSchema, runtime supervision and scoped clients; it must not import the
+Solid navigation singleton or implement a second SSH stack. Test cancellation,
+child cleanup, sanitized failures, generation mismatches and late completion after
+a machine switch before exposing the Add machine dialog.
 
 - [ ] Native add-machine/SSH flow and machine/session grouping.
 - [ ] Match retry, disconnect, unavailable-machine feedback and identity conflict diagnostics.
