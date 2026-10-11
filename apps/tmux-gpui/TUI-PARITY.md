@@ -81,6 +81,9 @@ The Node connection owner is now reusable through
 `@tmux-ide/daemon/connection-owner` (`createDaemonConnectionOwner`). The TUI retains
 its telemetry adapter and consumes the same owner; the public subpath brings in
 no TUI modules. This is a Node-only API and does not belong in host-neutral clients.
+The existing multi-machine manager is now also shared through the Node-only
+`@tmux-ide/daemon/machine-connections` subpath; the TUI retains its singleton and
+telemetry adapter. Native multi-machine catalog integration remains pending.
 
 The bridge now has a tested `remote-route.ts` adapter that borrows one verified
 SSH epoch, rejects stale inventory, and cancels on retirement. The browser now
