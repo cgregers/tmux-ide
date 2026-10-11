@@ -200,3 +200,69 @@ test("saved route reconciliation preserves display edits and rejects authority c
     f.owner.dispose();
   }
 });
+
+test("prepare Add reuses saved identity and pin without writing or bypassing a disabled profile", () => {
+  const f = fixture();
+  try {
+    const p = f.owner.publication();
+    assert.deepEqual(f.owner.prepareAdd("build", p.revision), f.registry.machines[0]);
+    assert.equal(f.counts().writes, 0);
+    f.registry.machines[0]!.enabled = false;
+    assert.throws(() => f.owner.prepareAdd("build", p.revision), { category: "stale" });
+    assert.throws(() => f.owner.prepareAdd("build", f.owner.publication().revision), {
+      category: "inactive",
+    });
+  } finally {
+    f.owner.dispose();
+  }
+});
+
+test("prepare Add shares TUI collision-safe labels and rejects invalid routes before writes", () => {
+  const f = fixture();
+  try {
+    const revision = f.owner.publication().revision;
+    const profile = f.owner.prepareAdd("Local", revision);
+    assert.equal(profile.label, "Local (2)");
+    assert.equal(profile.sshTarget, "Local");
+    assert.equal(profile.enabled, true);
+    const long = f.owner.prepareAdd("a".repeat(200), revision);
+    assert.ok(long.label.length <= 80);
+    assert.equal(long.sshTarget.length, 200);
+    assert.throws(() => f.owner.prepareAdd("build;command", revision));
+    f.corrupt();
+    assert.throws(() => f.owner.prepareAdd("new-host", f.owner.publication().revision), {
+      category: "unavailable",
+    });
+    assert.equal(f.counts().writes, 0);
+  } finally {
+    f.owner.dispose();
+  }
+});
+
+test("prepare Add refuses ambiguous SSH aliases regardless of profile order or enabled state", () => {
+  const f = fixture();
+  try {
+    const first = f.registry.machines[0]!;
+    const second = {
+      ...first,
+      id: randomUUID(),
+      label: "Other build",
+      expectedEnvironmentId: randomUUID(),
+      enabled: false,
+    };
+    for (const profiles of [
+      [first, second],
+      [second, first],
+      [first, { ...second, enabled: true }],
+    ]) {
+      f.registry = { version: 1, machines: profiles };
+      f.watched();
+      assert.throws(() => f.owner.prepareAdd("build", f.owner.publication().revision), {
+        category: "ambiguous",
+      });
+    }
+    assert.equal(f.counts().writes, 0);
+  } finally {
+    f.owner.dispose();
+  }
+});

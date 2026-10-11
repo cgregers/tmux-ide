@@ -1,3 +1,4 @@
+import { ephemeralMachineProfile } from "../../../packages/daemon/src/lib/machine-profile.ts";
 import {
   SavedMachineSchema,
   SavedMachineRegistrySchema,
@@ -26,6 +27,7 @@ const messages = {
   stale: "Saved machines changed. Select the machine again.",
   busy: "A machine change is already in progress.",
   inactive: "This saved machine is disabled or no longer available.",
+  ambiguous: "Several saved machines use this SSH target. Select a saved machine instead.",
   write: "Could not confirm the saved machine change. Refresh before trying again.",
   stopped: "Machine management is closed.",
 } as const;
@@ -124,6 +126,17 @@ export function createNativeMachineRegistry(changed: () => void, io: typeof defa
       const profile = registry.machines.find((machine) => machine.id === id && machine.enabled);
       if (!profile) throw new MachineRegistryError("inactive");
       return structuredClone(profile);
+    },
+    prepareAdd(alias: string, expectedRevision: number): SavedMachine {
+      current(expectedRevision);
+      const target = SavedMachineSchema.shape.sshTarget.parse(alias);
+      const matches = registry.machines.filter((machine) => machine.sshTarget === target);
+      if (matches.length > 1) throw new MachineRegistryError("ambiguous");
+      const existing = matches[0];
+      // An explicit Add must not bypass a disabled profile or discard its identity pin.
+      if (existing && !existing.enabled) throw new MachineRegistryError("inactive");
+      if (existing) return structuredClone(existing);
+      return ephemeralMachineProfile(target, registry.machines);
     },
     save(machine: SavedMachine, expectedRevision: number) {
       const parsed = SavedMachineSchema.parse(machine);
