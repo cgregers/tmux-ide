@@ -33,3 +33,13 @@ response. The shared-owner bridge tests, separately, prove fixture recovery.
 No actual SSH recovery, Home-button pointer action, light/narrow layout or full
 Home multi-input interaction is qualified by this presentation test. The native
 child was terminated by its exact PID and the private HOME removed.
+
+## Controlled native input comparison
+
+The follow-up presentation fixture enabled Home agent search alongside F5: typing
+retry still worked. With `--home-search --with-sessions --updates`, it additionally
+published unchanged catalog metadata every 200 ms; F6 → type Workspace retained
+focus and query (f6-home-search-updates.png). This rules out those factors alone
+in this fixture. It does not explain or erase the original real-bridge QA typing
+observation. No speculative production input change was made. Each comparison
+child was terminated by exact PID and its isolated HOME removed.
