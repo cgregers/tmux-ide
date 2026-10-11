@@ -1,6 +1,7 @@
 import process from "node:process";
 import { Buffer } from "node:buffer";
 import { setTimeout, clearTimeout } from "node:timers";
+import { setTimeout as delay } from "node:timers/promises";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
@@ -273,6 +274,30 @@ test(
       assert.equal(event.selectedPane, null);
       assert.deepEqual(event.sessions, []);
       assert.match(event.status, /Machine connection changed/);
+      // A stalled handshake followed by Home/Refresh must not block Local cancellation.
+      child.stdin.write(
+        JSON.stringify({ type: "machine", request: 2, sshTarget: "slow-fixture" }) + "\n",
+      );
+      let opened = false;
+      for (let attempt = 0; attempt < 200; attempt++) {
+        try {
+          await readFile(join(directory, "slow-open"));
+          opened = true;
+          break;
+        } catch {
+          await delay(10);
+        }
+      }
+      assert.ok(opened, "Owned slow SSH fixture did not start");
+      const cancelStarted = Date.now();
+      for (const command of [
+        { type: "refresh", request: 3 },
+        { type: "home", request: 4 },
+        { type: "machine", request: 5, sshTarget: null },
+      ])
+        child.stdin.write(JSON.stringify(command) + "\n");
+      await until((event) => event.request === 5 && event.home.phase === "unavailable");
+      assert.ok(Date.now() - cancelStarted < 3000, "Local cancellation waited for SSH timeout");
       child.stdin.end();
       const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
       try {

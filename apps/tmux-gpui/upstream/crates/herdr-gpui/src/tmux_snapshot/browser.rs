@@ -207,6 +207,11 @@ pub(super) enum Command {
         id: String,
         input: super::keys::Input,
     },
+    #[serde(rename_all = "camelCase")]
+    Machine {
+        request: u64,
+        ssh_target: Option<String>,
+    },
     Home {
         request: u64,
     },

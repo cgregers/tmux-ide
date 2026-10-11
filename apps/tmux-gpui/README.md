@@ -212,7 +212,10 @@ host verification and guarded loopback relay. The remote machine must already ru
 a compatible tmux-ide daemon and have exactly one online tmux server. Home refresh
 reuses the connection; connection retirement clears selection and terminal input.
 Closing the preview disposes its transport, not the remote daemon or tmux sessions.
-The native Add Machine dialog and saved-machine picker are still pending; this
+Press F5 and choose **Connect to machine…** to enter an SSH alias in the native
+dialog. **Use local machine / cancel connection** returns to local discovery and
+cancels a pending remote dial. Home and Refresh remain responsive during discovery.
+Saved-machine persistence and a fleet picker are still pending; this connection
 path has process-fixture coverage, not physical remote-terminal qualification.
 
 With no argument, the launcher discovers an existing local daemon from its canonical

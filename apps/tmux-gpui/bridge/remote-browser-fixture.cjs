@@ -9,7 +9,10 @@ if (!directory) process.exit(2);
 const { daemon, scope } = JSON.parse(fs.readFileSync(path.join(directory, "fixture.json"), "utf8"));
 const args = process.argv.slice(2);
 const index = args.indexOf("-L");
-if (index < 0) {
+if (index < 0 && args.includes("slow-fixture")) {
+  fs.writeFileSync(path.join(directory, "slow-open"), "");
+  setInterval(() => {}, 1000);
+} else if (index < 0) {
   process.stdout.write(JSON.stringify({ version: 1, daemon }));
 } else {
   const port = Number(args[index + 1].split(":")[1]);

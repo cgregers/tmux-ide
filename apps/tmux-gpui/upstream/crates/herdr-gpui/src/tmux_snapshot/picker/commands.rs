@@ -3,6 +3,8 @@ use super::{Row, Target, browser};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::tmux_snapshot) enum Action {
     Home,
+    AddMachine,
+    LocalMachine,
     Sessions,
     Appearance,
     Refresh,
@@ -16,6 +18,11 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
     let query: String = query.chars().take(256).collect::<String>().to_lowercase();
     [
         (Action::Home, "Home"),
+        (Action::AddMachine, "Connect to machine…"),
+        (
+            Action::LocalMachine,
+            "Use local machine / cancel connection",
+        ),
         (Action::Sessions, "Switch session"),
         (Action::Appearance, "Appearance…"),
         (Action::Refresh, "Refresh sessions"),

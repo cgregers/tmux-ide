@@ -34,6 +34,7 @@ export function createPreviewHostSource(
   let route: RemotePreviewRoute | null = null;
   let removeAbort = () => {};
   const lifetime = new AbortController();
+  let selection: { sshTarget: string } | null | undefined;
   const clearRoute = () => {
     removeAbort();
     removeAbort = () => {};
@@ -46,18 +47,24 @@ export function createPreviewHostSource(
     remote = null;
   };
   return {
+    select(sshTarget: string | null) {
+      const next = sshTarget === null ? null : remoteHostConfigSchema.parse({ sshTarget });
+      revision++;
+      clearRemote();
+      selection = next;
+    },
     async read(): Promise<PreviewHost> {
       if (stopped) throw new RemoteRouteError("retired");
       const token = ++revision;
       const current = () => !stopped && token === revision;
       clearRoute();
-      if (argument === "--local") {
+      if (selection === null || (selection === undefined && argument === "--local")) {
         clearRemote();
         const host = await dependencies.discover();
         if (!current()) throw new RemoteRouteError("retired");
         return host;
       }
-      const config = dependencies.readConfig(argument);
+      const config = selection ?? dependencies.readConfig(argument);
       const target = remoteHostConfigSchema.safeParse(config);
       if (!target.success) {
         clearRemote();

@@ -185,3 +185,22 @@ test("machine file uses the shared SSH target and environment identity constrain
   ])
     assert.equal(remoteHostConfigSchema.safeParse(value).success, false);
 });
+
+test("native machine selection replaces owned SSH and can return to local discovery", async () => {
+  const f = fixture();
+  const source = f.source();
+  try {
+    await source.read();
+    source.select("another-machine");
+    assert.equal(f.counts().disposed, 1);
+    await source.read();
+    assert.equal(f.counts().dials, 2);
+    source.select(null);
+    assert.equal(f.counts().disposed, 2);
+    assert.deepEqual(await source.read(), f.host);
+    assert.equal(f.counts().dials, 2);
+    assert.throws(() => source.select("-bad-target"));
+  } finally {
+    source.dispose();
+  }
+});

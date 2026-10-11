@@ -1,5 +1,6 @@
 //! Bounded catalog switcher. Labels are searchable display text, never command targets.
 pub(super) mod commands;
+mod machine;
 use super::{SnapshotView, browser, browser_ui::Selection};
 use crate::search_input::{Changed, SearchInput};
 use commands::{Action, command_rows};
@@ -26,6 +27,7 @@ enum Mode {
     Navigation,
     Theme,
     Commands,
+    Machine,
 }
 pub(super) struct Picker {
     mode: Mode,
@@ -122,6 +124,7 @@ impl SnapshotView {
             let mut input = SearchInput::new(cx).with_max_bytes(1024);
             input.set_placeholder(
                 match mode {
+                    Mode::Machine => "SSH alias or user@host",
                     Mode::Theme => "Search themes…",
                     Mode::Commands => "Search commands…",
                     Mode::Navigation => "Search sessions and panes…",
@@ -141,7 +144,9 @@ impl SnapshotView {
             error: None,
             search,
             _changed: changed,
-            rows: if mode == Mode::Commands {
+            rows: if mode == Mode::Machine {
+                Vec::new()
+            } else if mode == Mode::Commands {
                 command_rows(&self.browser_state, "")
             } else if mode == Mode::Theme {
                 theme_rows(&self.browser_state, "")
@@ -172,7 +177,9 @@ impl SnapshotView {
             self.picker = None;
             return;
         }
-        picker.rows = if picker.mode == Mode::Commands {
+        picker.rows = if picker.mode == Mode::Machine {
+            Vec::new()
+        } else if picker.mode == Mode::Commands {
             command_rows(&self.browser_state, picker.search.read(cx).text())
         } else if picker.mode == Mode::Theme {
             theme_rows(&self.browser_state, picker.search.read(cx).text())
@@ -199,6 +206,8 @@ impl SnapshotView {
         if let Target::Command(action) = target {
             self.close_picker(window, cx);
             match action {
+                Action::AddMachine => self.open_picker_mode(Mode::Machine, window, cx),
+                Action::LocalMachine => self.select(Selection::Machine(None), window, cx),
                 Action::Home => self.select(Selection::Home, window, cx),
                 Action::Sessions => self.open_picker(window, cx),
                 Action::Appearance => self.open_theme_picker(window, cx),
@@ -281,6 +290,7 @@ impl SnapshotView {
             "down" => {
                 picker.selected = (picker.selected + 1).min(picker.rows.len().saturating_sub(1))
             }
+            "enter" if picker.mode == Mode::Machine => self.submit_machine(window, cx),
             "enter" => {
                 let target = picker
                     .rows

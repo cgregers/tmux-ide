@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 mod commands;
+mod machine;
 use crate::tmux_snapshot::{decode, presence::Presence};
 use core::prelude::v1::test;
 use std::{

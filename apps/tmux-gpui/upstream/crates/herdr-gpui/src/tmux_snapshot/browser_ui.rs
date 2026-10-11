@@ -17,6 +17,7 @@ pub(super) enum Selection {
         key: String,
     },
     Home,
+    Machine(Option<String>),
     Refresh,
     Session(String),
     Pane(String),
@@ -411,7 +412,11 @@ impl SnapshotView {
         let Some(request) = self.browser_request.checked_add(1) else {
             return;
         };
-        let going_home = matches!(selection, Selection::Home | Selection::Refresh);
+        let changing_machine = matches!(selection, Selection::Machine(_));
+        let going_home = matches!(
+            selection,
+            Selection::Home | Selection::Refresh | Selection::Machine(_)
+        );
         let selecting_pane = matches!(selection, Selection::Pane(_));
         let command = match selection {
             Selection::WorkspaceAgent {
@@ -438,6 +443,10 @@ impl SnapshotView {
             },
             Selection::Session(id) => browser::Command::Session { request, id },
             Selection::Pane(id) => browser::Command::Pane { request, id },
+            Selection::Machine(ssh_target) => browser::Command::Machine {
+                request,
+                ssh_target,
+            },
             Selection::Home => browser::Command::Home { request },
             Selection::Refresh => browser::Command::Refresh { request },
         };
@@ -472,6 +481,10 @@ impl SnapshotView {
                 self.browser_state.frame = None;
                 self.browser_state.regions.clear();
                 self.browser_state.copy_region = None;
+            }
+            if changing_machine {
+                self.last_workspace_session = None;
+                self.browser_state.sessions.clear();
             }
             if !selecting_pane {
                 self.browser_state.panes.clear();
@@ -669,7 +682,7 @@ impl SnapshotView {
                 .on_scroll_wheel(cx.listener(Self::terminal_wheel))
                 .child(self.terminal_render(window, cx))
         });
-        if self.picker.is_some() {
+        if self.picker.is_some() && !self.machine_dialog_open() {
             sidebar = div()
                 .id("picker-sidebar")
                 .w(px(224.))
@@ -766,6 +779,7 @@ impl SnapshotView {
                 )
             });
         let body = div()
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -774,6 +788,10 @@ impl SnapshotView {
             .on_key_down(cx.listener(Self::picker_key))
             .child(application_tabs)
             .child(main)
+            .children(
+                self.machine_dialog(cx)
+                    .map(|dialog| deferred(dialog).with_priority(2)),
+            )
             .into_any_element();
         super::shell::themed_frame(body, window, &theme, self.canvas(), glass, heading)
     }

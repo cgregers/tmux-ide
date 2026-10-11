@@ -97,8 +97,9 @@ SSH epoch, rejects stale inventory, and cancels on retirement. The browser now
 accepts a private SSH machine file through `host-source.ts`, reuses the shared
 owner on Home refresh, and clears its catalog/input/child when the route retires.
 An isolated process fixture covers connection, refresh and disconnect; real SSH
-and physical remote-terminal acceptance remain pending. Next add the native
-machine dialog and saved-machine navigation. Reuse SavedMachineSchema and scoped clients;
+and physical remote-terminal acceptance remain pending. A centered native SSH
+dialog is available through F5, with a Local action that cancels pending discovery.
+Saved-machine navigation and persistence remain pending. Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
 Cancellation, child cleanup, sanitized failures, generation mismatches and late
 completion after a machine switch must remain fenced through the native adapter.

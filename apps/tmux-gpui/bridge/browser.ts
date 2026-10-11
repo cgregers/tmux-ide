@@ -44,10 +44,17 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { z } from "zod";
 import { createPreviewCatalog, sessionChoice } from "./catalog.ts";
 import { connectionSchema } from "./config.ts";
-import { createPreviewHostSource } from "./host-source.ts";
+import { createPreviewHostSource, remoteHostConfigSchema } from "./host-source.ts";
 import { RemoteRouteError } from "./remote-route.ts";
 
 const commandSchema = z.union([
+  z
+    .object({
+      type: z.literal("machine"),
+      request: z.number().int().positive().safe(),
+      sshTarget: remoteHostConfigSchema.shape.sshTarget.nullable(),
+    })
+    .strict(),
   openEditorSchema,
   openWorkspaceAgentSchema,
   openAgentSchema,
@@ -1060,7 +1067,8 @@ async function command(value: unknown) {
   selectedPane = null;
   paneActions = null;
   status = "Loading";
-  surface = cmd.type === "home" || cmd.type === "refresh" ? "home" : "workspace";
+  surface =
+    cmd.type === "home" || cmd.type === "refresh" || cmd.type === "machine" ? "home" : "workspace";
   if (surface === "home") {
     homePhase = "loading";
     sessions = [];
@@ -1071,9 +1079,19 @@ async function command(value: unknown) {
     selectedSession = null;
   }
   publish();
+  if (cmd.type === "machine") {
+    machineRouteRevision++;
+    hostSource ??= createPreviewHostSource(process.argv[2]!, retireMachineRoute);
+    hostSource.select(cmd.sshTarget);
+    catalog?.dispose();
+    catalog = undefined;
+  }
   await retire();
   if (stopped || token !== request) return;
-  if (cmd.type === "refresh" || cmd.type === "home") return refresh(token);
+  if (cmd.type === "machine" || cmd.type === "refresh" || cmd.type === "home") {
+    launchRefresh(token);
+    return;
+  }
   if (cmd.type === "session") {
     if (!sessions.some((s) => s.id === cmd.id)) throw new Error("Unknown session");
     if (!catalog) throw new Error("Catalog unavailable");
@@ -1097,11 +1115,10 @@ async function command(value: unknown) {
     if (!stopped && request === token) startAgents();
   }
 }
-// One command at a time and a bounded partial line; stdin backpressure bounds work.
-try {
-  try {
-    await refresh(0);
-  } catch (error) {
+// Discovery stays off the command loop so Local can always cancel a slow SSH dial.
+function launchRefresh(token: number) {
+  void refresh(token).catch((error) => {
+    if (stopped || request !== token) return;
     homePhase = "unavailable";
     status =
       error instanceof DaemonCompatibilityError ||
@@ -1111,7 +1128,11 @@ try {
         ? error.message
         : "Connection unavailable — start the daemon and refresh";
     publish();
-  }
+  });
+}
+// One bounded command at a time; discovery results are fenced by request and route.
+try {
+  launchRefresh(0);
   let buffer = Buffer.alloc(0);
   for await (const chunk of process.stdin) {
     buffer = Buffer.concat([buffer, Buffer.from(chunk)]);
