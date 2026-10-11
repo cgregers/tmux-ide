@@ -117,8 +117,10 @@ persistence cannot be confirmed and no conflicting profile exists. Late save
 results cannot reconnect after navigation cancellation. Native F5 **Manage saved machines** now exposes revision-fenced enable/disable
 actions through the existing canonical registry mutation path. The dialog uses
 authoritative pending/results rather than optimistic saved-state changes. Keyboard
-dispatch and stale/pending/unavailable guards have headless coverage; physical
-persistence remains unqualified. Native edit/remove controls and physical
+dispatch and stale/pending/unavailable guards have headless coverage. Physical
+macOS enable/disable now has native screenshots and separate-process persisted
+registry reads in `evidence/native-fleet-live-2026-10-11/`; restart restoration and
+real SSH acceptance remain unqualified. Native edit/remove controls and physical
 saved-picker/Add acceptance remain pending.
 Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
