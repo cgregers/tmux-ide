@@ -34,11 +34,10 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
         (Action::Refresh, "Refresh sessions"),
     ]
     .into_iter()
-    .filter(|(action, label)| {
-        action.available(state)
-            && query
-                .split_whitespace()
-                .all(|term| label.to_lowercase().contains(term))
+    .filter(|(_, label)| {
+        query
+            .split_whitespace()
+            .all(|term| label.to_lowercase().contains(term))
     })
     .map(|(action, label)| Row {
         target: Target::Command(action),

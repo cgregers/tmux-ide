@@ -590,7 +590,7 @@ impl SnapshotView {
         }
         let theme = self.theme();
         let is_home = self.browser_state.surface == browser::Surface::Home;
-        let show_sidebar = !is_home || self.picker.is_some();
+        let show_sidebar = !is_home || self.picker_in_sidebar();
         let viewport = window.viewport_size();
         let chrome_height =
             crate::titlebar::HEIGHT + super::workspace_chrome::APPLICATION_TABS_HEIGHT;
@@ -707,7 +707,7 @@ impl SnapshotView {
                 .on_scroll_wheel(cx.listener(Self::terminal_wheel))
                 .child(self.terminal_render(window, cx))
         });
-        if self.picker.is_some() && !self.machine_dialog_open() {
+        if self.picker_in_sidebar() && !self.machine_dialog_open() {
             sidebar = div()
                 .id("picker-sidebar")
                 .w(px(224.))
@@ -813,6 +813,10 @@ impl SnapshotView {
             .on_key_down(cx.listener(Self::picker_key))
             .child(application_tabs)
             .child(main)
+            .children(
+                self.commands_popover(window, cx)
+                    .map(|popover| deferred(popover).with_priority(2)),
+            )
             .children(
                 self.machine_dialog(cx)
                     .map(|dialog| deferred(dialog).with_priority(2)),

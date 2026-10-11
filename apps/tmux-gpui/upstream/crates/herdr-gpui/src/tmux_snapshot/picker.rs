@@ -563,6 +563,68 @@ impl SnapshotView {
         window.prevent_default();
         cx.notify();
     }
+    pub(super) fn picker_in_sidebar(&self) -> bool {
+        self.picker
+            .as_ref()
+            .is_some_and(|picker| matches!(picker.mode, Mode::Navigation | Mode::Theme))
+    }
+
+    /// Herdr menu chrome supplies occlusion, themed borders and shadow; like the
+    /// TUI palette this floats above the unchanged workspace near its top sixth.
+    pub(super) fn commands_popover(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        self.picker.as_ref().filter(|p| p.mode == Mode::Commands)?;
+        let theme = self.theme();
+        let viewport = window.viewport_size();
+        Some(
+            div()
+                .id("commands-overlay")
+                .debug_selector(|| "commands-overlay".into())
+                .absolute()
+                .inset_0()
+                .size_full()
+                .flex()
+                .justify_center()
+                .pt((viewport.height / 6.).min(px(80.)))
+                .occlude()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|view, _, window, cx| {
+                        view.close_picker(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .child(
+                    div()
+                        .id("commands-popover")
+                        .debug_selector(|| "commands-popover".into())
+                        .w((viewport.width - px(24.)).max(px(0.)).min(px(560.)))
+                        .h(
+                            (viewport.height - (viewport.height / 6.).min(px(80.)) - px(48.))
+                                .max(px(0.))
+                                .min(px(400.)),
+                        )
+                        .p_3()
+                        .overflow_hidden()
+                        .rounded(px(crate::config::corners::PANEL))
+                        .border_1()
+                        .border_color(rgb(theme.active))
+                        .bg(rgb(theme.surface))
+                        .shadow_lg()
+                        .occlude()
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                        .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                        .on_click(|_, _, cx| cx.stop_propagation())
+                        .child(self.picker_render(cx)),
+                )
+                .into_any_element(),
+        )
+    }
     pub(super) fn picker_render(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(picker) = &self.picker else {
             return div().into_any_element();
@@ -608,6 +670,7 @@ impl SnapshotView {
             .track_scroll(&picker.scroll);
         for (index, row) in picker.rows.iter().enumerate() {
             let target = row.target.clone();
+            let enabled = current(&self.browser_state, &target);
             list = list.child(
                 div()
                     .id(("picker-row", index))
@@ -615,16 +678,19 @@ impl SnapshotView {
                     .py_1()
                     .rounded(px(4.))
                     .truncate()
-                    .cursor_pointer()
+                    .when(enabled, |row| row.cursor_pointer())
+                    .when(!enabled, |row| row.text_color(rgb(theme.muted)))
                     .bg(rgb(if index == picker.selected {
                         theme.active
                     } else {
                         theme.surface
                     }))
                     .child(row.label.clone())
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.choose_picker(target.clone(), window, cx)
-                    })),
+                    .when(enabled, |row| {
+                        row.on_click(cx.listener(move |view, _, window, cx| {
+                            view.choose_picker(target.clone(), window, cx)
+                        }))
+                    }),
             );
         }
         panel = panel.child(list);

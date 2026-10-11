@@ -27,8 +27,9 @@ The first F5 slice adds searchable Home, Switch session, Appearance and Refresh
 commands using the existing picker. It has keyboard/input-isolation tests and
 physical light/dark verification. F1 Home, F2 Terminals and F6 session search now reuse the native tab/picker
 owners, and the F5 list exposes Terminals and shortcut labels. Modified function
-keys remain available to the terminal. The centered palette design and full TUI action
-vocabulary remain unfinished. Shared icon tabs and sidebar buttons landed in
+keys remain available to the terminal. F5 now floats in a centered popover over the unchanged view; shared control sizing
+and theme treatments are consistent. Full TUI action vocabulary and F6/F7
+convergence remain unfinished. See `evidence/native-f5-popover-2026-10-11/`. Shared icon tabs and sidebar buttons landed in
 `2b83924c`; see `evidence/native-controls-2026-10-11/` and `evidence/native-f5-2026-10-11/`.
 
 - [ ] Match TUI information hierarchy: machine, session, window, pane and agent status.
@@ -302,3 +303,26 @@ Next visual acceptance should prioritize:
 Sources inspected: https://github.com/zed-industries/zed/tree/main/crates/ui/src/components,
 https://zed.dev/docs/appearance, https://github.com/penso/herdr-gpui and the vendored
 Herdr modules above. These are design targets, not completed visual parity claims.
+
+
+## Next Home/F5 parity increments after the first popover
+
+Independent source comparison identified these concrete gaps. None is complete
+merely because an equivalent-looking button exists:
+
+1. F6 session switching and F7 attention should use the same popover family as
+   TUI F5 (`application-fleet-switcher.tsx`), rather than a sidebar replacement.
+2. F5 needs scoped machine/session/agent destinations and useful previews, beyond
+   static commands and retry/disconnect (`application-shell-overlays.tsx`).
+3. Home agent rows need selected-row arrows, Page Up/Down, Home/End and Enter,
+   preserving captured roster/route authority (`application-home-agent-roster.tsx`).
+4. Home needs machine filtering, observation Retry and Load more; connection retry
+   is distinct. Reuse the shared observation owner rather than duplicating it.
+5. Preserve machine/server/session hierarchy and qualify favorites/collapse, so
+   duplicate session labels on different servers remain distinguishable
+   (`application-machine-sidebar.tsx`).
+
+Popover physical acceptance: normal/narrow Home and Workspace geometry; outside
+click dismissal without underlying action/input; wheel isolation; marked IME and
+paste ownership; Escape focus restoration without clearing interrupted-input
+state; disabled/stale commands; light/dark contrast and resize while open.

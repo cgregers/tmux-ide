@@ -6,6 +6,7 @@ mod fleet_disconnect;
 mod fleet_retry;
 mod machine;
 mod navigation_keys;
+mod popover;
 mod saved_machines;
 use crate::tmux_snapshot::{decode, presence::Presence};
 use core::prelude::v1::test;

@@ -4,6 +4,12 @@ use gpui::{prelude::*, *};
 
 pub(super) const CONTROL_HEIGHT: f32 = 32.;
 const ICON_SIZE: f32 = 16.;
+const LABEL_SIZE: f32 = 12.;
+const CONTENT_GAP: f32 = 6.;
+
+#[cfg(test)]
+#[path = "controls_tests.rs"]
+mod tests;
 
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
@@ -51,14 +57,22 @@ pub(super) fn button(
         .flex()
         .items_center()
         .justify_center()
-        .gap(px(6.))
-        .px(px(8.))
-        .rounded(px(4.))
+        .gap(px(CONTENT_GAP))
+        .map(|control| {
+            if label.is_some() {
+                control.px(px(10.))
+            } else {
+                control.w(px(CONTROL_HEIGHT))
+            }
+        })
+        .text_size(px(LABEL_SIZE))
+        .font_weight(FontWeight::NORMAL)
+        .rounded(px(crate::config::corners::CONTROL))
         .text_color(rgb(foreground))
         .cursor_pointer()
         .hover(move |style| style.bg(rgb(active)))
         .child(glyph(icon, foreground))
-        .children(label.map(|label| div().child(label)))
+        .children(label.map(|label| div().min_w_0().truncate().child(label)))
         .tooltip(move |_, cx| {
             cx.new(|_| crate::usage::Hint {
                 text: hint.into(),
@@ -89,8 +103,15 @@ pub(super) fn tab(
         .flex_shrink_0()
         .flex()
         .items_center()
-        .gap(px(6.))
+        .gap(px(CONTENT_GAP))
         .px(px(12.))
+        .text_size(px(LABEL_SIZE))
+        .font_weight(FontWeight::MEDIUM)
+        .bg(if selected {
+            rgb(theme.surface).into()
+        } else {
+            transparent_black()
+        })
         .border_b_2()
         .border_color(if selected {
             rgb(accent).into()
