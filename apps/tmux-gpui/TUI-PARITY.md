@@ -470,3 +470,24 @@ manager-level tests verify selected-route retirement and sibling preservation.
 Real remote SSH and physical macOS dialog acceptance remain open. Registry
 revision is local preflight, not daemon-side atomic compare-and-swap. User demos
 and actual saved profiles were left untouched.
+
+
+## Home agent context/search checkpoint — 11 October
+
+Home and F7 now search agent, team, harness, project, session, machine and server
+names using a whole-query substring within each field, matching the current TUI
+field vocabulary. Five optional display fields use the existing shared metadata,
+control stripping and 160-Unicode-scalar bounds. Machine/server/session context is
+shown on Home rows and F7 choices; plain session labels are no longer prefixed with
+machine names. Opaque keys, captured scope/revision and availability remain the
+navigation authority. Missing metadata remains compatible.
+
+The isolated two-session daemon smoke verifies exact Home/F7 context before and
+after machine filtering with unchanged source identity/geometry/stamps. Native
+headless coverage includes context-only queries over duplicate agent labels,
+stale F7 revision refusal, optional/invalid fields and 520px layout with maximum
+length Unicode context plus a real simulated Open click. Physical light/dark,
+OS input and remote checks remain distinct and open. See
+`evidence/home-agent-context-2026-10-11/` for exact final gates and source hashes.
+This supersedes the preceding context/search implementation gap, without claiming
+full Home/fleet parity or release readiness.

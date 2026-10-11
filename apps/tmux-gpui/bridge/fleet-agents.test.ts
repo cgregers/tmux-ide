@@ -128,7 +128,8 @@ test("duplicate host identities resolve through distinct opaque machine routes a
   assert.notEqual(local!.key, remote!.key);
   assert.equal(f.owner.resolve(local!.key)?.selection, "local/route-1");
   assert.equal(f.owner.resolve(remote!.key)?.selection, "remote/route-1");
-  assert.equal(remote!.sessionName, "Spark · Workspace");
+  assert.equal(remote!.sessionName, "Workspace");
+  assert.equal(remote!.machineLabel, "Spark");
   f.emit();
   assert.deepEqual(
     f.snapshot().rows.map((r) => r.key),
@@ -371,13 +372,11 @@ test("selected machine coverage and failure exclude healthy siblings", () => {
 test("connected partial Home coverage does not claim machine disconnection", () => {
   const f = fixture();
   f.setRows(
-    f
-      .groups()
-      .map((group) => ({
-        ...group,
-        available: false,
-        observation: { ...group.observation!, phase: "partial", truncatedSessions: 1 },
-      })),
+    f.groups().map((group) => ({
+      ...group,
+      available: false,
+      observation: { ...group.observation!, phase: "partial", truncatedSessions: 1 },
+    })),
   );
   f.filter("remote");
   assert.equal(f.owner.homeSnapshot()!.phase, "partial");

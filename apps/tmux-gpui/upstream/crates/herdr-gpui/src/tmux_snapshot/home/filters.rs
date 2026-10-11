@@ -19,9 +19,7 @@ impl Filter {
         }
     }
     pub(super) fn matches(self, roster: &Roster, row: &Row, query: &str) -> bool {
-        let query = query.trim().to_lowercase();
-        (row.name.to_lowercase().contains(&query)
-            || row.session_label.to_lowercase().contains(&query))
+        row.matches_query(query)
             && match self {
                 Self::All => true,
                 Self::Working => {

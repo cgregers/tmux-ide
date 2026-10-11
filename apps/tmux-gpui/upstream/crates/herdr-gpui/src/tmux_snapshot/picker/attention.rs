@@ -75,17 +75,14 @@ pub(super) fn rows(state: &browser::State, active: Option<(u64, u64)>, query: &s
         .rows
         .iter()
         .filter(|r| r.attention)
-        .filter(|r| {
-            r.name.to_lowercase().contains(&query)
-                || r.session_label.to_lowercase().contains(&query)
-        })
+        .filter(|r| r.matches_query(&query))
         .map(|r| Row {
             target: Target::Attention {
                 scope,
                 revision: publication.roster.revision,
                 key: r.key.clone(),
             },
-            label: format!("{} · {} · {}", r.name, r.session_label, r.status.label()),
+            label: format!("{} · {} · {}", r.name, r.context_label(), r.status.label()),
         })
         .collect()
 }

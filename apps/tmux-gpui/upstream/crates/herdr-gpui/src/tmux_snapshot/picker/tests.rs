@@ -395,3 +395,5 @@ mod pane_commands;
 mod fleet_servers;
 
 mod machine_remove;
+
+mod attention_context;

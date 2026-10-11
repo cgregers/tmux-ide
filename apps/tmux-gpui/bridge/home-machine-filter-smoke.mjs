@@ -168,6 +168,22 @@ try {
   await until(
     () => latest?.attentionAgents?.scope === 1 && latest.attentionAgents.rows.length === 2,
   );
+  const assertContext = () => {
+    const local = latest.fleet.groups.find((group) => group.id === "local");
+    for (const roster of [latest.homeAgents, latest.attentionAgents]) {
+      assert.deepEqual(
+        roster.rows.map((row) => row.sessionLabel).sort(),
+        [...fleet.sessionNames].sort(),
+        "Session labels must retain exact fixture names without a machine prefix",
+      );
+      for (const row of roster.rows) {
+        assert.equal(row.machineLabel, local.label);
+        // The canonical configless shell project is the explicitly created session.
+        assert.equal(row.projectName, row.sessionLabel);
+      }
+    }
+  };
+  assertContext();
   const initialRevision = latest.homeAgents.revision;
   const machineId = latest.fleet.groups.find((group) => group.id === "local").id;
   send({ type: "home-agent-filter", request, rosterRevision: initialRevision, machineId });
@@ -200,6 +216,7 @@ try {
   assert.equal(latest.homeAgents.totalSessions, 2);
   assert.equal(latest.attentionAgents.scope, 1);
   assert.equal(latest.attentionAgents.rows.length, 2);
+  assertContext();
   assert.equal(latest.connection, connection);
   assert.equal(latest.request, request);
   assert.equal(latest.surface, "home");
@@ -238,6 +255,7 @@ console.log(
     staleRevisionRefused: true,
     sameConnection: true,
     attentionScopeRetained: true,
+    homeAndAttentionContext: true,
     sourceIdentityGeometryAndStampsUnchanged: true,
     noPromotion: true,
     multipleMachinesAndRemovalTested: false,

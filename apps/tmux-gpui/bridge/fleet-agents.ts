@@ -59,7 +59,6 @@ export function createFleetAgentRoster(
       return {
         ...row,
         key,
-        sessionName: `${row.machineLabel} · ${row.sessionName}`,
         disabled: !selection,
       };
     });

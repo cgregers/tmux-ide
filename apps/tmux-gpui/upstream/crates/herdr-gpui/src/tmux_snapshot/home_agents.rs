@@ -38,9 +38,43 @@ pub(in crate::tmux_snapshot) struct Row {
     pub pane_id: Option<String>,
     pub name: String,
     pub session_label: String,
+    pub machine_label: Option<String>,
+    pub server_label: Option<String>,
+    pub project_name: Option<String>,
+    pub harness: Option<String>,
+    pub team_name: Option<String>,
     pub status: Status,
     pub attention: bool,
     pub available: bool,
+}
+impl Row {
+    pub(in crate::tmux_snapshot) fn matches_query(&self, query: &str) -> bool {
+        let query = query.trim().to_lowercase();
+        [
+            Some(self.name.as_str()),
+            Some(self.session_label.as_str()),
+            self.machine_label.as_deref(),
+            self.server_label.as_deref(),
+            self.project_name.as_deref(),
+            self.harness.as_deref(),
+            self.team_name.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| value.to_lowercase().contains(&query))
+    }
+    pub(in crate::tmux_snapshot) fn context_label(&self) -> String {
+        [
+            self.machine_label.as_deref(),
+            self.server_label.as_deref(),
+            Some(self.session_label.as_str()),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+    }
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
@@ -80,6 +114,15 @@ impl Roster {
                     && (!r.available || r.pane_id.is_some())
                     && display(&r.name, 160)
                     && display(&r.session_label, 160)
+                    && [
+                        &r.machine_label,
+                        &r.server_label,
+                        &r.project_name,
+                        &r.harness,
+                        &r.team_name,
+                    ]
+                    .into_iter()
+                    .all(|value| value.as_ref().is_none_or(|value| display(value, 160)))
                     && keys.insert(&r.key)
             })
     }

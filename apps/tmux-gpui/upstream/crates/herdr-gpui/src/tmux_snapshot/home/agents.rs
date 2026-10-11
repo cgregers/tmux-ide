@@ -154,7 +154,8 @@ impl SnapshotView {
                                 .truncate()
                                 .text_sm()
                                 .text_color(rgb(theme.muted))
-                                .child(row.session_label.clone()),
+                                .debug_selector(move || format!("home-agent-context-{index}"))
+                                .child(row.context_label()),
                         ),
                 )
                 .child(div().flex_none().text_sm().child(format!(
@@ -164,6 +165,7 @@ impl SnapshotView {
                 )))
                 .child(
                     div()
+                        .debug_selector(move || format!("home-agent-action-{index}"))
                         .flex_none()
                         .text_color(rgb(theme.muted))
                         .child(if enabled { "Open" } else { "Unavailable" }),

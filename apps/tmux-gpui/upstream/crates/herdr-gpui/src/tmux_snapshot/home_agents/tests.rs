@@ -76,3 +76,6 @@ fn duplicate_keys_row_bound_and_unavailable_phase_never_admit_actions() {
     assert!(roster.valid());
     assert!(!roster.available("key"));
 }
+
+#[path = "tests/context.rs"]
+mod context;

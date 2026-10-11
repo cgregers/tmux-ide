@@ -27,6 +27,25 @@ const display = (value: string, max: number) =>
     })
     .slice(0, max)
     .join("");
+/** Display-only context already owned by the shared Home projection. */
+type AgentContext = Partial<
+  Record<"machineLabel" | "serverLabel" | "projectName" | "harness" | "teamName", string>
+>;
+function context(row: HomeAgentRow): AgentContext {
+  const fields = {
+    machineLabel: row.machineLabel,
+    serverLabel: row.serverLabel,
+    projectName: row.projectName,
+    harness: row.harness,
+    teamName: row.team?.name,
+  };
+  return Object.fromEntries(
+    Object.entries(fields).flatMap(([key, value]) => {
+      const label = value === undefined ? "" : display(value, 160);
+      return label ? [[key, label]] : [];
+    }),
+  );
+}
 export function agentAvailable(row: HomeAgentRow) {
   return id(row.paneId) && !!(row.nativeIdentity || row.interactionEndpoint) && !row.disabled;
 }
@@ -47,6 +66,7 @@ export function homeAgentPublication(
       paneId: row.paneId,
       name: display(row.name, 160),
       sessionLabel: display(row.sessionName, 160),
+      ...context(row),
       status: homeAgentStatusLabel(row.activity),
       attention: row.attention,
       available: agentAvailable(row) || (!row.disabled && admissionAvailable(row)),
