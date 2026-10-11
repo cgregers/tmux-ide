@@ -2,7 +2,7 @@
 use super::{Mode, Selection, SnapshotView};
 use gpui::{prelude::*, *};
 
-fn target(value: &str) -> Option<String> {
+pub(super) fn target(value: &str) -> Option<String> {
     let value = value.trim();
     fn name(value: &str) -> bool {
         value

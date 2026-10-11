@@ -3,6 +3,7 @@ pub(super) mod attention;
 pub(super) mod commands;
 mod fleet_servers;
 mod machine;
+mod machine_edit;
 mod machine_remove;
 mod pane_commands;
 mod saved_machines;
@@ -17,6 +18,10 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
+    MachineEdit {
+        id: String,
+        revision: u64,
+    },
     MachineRemove {
         id: String,
         revision: u64,
@@ -70,6 +75,7 @@ pub(super) struct Picker {
     mode: Mode,
     error: Option<&'static str>,
     removal: Option<machine_remove::Confirmation>,
+    edit: Option<machine_edit::Form>,
     search: Entity<SearchInput>,
     _changed: Subscription,
     rows: Vec<Row>,
@@ -183,12 +189,14 @@ fn current(state: &browser::State, target: &Target) -> bool {
                 .iter()
                 .any(|group| group.retry.as_ref() == Some(token))
         }),
-        Target::MachineRemove { id, revision } => state.machines.as_ref().is_some_and(|registry| {
-            registry.available
-                && !registry.pending
-                && registry.revision == *revision
-                && registry.machines.iter().any(|p| &p.id == id)
-        }),
+        Target::MachineEdit { id, revision } | Target::MachineRemove { id, revision } => {
+            state.machines.as_ref().is_some_and(|registry| {
+                registry.available
+                    && !registry.pending
+                    && registry.revision == *revision
+                    && registry.machines.iter().any(|p| &p.id == id)
+            })
+        }
         Target::MachineToggle {
             id,
             revision,
@@ -373,6 +381,7 @@ impl SnapshotView {
             mode,
             error: None,
             removal: None,
+            edit: None,
             search,
             _changed: changed,
             rows: if mode == Mode::Attention {
@@ -526,6 +535,10 @@ impl SnapshotView {
             }
             return;
         }
+        if let Target::MachineEdit { id, revision } = &target {
+            self.begin_machine_edit(id, *revision, window, cx);
+            return;
+        }
         if let Target::MachineRemove { id, revision } = &target {
             self.begin_machine_removal(id, *revision, window, cx);
             return;
@@ -590,6 +603,7 @@ impl SnapshotView {
                 | Target::Command(_)
                 | Target::MachineToggle { .. }
                 | Target::MachineRemove { .. }
+                | Target::MachineEdit { .. }
                 | Target::FleetRetry(_)
                 | Target::FleetDisconnect(_) => return,
             },
@@ -616,6 +630,9 @@ impl SnapshotView {
             .as_ref()
             .is_some_and(|p| p.search.read(cx).is_composing())
         {
+            return;
+        }
+        if self.machine_edit_composing(cx) {
             return;
         }
         if self.home_search_composing(window, cx) {
@@ -657,6 +674,14 @@ impl SnapshotView {
             self.open_picker(window, cx);
             cx.stop_propagation();
             window.prevent_default();
+            return;
+        }
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| picker.edit.is_some())
+        {
+            self.machine_edit_key(event, window, cx);
             return;
         }
         if self.picker.as_ref().is_some_and(|p| p.removal.is_some()) {

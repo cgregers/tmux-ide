@@ -69,6 +69,13 @@ pub(super) fn management_rows(state: &browser::State, query: &str) -> Vec<Row> {
                         },
                         label: format!("Remove {} · {}", profile.label, profile.ssh_target),
                     },
+                    Row {
+                        target: Target::MachineEdit {
+                            id: profile.id.clone(),
+                            revision: registry.revision,
+                        },
+                        label: format!("Edit {} · {}", profile.label, profile.ssh_target),
+                    },
                 ]
             })
             .filter(|row| {
@@ -104,6 +111,9 @@ impl SnapshotView {
     }
 
     pub(super) fn saved_machines_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.picker.as_ref().is_some_and(|p| p.edit.is_some()) {
+            return self.machine_edit_dialog(cx);
+        }
         if self.picker.as_ref().is_some_and(|p| p.removal.is_some()) {
             return self.machine_removal_dialog(cx);
         }
@@ -121,7 +131,7 @@ impl SnapshotView {
                 .cloned()
                 .unwrap_or_else(|| {
                     if registry.pending { return "Saving machine change…".into(); }
-                    if managing && !registry.machines.is_empty() { return "Enable, disable or remove a saved connection. Remote sessions keep running.".into(); }
+                    if managing && !registry.machines.is_empty() { return "Edit, enable, disable or remove a saved connection. Remote sessions keep running.".into(); }
                     if registry.machines.is_empty() {
                         "No saved machines yet. Connect to an SSH machine to get started.".into()
                     } else {

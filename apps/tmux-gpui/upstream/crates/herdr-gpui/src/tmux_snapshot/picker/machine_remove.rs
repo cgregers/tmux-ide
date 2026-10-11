@@ -19,6 +19,7 @@ impl SnapshotView {
                 p.mode != Mode::ManageMachines
                     || p.request != self.browser_request
                     || p.removal.is_some()
+                    || p.edit.is_some()
             })
         {
             return;

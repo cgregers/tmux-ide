@@ -397,3 +397,5 @@ mod fleet_servers;
 mod machine_remove;
 
 mod attention_context;
+
+mod machine_edit;

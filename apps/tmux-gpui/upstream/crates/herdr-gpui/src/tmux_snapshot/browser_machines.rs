@@ -60,7 +60,15 @@ pub(in crate::tmux_snapshot) enum Operation {
 #[derive(Serialize)]
 #[serde(tag = "operation", rename_all = "lowercase")]
 pub(in crate::tmux_snapshot) enum Change {
+    Edit { id: String, patch: EditPatch },
     Remove { id: String },
     Enable { id: String },
     Disable { id: String },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(in crate::tmux_snapshot) struct EditPatch {
+    pub label: String,
+    pub ssh_target: String,
 }

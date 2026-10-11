@@ -513,3 +513,21 @@ builds the pinned patched tmux in a private directory. The exact journey step
 passed locally against existing qualified artifacts; a new hosted run is still
 required. This does not close native UI, remote SSH or release acceptance. See
 `evidence/packaged-fleet-ci-2026-10-11/`.
+
+
+## Saved-machine editing checkpoint — 11 October
+
+F5 → Manage machines now includes Edit for each saved connection. The native
+form edits label and SSH target through the existing canonical registry API;
+UUID, enabled state and environment identity pin are preserved. Captured profile,
+revision, browser request, foreground presence and per-dialog identity prevent
+stale writes. Unchanged fields do not queue a write; changed fields show success
+only after a newer settled matching registry publication. Typing, Tab, IME
+isolation and hidden-list key isolation reuse native input ownership.
+
+Headless coverage includes real typing/Tab/Enter, 640×400 dialog bounds, rendered
+pending/confirmed states and stale/reopen/queue guards. An actual browser plus
+canonical HTTP handler verifies exact private-file editing, sibling/pin retention
+and duplicate refusal. See `evidence/native-machine-edit-2026-10-11/` for gate
+results and source hashes. Physical pointer/IME, real SSH and exact packaging of
+this newer native binary remain unqualified. The active user demo is unchanged.
