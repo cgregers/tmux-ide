@@ -531,3 +531,13 @@ canonical HTTP handler verifies exact private-file editing, sibling/pin retentio
 and duplicate refusal. See `evidence/native-machine-edit-2026-10-11/` for gate
 results and source hashes. Physical pointer/IME, real SSH and exact packaging of
 this newer native binary remain unqualified. The active user demo is unchanged.
+
+
+## Packaged machine-management checkpoint — 11 October
+
+A fresh release-mode app including native saved-machine editing passed seven
+artifact/compatibility and exact-bundled Edit/Remove checks. The packaging gate
+now runs those canonical HTTP/private-registry journeys automatically; explicit
+invalid packages fail before fixture allocation. This supersedes source-only
+Edit/Remove bridge qualification, but does not claim physical native form or real
+SSH acceptance. Evidence: `evidence/packaged-machine-edit-2026-10-11/`.
