@@ -58,6 +58,7 @@ export async function runBrowserTraceFixture({
   let bytes = 0,
     ordinal = 0,
     failure = false,
+    cancelled = false,
     stopping = false,
     deadline;
   const child = spawn(executable, args, { stdio: ["pipe", "pipe", "inherit"] });
@@ -82,6 +83,10 @@ export async function runBrowserTraceFixture({
   };
   const fail = () => {
     failure = true;
+    stop();
+  };
+  const cancel = () => {
+    cancelled = true;
     stop();
   };
   const tap = (direction) => {
@@ -111,7 +116,9 @@ export async function runBrowserTraceFixture({
         }
       },
       flush(done) {
-        done(pending.length ? new Error("Fixture trace incomplete line") : undefined);
+        // An explicit abort may cut a valid publication between pipe chunks.
+        // Ordinary EOF must still reject an incomplete record.
+        done(pending.length && !cancelled ? new Error("Fixture trace incomplete line") : undefined);
       },
     });
   };
@@ -129,7 +136,7 @@ export async function runBrowserTraceFixture({
     }, 3000);
   };
   input.once("end", eof);
-  signal?.addEventListener("abort", stop, { once: true });
+  signal?.addEventListener("abort", cancel, { once: true });
   input.pipe(commands).pipe(child.stdin);
   child.stdout.pipe(publications).pipe(output, { end: false });
   const drained = new Promise((resolve) => {
@@ -137,7 +144,7 @@ export async function runBrowserTraceFixture({
     publications.once("error", resolve);
     publications.once("close", resolve);
   });
-  if (signal?.aborted) stop();
+  if (signal?.aborted) cancel();
   try {
     const result = await Promise.race([closed, retired]);
     await retirement;
@@ -158,7 +165,7 @@ export async function runBrowserTraceFixture({
     input.off("end", eof);
     input.off("error", fail);
     output.off("error", fail);
-    signal?.removeEventListener("abort", stop);
+    signal?.removeEventListener("abort", cancel);
     commands.destroy();
     publications.destroy();
     closeSync(fd);

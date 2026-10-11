@@ -127,3 +127,49 @@ test(
     }
   },
 );
+
+test("intentional cancellation discards an incomplete tail but ordinary EOF rejects it", async () => {
+  const root = mkdtempSync(join(tmpdir(), "gpui-trace-"));
+  try {
+    const controller = new globalThis.AbortController();
+    const output = new Writable({
+      write(_chunk, _encoding, done) {
+        controller.abort();
+        done();
+      },
+    });
+    try {
+      assert.equal(
+        await runBrowserTraceFixture({
+          executable: process.execPath,
+          args: ["-e", 'process.stdout.write("{\\"snapshot\\":");setInterval(()=>{},1000)'],
+          tracePath: join(root, "cancelled-tail"),
+          input: new PassThrough(),
+          output,
+          signal: controller.signal,
+        }),
+        0,
+      );
+    } finally {
+      output.destroy();
+    }
+    const ordinaryOutput = new PassThrough();
+    ordinaryOutput.resume();
+    try {
+      assert.equal(
+        await runBrowserTraceFixture({
+          executable: process.execPath,
+          args: ["-e", 'process.stdout.write("{\\"snapshot\\":")'],
+          tracePath: join(root, "ordinary-tail"),
+          input: new PassThrough(),
+          output: ordinaryOutput,
+        }),
+        1,
+      );
+    } finally {
+      ordinaryOutput.destroy();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
