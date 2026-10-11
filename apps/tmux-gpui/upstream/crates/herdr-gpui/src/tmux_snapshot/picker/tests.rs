@@ -47,6 +47,7 @@ fn make_view(
         glass: Default::default(),
         last_workspace_session: None,
         pending_session_open: None,
+        header_controls: Default::default(),
         frame: Some(frame.clone()),
         browsing: true,
         terminal_focus: focus,
@@ -57,6 +58,7 @@ fn make_view(
         pane_actions: None,
         new_session: None,
         new_session_queued: None,
+        agent_animation: Default::default(),
         sidebar_hidden: false,
         window_reveal: Default::default(),
         resize_gesture: Default::default(),
@@ -406,3 +408,5 @@ mod pane_close;
 mod new_agent;
 
 mod sidebar_visibility;
+
+mod header_scope;

@@ -92,7 +92,7 @@ fn name(text: &str) -> Option<String> {
         .then(|| text.to_owned())
 }
 impl SnapshotView {
-    fn open_pane_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_pane_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = Target::capture(&self.browser_state) else {
             return;
         };
@@ -132,7 +132,7 @@ impl SnapshotView {
         self.terminal_focus.focus(window, cx);
         cx.notify();
     }
-    fn edit_pane_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn edit_pane_name(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.refresh_pane_actions(cx);
         let Some(menu) = self.pane_actions.as_ref() else {
             return;
@@ -292,27 +292,6 @@ impl SnapshotView {
         }
         cx.stop_propagation();
         window.prevent_default();
-    }
-    pub(super) fn pane_actions_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let available = self.browser_commands.is_some()
-            && self.presence.ready()
-            && Target::capture(&self.browser_state)
-                .is_some_and(|t| t.request == self.browser_request);
-        div()
-            .id("pane-actions-open")
-            .px_2()
-            .py_1()
-            .flex_shrink_0()
-            .text_color(rgb(self.theme().muted))
-            // Capability changes must not reflow the status row and resize panes.
-            .child("Actions…")
-            .when(!available, |button| button.opacity(0.5))
-            .when(available, |button| {
-                button
-                    .cursor_pointer()
-                    .on_click(cx.listener(|view, _, window, cx| view.open_pane_actions(window, cx)))
-            })
-            .into_any_element()
     }
     pub(super) fn pane_actions_panel(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.pane_actions.as_ref()?;

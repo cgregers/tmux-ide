@@ -95,6 +95,7 @@ pub(super) struct State {
     pub regions: Vec<super::hit_regions::Region>,
     pub request: u64,
     pub input_ready: bool,
+    pub history_offset: u32,
     pub presence_revision: u64,
     pub sessions: Vec<Choice>,
     pub panes: Vec<Choice>,
@@ -140,6 +141,8 @@ struct Publication {
     sequence: u64,
     request: u64,
     input_ready: bool,
+    #[serde(default)]
+    history_offset: u32,
     #[serde(default)]
     presence_revision: u64,
     sessions: Vec<Choice>,
@@ -458,6 +461,15 @@ impl Reader {
         }) {
             return Err(Error::Invalid("invalid copy region"));
         }
+        if p.history_offset > 1000
+            || (p.history_offset > 0
+                && (frame.is_none()
+                    || p.selected_pane.is_none()
+                    || p.input_ready
+                    || surface != Surface::Workspace))
+        {
+            return Err(Error::Invalid("invalid history offset"));
+        }
         if p.split_layout.as_ref().is_some_and(|layout| {
             !p.input_ready
                 || !layout.matches(
@@ -498,6 +510,7 @@ impl Reader {
             regions: p.regions,
             request: p.request,
             input_ready: p.input_ready,
+            history_offset: p.history_offset,
             presence_revision: p.presence_revision,
             sessions: p.sessions,
             panes: p.panes,
@@ -578,6 +591,10 @@ pub(super) fn start() -> Bridge {
 #[cfg(test)]
 #[path = "browser_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "browser_history_tests.rs"]
+mod history_tests;
 
 #[cfg(test)]
 #[path = "browser_home_tests.rs"]

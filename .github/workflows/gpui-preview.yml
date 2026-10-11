@@ -46,6 +46,7 @@ jobs:
           node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/server.log"
           node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/home.log"
           node --import tsx apps/tmux-gpui/bridge/new-window-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/new-window.log"
+          node --import tsx apps/tmux-gpui/bridge/browser-history-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/browser-history.log"
           node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/close-pane.log"
           TMUX_GPUI_CLOSE_LAYOUT=windows node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/close-window.log"
       - name: Preserve Home and fleet source evidence
@@ -152,6 +153,7 @@ jobs:
           node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/fleet-server.log"
           node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/home-machine-filter.log"
           node --import tsx apps/tmux-gpui/bridge/new-window-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/new-window.log"
+          node --import tsx apps/tmux-gpui/bridge/browser-history-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/browser-history.log"
           node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/close-pane.log"
           TMUX_GPUI_CLOSE_LAYOUT=windows node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/close-window.log"
       - name: Preserve packaging evidence

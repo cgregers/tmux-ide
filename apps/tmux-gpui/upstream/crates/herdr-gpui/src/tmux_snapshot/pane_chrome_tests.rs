@@ -198,3 +198,6 @@ fn header_callback_publication_fence_rejects_replaced_frame_request_and_regions(
     ));
     Ok(())
 }
+
+#[path = "pane_chrome_tests/controls.rs"]
+mod controls;

@@ -292,6 +292,7 @@ let editorPending = false;
 let editorConsumed: string | null = null;
 let editorMessage: { request: number; id: string; text: string } | null = null;
 let snapshot: unknown = null;
+let historyOffset = 0;
 let copyRegion: unknown = null;
 let regions: unknown[] = [];
 let layouts: Layout[] = [];
@@ -595,6 +596,7 @@ function publish() {
             ? `${status} · ${machineMessage}`
             : status,
       snapshot,
+      historyOffset: snapshot && selectedPane ? historyOffset : 0,
       copyRegion: snapshot ? copyRegion : null,
       regions: snapshot ? regions : [],
       inputReady,
@@ -1219,6 +1221,7 @@ async function openPane(
             hasAuthority,
           );
           snapshot = coherent?.snapshot ?? null;
+          historyOffset = snapshot ? scrollOffset : 0;
           copyRegion = coherent?.copyRegion ?? null;
           regions = coherent?.regions ?? [];
           inputReady = hasAuthority && !!snapshot;

@@ -1,5 +1,6 @@
 //! tmux-ide addition: an offline, read-only adapter qualification window.
 //! This path never initializes Herdr discovery, settings, updates, or commands.
+mod agent_indicator;
 mod appearance;
 mod browser;
 mod browser_state;
@@ -159,6 +160,7 @@ fn show(
                                         }
                                         view.flush_resize_gesture(cx);
                                         view.flush_attention();
+                                        view.tick_agent_indicators(cx);
                                         if view.glass.take_policy_change() {
                                             cx.notify();
                                         }
@@ -175,6 +177,7 @@ fn show(
                                         .update_in(cx, |view, window, cx| {
                                             view.apply_browser_state(state, cx);
                                             view.finish_session_open(window, cx);
+                                            view.finish_header_actions(window, cx);
                                         })
                                         .is_err()
                                         || done
@@ -188,6 +191,7 @@ fn show(
                     let activation = cx.observe_window_activation(window, |view, window, cx| {
                         if !window.is_window_active() {
                             view.pending_session_open = None;
+                            view.header_controls = Default::default();
                             view.cancel_attention();
                             if view.attention_picker_open() {
                                 view.picker = None;
@@ -217,6 +221,7 @@ fn show(
                         glass: Default::default(),
                         last_workspace_session: None,
                         pending_session_open: None,
+                        header_controls: Default::default(),
                         painter: Rc::new(RefCell::new(TerminalPainter::default())),
                         _task: task,
                         _browser_task: browser_task,
@@ -229,6 +234,7 @@ fn show(
                         pane_actions: None,
                         new_session: None,
                         new_session_queued: None,
+                        agent_animation: Default::default(),
                         sidebar_hidden: false,
                         window_reveal: Default::default(),
                         resize_gesture: Default::default(),
@@ -274,6 +280,7 @@ struct SnapshotView {
     glass: glass::Glass,
     last_workspace_session: Option<String>,
     pending_session_open: Option<(u64, String)>,
+    header_controls: pane_chrome::Controls,
     terminal_focus: FocusHandle,
     input_interrupted: bool,
     picker: Option<picker::Picker>,
@@ -282,6 +289,7 @@ struct SnapshotView {
     pane_actions: Option<pane_actions::Menu>,
     new_session: Option<new_session::Dialog>,
     new_session_queued: Option<(u64, u64)>,
+    agent_animation: agent_indicator::Clock,
     sidebar_hidden: bool,
     window_reveal: workspace_chrome::WindowReveal,
     resize_gesture: divider::Owner,
@@ -485,6 +493,7 @@ impl SnapshotView {
             )
             .children(self.lower_pane_headers(width))
             .children(self.divider_handles(width))
+            .children(self.lower_pane_header_controls(width, cx))
             .into_any_element()
     }
 }

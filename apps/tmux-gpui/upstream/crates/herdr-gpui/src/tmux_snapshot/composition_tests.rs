@@ -25,6 +25,7 @@ fn composition_commits_once_and_rejects_retired_input(cx: &mut TestAppContext) {
             glass: Default::default(),
             last_workspace_session: None,
             pending_session_open: None,
+            header_controls: Default::default(),
             frame: Some(Arc::new(
                 decode::frame(include_bytes!("../../../../../fixtures/snapshot.json")).unwrap(),
             )),
@@ -37,6 +38,7 @@ fn composition_commits_once_and_rejects_retired_input(cx: &mut TestAppContext) {
             pane_actions: None,
             new_session: None,
             new_session_queued: None,
+            agent_animation: Default::default(),
             sidebar_hidden: false,
             window_reveal: Default::default(),
             resize_gesture: Default::default(),

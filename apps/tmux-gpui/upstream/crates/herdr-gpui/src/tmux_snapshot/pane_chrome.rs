@@ -25,6 +25,23 @@ mod tests;
 use super::{SnapshotView, browser_ui::Selection, hit_regions};
 use gpui::{prelude::*, *};
 use std::sync::Arc;
+#[derive(Default)]
+pub(super) struct Controls {
+    pending: Option<(u64, String, String)>,
+}
+const OVERFLOW_WIDTH: f32 = 24.;
+const MODE_WIDTH: f32 = 56.;
+fn has_mode(header: &Header, width: f32) -> bool {
+    has_control(header, width)
+        && header.width >= 14
+        && f32::from(header.width) * width >= MODE_WIDTH + OVERFLOW_WIDTH + 12.
+}
+fn has_control(header: &Header, width: f32) -> bool {
+    width.is_finite()
+        && width > 0.
+        && header.width >= 7
+        && f32::from(header.width) * width >= OVERFLOW_WIDTH + 12.
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Header {
@@ -138,9 +155,214 @@ fn publication_current(
     state.request == request
         && hit_regions::is_painted(Some(frame), state.frame.as_ref())
         && state.regions == regions
-        && headers(state).iter().any(|h| h.id == id && h.row.is_none())
+        && headers(state).iter().any(|h| h.id == id)
 }
 impl SnapshotView {
+    fn activate_header_menu(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.browser_state.selected_pane.as_deref() == Some(id) {
+            self.open_header_actions(window, cx);
+            return;
+        }
+        let Some(session) = self.browser_state.selected_session.clone() else {
+            return;
+        };
+        let old_request = self.browser_request;
+        self.select(Selection::Pane(id.to_owned()), window, cx);
+        if self.browser_request != old_request {
+            self.header_controls.pending = Some((self.browser_request, session, id.to_owned()));
+        }
+    }
+    pub(super) fn finish_header_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((request, session, id)) = self.header_controls.pending.clone() else {
+            return;
+        };
+        if self.browser_request != request
+            || !self.presence.active()
+            || self.browser_commands.is_none()
+            || self.picker.is_some()
+            || self.pane_actions.is_some()
+            || self.new_session.is_some()
+        {
+            self.header_controls = Default::default();
+            return;
+        }
+        if self.browser_state.request != request {
+            return;
+        }
+        if self.browser_state.selected_session.as_ref() != Some(&session)
+            || self.browser_state.selected_pane.as_ref() != Some(&id)
+            || !self.browser_state.panes.iter().any(|p| p.id == id)
+        {
+            self.header_controls = Default::default();
+            return;
+        }
+        if self.presence.ready()
+            && super::pane_actions::Target::capture(&self.browser_state).is_some()
+        {
+            self.header_controls = Default::default();
+            self.open_header_actions(window, cx);
+        }
+    }
+    fn header_mode(
+        &self,
+        header: &Header,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !has_mode(header, width)
+            || self.browser_state.selected_pane.as_deref() != Some(&header.id)
+        {
+            return None;
+        }
+        let history = self.browser_state.history_offset;
+        let target = super::pane_actions::Target::capture(&self.browser_state);
+        let restore = self
+            .browser_state
+            .pane_actions
+            .as_ref()
+            .is_some_and(|a| a.zoomed);
+        if history == 0 && (!restore || target.is_none()) {
+            return None;
+        }
+        let frame = self.browser_state.frame.clone()?;
+        let regions = self.browser_state.regions.clone();
+        let request = self.browser_request;
+        let id = header.id.clone();
+        let theme = self.theme();
+        Some(
+            div()
+                .id(SharedString::from(format!("pane-mode:{id}")))
+                .debug_selector({
+                    let id = id.clone();
+                    move || format!("pane-mode:{id}")
+                })
+                .absolute()
+                .left(px(f32::from(header.left + header.width) * width
+                    - OVERFLOW_WIDTH
+                    - MODE_WIDTH))
+                .top(px(header.row.map_or(0., |row| {
+                    f32::from(row) * crate::terminal::CELL_HEIGHT
+                })))
+                .w(px(MODE_WIDTH))
+                .h(px(crate::terminal::CELL_HEIGHT))
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(10.))
+                .bg(rgb(theme.surface))
+                .text_color(rgb(theme.foreground))
+                .hover(move |s| s.bg(rgb(theme.active)))
+                .occlude()
+                .cursor_pointer()
+                .child(if history > 0 {
+                    "Back to live"
+                } else {
+                    "Restore"
+                })
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |view, _, window, cx| {
+                    cx.stop_propagation();
+                    if !current_header(view, request, &frame, &regions, &id)
+                        || view.browser_state.selected_pane.as_ref() != Some(&id)
+                    {
+                        return;
+                    }
+                    if history > 0 && view.browser_state.history_offset == history {
+                        view.queue_input(super::keys::Input::Scroll(0), cx);
+                    } else if history == 0
+                        && let Some(target) = &target
+                    {
+                        view.dispatch_captured_pane_action(
+                            target,
+                            super::pane_actions::Action::Zoom {
+                                desired: super::pane_actions::Zoom::Unzoomed,
+                            },
+                            window,
+                            cx,
+                        );
+                    }
+                }))
+                .into_any_element(),
+        )
+    }
+    fn header_overflow(
+        &self,
+        header: &Header,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !has_control(header, width) {
+            return None;
+        }
+        let frame = self.browser_state.frame.clone()?;
+        let regions = self.browser_state.regions.clone();
+        let request = self.browser_request;
+        let id = header.id.clone();
+        let theme = self.theme();
+        Some(
+            div()
+                .id(SharedString::from(format!("pane-overflow:{id}")))
+                .debug_selector({
+                    let id = id.clone();
+                    move || format!("pane-overflow:{id}")
+                })
+                .absolute()
+                .left(px(
+                    f32::from(header.left + header.width) * width - OVERFLOW_WIDTH
+                ))
+                .top(px(header.row.map_or(0., |row| {
+                    f32::from(row) * crate::terminal::CELL_HEIGHT
+                })))
+                .w(px(OVERFLOW_WIDTH))
+                .h(px(crate::terminal::CELL_HEIGHT))
+                .overflow_hidden()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(12.))
+                .bg(rgb(theme.surface))
+                .text_color(rgb(theme.muted))
+                .hover(move |s| s.bg(rgb(theme.active)))
+                .cursor_pointer()
+                .occlude()
+                .child("⋯")
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |view, _, window, cx| {
+                    cx.stop_propagation();
+                    if current_header(view, request, &frame, &regions, &id) {
+                        view.activate_header_menu(&id, window, cx);
+                    }
+                }))
+                .into_any_element(),
+        )
+    }
+    pub(super) fn lower_pane_header_controls(
+        &self,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        if self.selection.is_some()
+            || self.picker.is_some()
+            || self.pane_actions.is_some()
+            || self.new_session.is_some()
+            || self.divider.is_some()
+        {
+            return Vec::new();
+        }
+        headers(&self.browser_state)
+            .iter()
+            .filter(|h| h.row.is_some())
+            .flat_map(|h| {
+                [
+                    self.header_overflow(h, width, cx),
+                    self.header_mode(h, width, cx),
+                ]
+                .into_iter()
+                .flatten()
+            })
+            .collect()
+    }
     pub(super) fn pane_header_row(
         &self,
         window: &mut Window,
@@ -175,25 +397,58 @@ impl SnapshotView {
             };
             let regions = self.browser_state.regions.clone();
             let id = header.id.clone();
-            row = row.child(
-                self.pane_header_label(&header, width)
-                    .id(SharedString::from(format!("pane-header:{}", header.id)))
-                    .cursor_pointer()
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        if current_header(view, request, &frame, &regions, &id) {
-                            if view.browser_state.selected_pane.as_ref() != Some(&id) {
-                                view.select(Selection::Pane(id.clone()), window, cx);
-                            } else {
-                                // Focus alone never restores interrupted input authority.
-                                view.terminal_focus.focus(window, cx);
+            let overflow = self.header_overflow(&header, width, cx);
+            let mode = self.header_mode(&header, width, cx);
+            row = row
+                .child(
+                    self.pane_header_label(&header, width)
+                        .id(SharedString::from(format!("pane-header:{}", header.id)))
+                        .cursor_pointer()
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            if current_header(view, request, &frame, &regions, &id) {
+                                if view.browser_state.selected_pane.as_ref() != Some(&id) {
+                                    view.select(Selection::Pane(id.clone()), window, cx);
+                                } else {
+                                    // Focus alone never restores interrupted input authority.
+                                    view.terminal_focus.focus(window, cx);
+                                }
                             }
-                        }
-                    })),
-            );
+                        })),
+                )
+                .children(overflow)
+                .children(mode);
         }
         row.into_any_element()
     }
     fn pane_header_label(&self, header: &Header, width: f32) -> Div {
+        let indicator = self
+            .browser_state
+            .workspace_agents
+            .as_ref()
+            .and_then(|workspace| {
+                if header.width < 20
+                    || self.browser_state.selected_session.as_ref() != Some(&workspace.session_id)
+                {
+                    return None;
+                }
+                let mut rows = workspace.roster.rows.iter().filter(|row| {
+                    row.session_id == workspace.session_id
+                        && row.pane_id.as_deref() == Some(&header.id)
+                });
+                let row = rows.next()?;
+                if rows.next().is_some() {
+                    return None;
+                }
+                Some(self.agent_indicator(
+                    row,
+                    !row.available
+                        || !matches!(
+                            workspace.roster.phase,
+                            super::browser::home_agents::Phase::Live
+                                | super::browser::home_agents::Phase::Partial
+                        ),
+                ))
+            });
         let selected = self.browser_state.selected_pane.as_deref() == Some(&header.id);
         let theme = self.theme();
         // Herdr sidebar/row.rs label budgeting and selection styling, rendered
@@ -209,6 +464,14 @@ impl SnapshotView {
             .min_w_0()
             .overflow_hidden()
             .px(px(width.min(4.)))
+            .when(has_control(header, width), |label| {
+                label.pr(px(OVERFLOW_WIDTH
+                    + if has_mode(header, width) {
+                        MODE_WIDTH + 2.
+                    } else {
+                        2.
+                    }))
+            })
             .bg(rgb(if selected {
                 theme.active
             } else {
@@ -225,8 +488,13 @@ impl SnapshotView {
             } else {
                 FontWeight::NORMAL
             })
+            .flex()
+            .items_center()
+            .gap(px(4.))
+            .children(indicator)
             .child(
                 div()
+                    .flex_1()
                     .min_w_0()
                     .truncate()
                     .child(label(&self.browser_state, &header.id)),
@@ -238,8 +506,8 @@ impl SnapshotView {
         {
             return Vec::new();
         }
-        // No event handlers/hitboxes: existing divider handles retain priority,
-        // including the whole horizontal separator beneath these labels.
+        // Labels remain pass-through. Only the separately rendered trailing controls
+        // occlude their reserved rectangles; the remaining separator still drags.
         headers(&self.browser_state)
             .iter()
             .filter(|h| h.row.is_some())

@@ -3,6 +3,7 @@ use super::{Row, Target, browser};
 use crate::tmux_snapshot::pane_actions;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::tmux_snapshot) enum Action {
+    Rename,
     NewWindow,
     NewAgent,
     Close,
@@ -13,7 +14,7 @@ pub(in crate::tmux_snapshot) enum Action {
 impl Action {
     pub(super) fn wire(self) -> Option<pane_actions::Action> {
         Some(match self {
-            Self::NewAgent => return None,
+            Self::Rename | Self::NewAgent => return None,
             Self::Close => pane_actions::Action::Close,
             Self::NewWindow => pane_actions::Action::NewWindow,
             Self::Zoom(true) => pane_actions::Action::Zoom {
@@ -41,6 +42,7 @@ pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
         .as_ref()
         .is_some_and(|actions| actions.zoomed);
     [
+        (Action::Rename, "Rename pane…"),
         (Action::NewWindow, "New terminal window"),
         (Action::NewAgent, "New agent…"),
         (Action::Close, "Close pane…"),

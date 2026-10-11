@@ -78,6 +78,7 @@ enum Mode {
 }
 pub(super) struct Picker {
     mode: Mode,
+    pane_scope: Option<super::pane_actions::Target>,
     error: Option<&'static str>,
     removal: Option<machine_remove::Confirmation>,
     edit: Option<machine_edit::Form>,
@@ -340,6 +341,19 @@ impl SnapshotView {
         false
     }
 
+    pub(super) fn open_header_actions(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(target) = super::pane_actions::Target::capture(&self.browser_state) else {
+            return;
+        };
+        self.open_commands(window, cx);
+        if let Some(picker) = &mut self.picker {
+            picker.pane_scope = Some(target);
+            picker.search.update(cx, |input, cx| {
+                input.set_placeholder("Search pane actions…", cx)
+            });
+        }
+        self.refresh_picker(cx);
+    }
     pub(super) fn open_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_picker_mode(Mode::Commands, window, cx);
     }
@@ -356,6 +370,7 @@ impl SnapshotView {
             return;
         }
         self.cancel_attention();
+        self.header_controls = Default::default();
         self.pending_session_open = None;
         self.pane_actions = None;
         self.new_session = None;
@@ -386,6 +401,7 @@ impl SnapshotView {
         search.read(cx).focus.clone().focus(window, cx);
         self.picker = Some(Picker {
             mode,
+            pane_scope: None,
             error: None,
             removal: None,
             edit: None,
@@ -428,6 +444,9 @@ impl SnapshotView {
             input.set_appearance(crate::config::Config::default().ui, theme, cx)
         });
         if self.browser_commands.is_none()
+            || picker.pane_scope.as_ref().is_some_and(|target| {
+                !self.presence.ready() || !target.current(&self.browser_state)
+            })
             || (picker.mode != Mode::Theme
                 && (picker.request != self.browser_request
                     || (picker.mode == Mode::Navigation
@@ -459,6 +478,10 @@ impl SnapshotView {
         } else {
             rows(&self.browser_state, picker.search.read(cx).text())
         };
+        if picker.pane_scope.is_some() {
+            picker.rows.retain(|row| matches!(&row.target, Target::PaneAction { action, .. }
+                if !matches!(action, pane_commands::Action::NewWindow | pane_commands::Action::NewAgent)));
+        }
         picker.selected = picker.selected.min(picker.rows.len().saturating_sub(1));
     }
     fn close_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -468,6 +491,15 @@ impl SnapshotView {
         cx.notify();
     }
     fn choose_picker(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(scope) = self
+            .picker
+            .as_ref()
+            .and_then(|picker| picker.pane_scope.as_ref())
+            && !matches!(&target, Target::PaneAction { captured: Some(captured), action }
+                if captured == scope && !matches!(action, pane_commands::Action::NewWindow | pane_commands::Action::NewAgent))
+        {
+            return;
+        }
         if self
             .picker
             .as_ref()
@@ -507,6 +539,14 @@ impl SnapshotView {
                 return;
             }
             if let Some(captured) = captured {
+                if matches!(action, pane_commands::Action::Rename) {
+                    if captured.current(&self.browser_state) {
+                        self.close_picker(window, cx);
+                        self.open_pane_actions(window, cx);
+                        self.edit_pane_name(window, cx);
+                    }
+                    return;
+                }
                 if matches!(action, pane_commands::Action::NewAgent) {
                     self.begin_new_agent(captured.clone(), window, cx);
                     return;
@@ -830,11 +870,24 @@ impl SnapshotView {
                     div()
                         .id("commands-popover")
                         .debug_selector(|| "commands-popover".into())
-                        .w((viewport.width - px(24.)).max(px(0.)).min(px(560.)))
+                        .w((viewport.width - px(24.)).max(px(0.)).min(px(
+                            if self.picker.as_ref().is_some_and(|p| p.pane_scope.is_some()) {
+                                360.
+                            } else {
+                                560.
+                            },
+                        )))
                         .h(
                             (viewport.height - (viewport.height / 6.).min(px(80.)) - px(48.))
                                 .max(px(0.))
-                                .min(px(400.)),
+                                .min(px(
+                                    if self.picker.as_ref().is_some_and(|p| p.pane_scope.is_some())
+                                    {
+                                        240.
+                                    } else {
+                                        400.
+                                    },
+                                )),
                         )
                         .p_3()
                         .overflow_hidden()
@@ -870,7 +923,11 @@ impl SnapshotView {
             .flex_col()
             .gap_1()
             .when(picker.mode == Mode::Commands, |panel| {
-                panel.child(div().px_2().py_1().child("Commands · F5"))
+                panel.child(div().px_2().py_1().child(if picker.pane_scope.is_some() {
+                    "Pane actions"
+                } else {
+                    "Commands · F5"
+                }))
             })
             .when(picker.mode == Mode::Navigation, |panel| {
                 panel.child(div().px_2().py_1().child("Sessions and panes · F6"))

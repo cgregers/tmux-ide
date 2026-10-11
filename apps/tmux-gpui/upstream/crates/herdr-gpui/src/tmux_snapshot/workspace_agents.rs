@@ -104,17 +104,10 @@ impl SnapshotView {
             };
             let mut element = sidebar::render_row(512 + index, &row, &theme, self.accent(), false)
                 .debug_selector(move || format!("tmux-workspace-agent-{index}"))
-                .child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(rgb(theme.muted))
-                        .child(format!(
-                            "{}{}",
-                            if agent.attention { "!" } else { "" },
-                            agent.status.label()
-                        )),
-                );
+                .child(self.agent_indicator(
+                    agent,
+                    !agent.available || !matches!(w.roster.phase, Phase::Live | Phase::Partial),
+                ));
             if enabled {
                 element =
                     element

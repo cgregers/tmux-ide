@@ -411,6 +411,7 @@ impl SnapshotView {
         self.pane_actions = None;
         self.new_session = None;
         self.pending_session_open = None;
+        self.header_controls = Default::default();
         let opening_session = match &selection {
             Selection::Session(id) => Some(id.clone()),
             Selection::FleetSession { session_id, .. } => Some(session_id.clone()),
@@ -595,6 +596,7 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.agent_animation.begin_render();
         // GPUI dispatches shortcuts along the focused element path. Initial catalog
         // and selection transitions have no focused control; retain navigation without
         // granting terminal authority or clearing an interrupted-input latch.
@@ -755,7 +757,6 @@ impl SnapshotView {
             .bg(rgb(theme.surface))
             .border_t_1()
             .border_color(rgb(theme.active))
-            .child(self.pane_actions_button(cx))
             .children(
                 super::pane_chrome::selected_title(&self.browser_state).map(|title| {
                     div()

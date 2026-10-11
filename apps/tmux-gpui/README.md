@@ -71,6 +71,21 @@ sidebar** from **F5**. The terminal expands into the freed space through the
 existing daemon resize path. The current pane stays selected. The preference
 lasts for the app session; Home keeps its normal sidebar-free layout.
 
+## Agent indicators and pane headers
+
+Home, the workspace agent list, and matching pane headers use the TUI's status
+vocabulary: Working (animated marker), Needs input, Done, Failed, Idle, and
+Unknown/Unavailable. Animation is presentation-only: one shared clock updates
+visible working markers without polling the daemon. Native reduced-motion
+preference wiring remains pending; the indicator supports a static rendering.
+
+Use **⋯** in a pane header for Rename, Zoom/Restore, Split right/down, and Close.
+Opening another pane's menu first selects that exact pane and waits for its
+current action capability. Close keeps its confirmation. **Back to live** and
+**Restore** appear in the selected pane header when applicable. Compact headers
+reserve control space; lower headers use verified separator cells and preserve
+the remaining divider drag area. The footer continues to show connection status.
+
 ## Preview release gates
 
 See [INTEGRATION.md](INTEGRATION.md). Native session/pane selection, multi-pane

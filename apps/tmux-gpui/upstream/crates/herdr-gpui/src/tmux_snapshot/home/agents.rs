@@ -158,11 +158,10 @@ impl SnapshotView {
                                 .child(row.context_label()),
                         ),
                 )
-                .child(div().flex_none().text_sm().child(format!(
-                    "{}{}",
-                    if row.attention { "! " } else { "" },
-                    row.status.label()
-                )))
+                .child(self.agent_indicator(
+                    row,
+                    !row.available || !matches!(roster.phase, Phase::Live | Phase::Partial),
+                ))
                 .child(
                     div()
                         .debug_selector(move || format!("home-agent-action-{index}"))
