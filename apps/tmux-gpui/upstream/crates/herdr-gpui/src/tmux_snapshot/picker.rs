@@ -1,6 +1,7 @@
 //! Bounded catalog switcher. Labels are searchable display text, never command targets.
 pub(super) mod attention;
 pub(super) mod commands;
+mod fleet_servers;
 mod machine;
 mod pane_commands;
 mod saved_machines;
@@ -15,6 +16,7 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
+    FleetServer(Option<String>),
     PaneAction {
         captured: Option<super::pane_actions::Target>,
         action: pane_commands::Action,
@@ -107,7 +109,14 @@ fn rows(state: &browser::State, query: &str) -> Vec<Row> {
                 else {
                     continue;
                 };
-                let label = format!("{} · {}", group.label, session.name);
+                let label = session
+                    .server_id
+                    .as_ref()
+                    .and_then(|id| group.servers.iter().find(|server| &server.id == id))
+                    .map_or_else(
+                        || format!("{} · {}", group.label, session.name),
+                        |server| format!("{} · {} · {}", group.label, server.label, session.name),
+                    );
                 let text: Utf32String = label.as_str().into();
                 if let Some(score) = pattern.score(text.slice(..), &mut matcher) {
                     matches.push((
@@ -124,6 +133,16 @@ fn rows(state: &browser::State, query: &str) -> Vec<Row> {
             }
         }
     }
+    matches.extend(
+        fleet_servers::rows(state, "")
+            .into_iter()
+            .filter_map(|row| {
+                let text: Utf32String = row.label.as_str().into();
+                pattern
+                    .score(text.slice(..), &mut matcher)
+                    .map(|score| (score, row))
+            }),
+    );
     matches.sort_by_key(|item| std::cmp::Reverse(item.0));
     matches.into_iter().take(32).map(|(_, row)| row).collect()
 }
@@ -200,6 +219,12 @@ fn current(state: &browser::State, target: &Target) -> bool {
         Target::PaneAction { captured, .. } => captured
             .as_ref()
             .is_some_and(|target| target.current(state)),
+        Target::FleetServer(token) => token.as_ref().is_some_and(|token| {
+            state
+                .fleet
+                .as_ref()
+                .is_some_and(|fleet| fleet.server(token).is_some())
+        }),
         Target::Command(action) => action.available(state),
         Target::Session(id) => state.sessions.iter().any(|c| &c.id == id),
         Target::Pane(id) => state.panes.iter().any(|c| &c.id == id),
@@ -458,6 +483,16 @@ impl SnapshotView {
             }
             return;
         }
+        if let Target::FleetServer(Some(token)) = &target {
+            if self
+                .picker
+                .as_ref()
+                .is_some_and(|picker| matches!(picker.mode, Mode::Commands | Mode::Navigation))
+            {
+                self.open_fleet_server(self.browser_request, token, window, cx);
+            }
+            return;
+        }
         if let Target::Command(action) = target {
             self.close_picker(window, cx);
             match action {
@@ -531,7 +566,8 @@ impl SnapshotView {
                     session_id,
                 },
                 Target::Pane(id) => Selection::Pane(id),
-                Target::PaneAction { .. }
+                Target::FleetServer(_)
+                | Target::PaneAction { .. }
                 | Target::Attention { .. }
                 | Target::Theme(_)
                 | Target::Command(_)

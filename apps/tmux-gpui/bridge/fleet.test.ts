@@ -1,3 +1,4 @@
+import { assertFleetSelectionCurrent } from "./fleet-selection-current.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -438,6 +439,79 @@ test("Home filter cannot select a machine omitted from the bounded publication",
     const hidden = f.profiles.find((profile) => !visible.has(profile.id));
     assert.ok(hidden);
     assert.equal(f.fleet.filterHomeAgents(hidden.id), false);
+  } finally {
+    f.close();
+  }
+});
+
+test("empty server routes use current catalog scope and preserve unscoped session rows", async () => {
+  const f = await fixture();
+  try {
+    const scope = f.snapshot.sessions[0]!.server!;
+    const empty = {
+      serverId: `tmux-server.${randomUUID().replaceAll("-", "")}`,
+      generation: randomUUID(),
+      label: "Empty",
+      state: "online" as const,
+    };
+    f.emitters.get("local")!({
+      ...f.snapshot,
+      servers: [{ ...scope, label: "Default", state: "online" }, empty],
+    });
+    const group = f.fleet.publication().groups.find((group) => group.id === "local")!;
+    assert.equal(group.sessions[0]!.serverId, scope.serverId);
+    assert.equal(group.servers.length, 2);
+    const token = group.servers[1]!.selection!;
+    const selected = f.fleet.selectServer(token);
+    selected.assertCurrent();
+    assert.equal(selected.descriptor.serverId, empty.serverId);
+    assert.equal(selected.descriptor.generation, empty.generation);
+    // Same name is not same scope; missing/offline server never defaults elsewhere.
+    f.emitters.get("local")!({ ...f.snapshot, servers: [{ ...empty, generation: randomUUID() }] });
+    assert.throws(selected.assertCurrent, /changed/);
+    assert.throws(() => f.fleet.selectServer(token), /changed/);
+    const unscoped = f.fleet.publication().groups.find((group) => group.id === "local")!;
+    assert.equal(unscoped.sessions.length, 1);
+    assert.equal(unscoped.sessions[0]!.serverId, null);
+  } finally {
+    f.close();
+  }
+});
+
+test("session beyond server display cap survives catalog updates but cannot authorize unlabeled creation", async () => {
+  const f = await fixture();
+  try {
+    const selectedScope = f.snapshot.sessions[0]!.server!;
+    const servers: { serverId: string; generation: string; label: string; state: "online" }[] =
+      Array.from({ length: 32 }, () => ({
+        serverId: `tmux-server.${randomUUID().replaceAll("-", "")}`,
+        generation: randomUUID(),
+        label: "Other",
+        state: "online" as const,
+      }));
+    servers.push({ ...selectedScope, label: "Omitted", state: "online" });
+    const publish = () => f.emitters.get("local")!({ ...f.snapshot, servers });
+    publish();
+    const group = () => f.fleet.publication().groups.find((group) => group.id === "local")!;
+    assert.equal(group().omittedServers, 1);
+    assert.equal(group().sessions[0]!.serverId, null);
+    const token = group().sessions[0]!.selection!;
+    assert.ok(token);
+    const selected = f.fleet.select(token);
+    const hasPublishedServer = () =>
+      group().servers.some((server) => server.id === selectedScope.serverId);
+    assertFleetSelectionCurrent(selected, hasPublishedServer());
+    publish();
+    assert.equal(group().sessions[0]!.selection, token);
+    assertFleetSelectionCurrent(selected, hasPublishedServer());
+    assert.throws(
+      () => assertFleetSelectionCurrent(selected, hasPublishedServer(), true),
+      /changed/,
+    );
+    assert.throws(
+      () => assertFleetSelectionCurrent({ ...selected, descriptor: selectedScope }, false),
+      /changed/,
+    );
   } finally {
     f.close();
   }

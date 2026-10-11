@@ -73,6 +73,7 @@ pub(super) struct CreateSession {
 pub(super) struct State {
     pub machines: Option<machines::Registry>,
     pub fleet: Option<fleet::Fleet>,
+    pub selected_server: Option<fleet::SelectedServer>,
     pub split_layout: Option<super::divider::canonical::Layout>,
     pub split_gesture: Option<super::divider::canonical::Ack>,
     pub resize_gesture_supported: bool,
@@ -108,6 +109,7 @@ pub(super) struct State {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Publication {
     fleet: Option<fleet::Fleet>,
+    selected_server: Option<fleet::SelectedServer>,
     machines: Option<machines::Registry>,
     split_layout: Option<super::divider::canonical::Layout>,
     split_gesture: Option<super::divider::canonical::Ack>,
@@ -188,6 +190,11 @@ pub(super) enum Command {
     FleetRetry {
         request: u64,
         retry: String,
+    },
+    #[serde(rename = "fleet-server")]
+    FleetServer {
+        request: u64,
+        selection: String,
     },
     #[serde(rename = "fleet-session")]
     FleetSession {
@@ -318,6 +325,11 @@ impl Reader {
         } else {
             Surface::Home
         });
+        if p.selected_server.as_ref().is_some_and(|selected| {
+            surface != Surface::Home || p.fleet.as_ref().is_none_or(|fleet| !selected.valid(fleet))
+        }) {
+            return Err(Error::Invalid("Invalid selected server"));
+        }
         if p.home_agent_recovery.as_ref().is_some_and(|c| {
             surface != Surface::Home
                 || p.fleet.is_none()
@@ -464,6 +476,7 @@ impl Reader {
         Ok(State {
             machines: p.machines,
             fleet: p.fleet,
+            selected_server: p.selected_server,
             split_layout: p.split_layout,
             split_gesture: p.split_gesture,
             resize_gesture_supported: p.resize_gesture_supported,
@@ -589,3 +602,7 @@ mod fleet_retry_tests;
 #[cfg(test)]
 #[path = "browser_fleet_disconnect_tests.rs"]
 mod fleet_disconnect_tests;
+
+#[cfg(test)]
+#[path = "browser_fleet_server_tests.rs"]
+mod fleet_server_tests;

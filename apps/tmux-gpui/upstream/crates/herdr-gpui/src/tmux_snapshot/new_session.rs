@@ -161,6 +161,18 @@ impl SnapshotView {
             .flex()
             .flex_col()
             .gap_2();
+        if let Some(server) = &self.browser_state.selected_server {
+            body = body.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(rgb(self.theme().muted))
+                    .child(format!(
+                        "New sessions on {} · {}",
+                        server.machine_label, server.label
+                    )),
+            );
+        }
         if let Some(dialog) = &self.new_session {
             body = body
                 .p_3()

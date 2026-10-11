@@ -1,3 +1,5 @@
+import { createFleetServerRoutes } from "./fleet-server-routes.ts";
+import type { NativeFleetServer } from "./fleet-server-publication.ts";
 import type { HomeAgentSnapshot } from "../../../packages/presentation/src/home-agent-roster.ts";
 import { createSharedAgentObservation } from "./shared-agent-observation.ts";
 import { createMachineAgents } from "../../../packages/daemon/src/lib/machine-agents.ts";
@@ -22,11 +24,14 @@ export interface NativeFleetPublication {
     retry: string | null;
     disconnect: string | null;
     omittedSessions: number;
+    servers: NativeFleetServer[];
+    omittedServers: number;
     sessions: {
       id: string;
       name: string;
       paneCount: number;
       sessionId: string | null;
+      serverId: string | null;
       selection: string | null;
     }[];
   }[];
@@ -61,6 +66,7 @@ export function createNativeFleet(
   makeAgents: typeof createMachineAgents = createMachineAgents,
 ) {
   const catalog = makeCatalog(manager);
+  const serverRoutes = createFleetServerRoutes(manager);
   let homeMachineId: string | null = null;
   const homeListeners = new Set<
     (value: { machineId: string | null; snapshot: HomeAgentSnapshot }) => void
@@ -109,6 +115,7 @@ export function createNativeFleet(
     const next = new Map<string, Route>();
     const nextRetries = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
     const nextDisconnects = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
+    serverRoutes.begin();
     let remaining = 512;
     publication = {
       omittedGroups: Math.max(0, snapshot.groups.length - 64),
@@ -137,7 +144,14 @@ export function createNativeFleet(
             nextDisconnects.set(disconnect, entry);
           }
         }
+        const serverPublication = serverRoutes.project(
+          group.id,
+          group.label.slice(0, 256),
+          group.state === "ready" && !group.identityConflict,
+          group.servers,
+        );
         return {
+          ...serverPublication,
           id: group.id,
           disconnect,
           retry,
@@ -181,6 +195,13 @@ export function createNativeFleet(
               name: session.name.slice(0, 512),
               paneCount: session.paneCount,
               sessionId: session.liveSessionId ?? null,
+              serverId: serverPublication.servers.some(
+                (server) =>
+                  server.id === session.server?.serverId &&
+                  server.generation === session.server?.generation,
+              )
+                ? session.server!.serverId
+                : null,
               selection,
             };
           }),
@@ -189,6 +210,7 @@ export function createNativeFleet(
     };
     if (homeMachineId !== null && !publication.groups.some((group) => group.id === homeMachineId))
       homeMachineId = null;
+    serverRoutes.finish();
     routes = next;
     retries = nextRetries;
     disconnects = nextDisconnects;
@@ -257,6 +279,25 @@ export function createNativeFleet(
     recoverAgents: (action: "retry" | "load-more") => agentRoster?.recover(action),
     resolveAgent: (key: string) => agentRoster?.resolve(key) ?? null,
     publication: () => structuredClone(publication),
+    selectServer(token: string) {
+      const route = serverRoutes.resolve(token);
+      if (!manager.select(route.handle.id)) throw new FleetSelectionError();
+      const selectedEpoch = manager.endpoint().epoch;
+      const revision = ++selectionRevision;
+      return {
+        ...route,
+        assertCurrent() {
+          if (
+            stopped ||
+            selectionRevision !== revision ||
+            manager.endpoint().epoch !== selectedEpoch ||
+            manager.snapshot().selectedMachineId !== route.handle.id
+          )
+            throw new FleetSelectionError();
+          route.assertCurrent();
+        },
+      };
+    },
     select(token: string) {
       const route = routes.get(token);
       if (!route || !current(route)) throw new FleetSelectionError();
@@ -298,6 +339,7 @@ export function createNativeFleet(
       observation.dispose();
       homeListeners.clear();
       catalog.dispose();
+      serverRoutes.dispose();
       routes.clear();
       retries.clear();
       disconnects.clear();

@@ -1,3 +1,5 @@
+import { completeFleetServerSelection } from "./fleet-server-selection.ts";
+import { createOnFleetRoute } from "./fleet-server-create.ts";
 import { applyHomeAgentFilter, homeAgentFilterSchema } from "./home-agent-filter.ts";
 import { createHomeAgentRecovery, homeAgentRecoverySchema } from "./home-agent-recovery.ts";
 import { admitFleetAgent, discoveredAgentRequest } from "./fleet-agent-admission.ts";
@@ -116,6 +118,13 @@ const commandSchema = z.union([
       type: z.literal("fleet-retry"),
       request: z.number().int().nonnegative().safe(),
       retry: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("fleet-server"),
+      request: z.number().int().positive().safe(),
+      selection: z.string().uuid(),
     })
     .strict(),
   z
@@ -518,6 +527,12 @@ function launchFleetSelection(
 }
 
 function publish() {
+  // A session may remain selectable beyond the server display cap, but Home
+  // must not offer creation without a visible exact destination.
+  if (surface === "home" && homePhase === "live" && selectedFleet && !fleet?.selectedServer()) {
+    homePhase = "unavailable";
+    status = "Selected server is not available in this fleet view — select a server again.";
+  }
   // Home has no terminal helper or authority to await; its presence applies locally.
   if (surface === "home" && !active) appliedPresenceRevision = presenceRevision;
   if (stopped) return;
@@ -530,7 +545,11 @@ function publish() {
       sessions,
       surface,
       home: { phase: homePhase },
-      createSession: sessionCreate.publication(),
+      createSession: selectedFleet && !fleet?.selectedServer() ? null : sessionCreate.publication(),
+      selectedServer:
+        surface === "home" && homePhase === "live" && selectedFleet
+          ? (fleet?.selectedServer() ?? null)
+          : null,
       homeAgents: surface === "home" ? agentPublication : null,
       homeAgentRecovery: surface === "home" && fleet ? homeRecovery.publication() : null,
       homeAgentFilter: surface === "home" && fleet ? homeAgentFilter : null,
@@ -646,17 +665,19 @@ function requestShutdown() {
 process.on("SIGINT", requestShutdown);
 process.on("SIGTERM", requestShutdown);
 process.stdout.on("error", () => void stop());
-async function refresh(token: number) {
+async function refresh(token: number, requiredCurrent: () => boolean = () => true) {
   const routeRevision = machineRouteRevision;
   catalog?.dispose();
   catalog = undefined;
   const discovered = await readHost();
-  if (stopped || request !== token || routeRevision !== machineRouteRevision) return;
+  if (stopped || request !== token || routeRevision !== machineRouteRevision || !requiredCurrent())
+    return;
   const fresh = createPreviewCatalog(discovered);
   sessionCreate.reset();
   catalog = fresh;
   const list = await fresh.sessions();
-  if (stopped || request !== token || catalog !== fresh) return;
+  if (stopped || request !== token || catalog !== fresh || !requiredCurrent()) return;
+  if (selectedFleet && !fleet?.selectedServer()) throw new FleetSelectionError();
   if (list.length > 512) throw new Error("Too many sessions for preview");
   sessions = list.map(sessionChoice);
   homePhase = "live";
@@ -1061,12 +1082,25 @@ async function command(value: unknown) {
       homePhase === "live" &&
       !active;
     if (!owner || !foreground || cmd.request !== token || !current()) return;
+    const createPresence = presenceRevision;
+    const createRoute = selectedFleet ? fleet : undefined;
     // Deliberately do not await: navigation/presence remain responsive while the
     // single mutation is pending; its captured request/catalog fence owns results.
     void sessionCreate.start({
       name: cmd.name,
       current,
-      create: (operationId, name) => owner.createSession(operationId, name),
+      create: (operationId, name) => {
+        const effectCurrent = () => current() && foreground && presenceRevision === createPresence;
+        const create = () => owner.createSession(operationId, name);
+        if (createRoute)
+          return createOnFleetRoute(
+            createRoute,
+            () => fleet === createRoute && effectCurrent(),
+            create,
+          );
+        if (!effectCurrent()) throw new FleetSelectionError();
+        return create();
+      },
       refresh: async () => {
         const list = await owner.sessions();
         if (!current()) return;
@@ -1484,7 +1518,8 @@ async function command(value: unknown) {
     cmd.type === "home" ||
     cmd.type === "refresh" ||
     cmd.type === "machine" ||
-    cmd.type === "machine-profile"
+    cmd.type === "machine-profile" ||
+    cmd.type === "fleet-server"
       ? "home"
       : "workspace";
   if (surface === "home") {
@@ -1499,6 +1534,44 @@ async function command(value: unknown) {
   publish();
   await retire();
   if (stopped || token !== request) return;
+  if (cmd.type === "fleet-server") {
+    const owner = fleet;
+    if (!owner) throw new FleetSelectionError();
+    selectedFleet = true;
+    selectedMachineProfile = null;
+    savedMachineRetired = false;
+    const revision = ++machineRouteRevision;
+    hostSource?.dispose();
+    hostSource = undefined;
+    catalog?.dispose();
+    catalog = undefined;
+    const presence = presenceRevision;
+    const current = () =>
+      !stopped &&
+      request === token &&
+      fleet === owner &&
+      machineRouteRevision === revision &&
+      foreground &&
+      presenceRevision === presence;
+    const retireSelection = () => {
+      if (stopped || request !== token || fleet !== owner || machineRouteRevision !== revision)
+        return;
+      owner.clearSelection();
+      catalog?.dispose();
+      catalog = undefined;
+      sessions = [];
+      homePhase = "unavailable";
+      status = "Server changed or selection cancelled — select the server again.";
+      publish();
+    };
+    void completeFleetServerSelection({
+      select: () => owner.selectServer(cmd.selection),
+      refresh: (valid) => refresh(token, valid),
+      current,
+      retire: retireSelection,
+    });
+    return;
+  }
   if (cmd.type === "fleet-session") {
     if (!fleet) throw new FleetSelectionError();
     launchFleetSelection(cmd.selection, token);

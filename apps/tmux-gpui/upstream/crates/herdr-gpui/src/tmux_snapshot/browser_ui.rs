@@ -24,6 +24,7 @@ pub(super) enum Selection {
     },
     Refresh,
     Session(String),
+    FleetServer(String),
     FleetSession {
         selection: String,
         session_id: String,
@@ -435,6 +436,7 @@ impl SnapshotView {
             Selection::Machine(_)
                 | Selection::MachineProfile { .. }
                 | Selection::FleetSession { .. }
+                | Selection::FleetServer(_)
         );
         let going_home = matches!(
             selection,
@@ -442,6 +444,7 @@ impl SnapshotView {
                 | Selection::Refresh
                 | Selection::Machine(_)
                 | Selection::MachineProfile { .. }
+                | Selection::FleetServer(_)
         );
         let selecting_pane = matches!(selection, Selection::Pane(_));
         let command = match selection {
@@ -468,6 +471,9 @@ impl SnapshotView {
                 key,
             },
             Selection::Session(id) => browser::Command::Session { request, id },
+            Selection::FleetServer(selection) => {
+                browser::Command::FleetServer { request, selection }
+            }
             Selection::FleetSession { selection, .. } => {
                 browser::Command::FleetSession { request, selection }
             }
@@ -517,6 +523,8 @@ impl SnapshotView {
                 self.browser_state.copy_region = None;
             }
             if changing_machine {
+                self.browser_state.selected_server = None;
+                self.browser_state.create_session = None;
                 self.last_workspace_session = None;
                 self.browser_state.sessions.clear();
             }
