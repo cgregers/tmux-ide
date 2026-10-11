@@ -79,6 +79,9 @@ pub(super) struct State {
     pub resize_gesture: Option<super::divider::gesture::Ack>,
     pub workspace_agents: Option<home_agents::WorkspaceRoster>,
     pub home_agents: Option<home_agents::Roster>,
+    pub attention_supported: bool,
+    pub attention_selection_rejected: Option<super::picker::attention::Rejected>,
+    pub attention_agents: Option<super::picker::attention::Publication>,
     pub create_session: Option<CreateSession>,
     pub pane_actions: Option<PaneActions>,
     pub resize_token: Option<String>,
@@ -111,6 +114,10 @@ struct Publication {
     resize_gesture: Option<super::divider::gesture::Ack>,
     workspace_agents: Option<home_agents::WorkspaceRoster>,
     home_agents: Option<home_agents::Roster>,
+    #[serde(default)]
+    attention_supported: bool,
+    attention_selection_rejected: Option<super::picker::attention::Rejected>,
+    attention_agents: Option<super::picker::attention::Publication>,
     create_session: Option<CreateSession>,
     pane_actions: Option<PaneActions>,
     resize_token: Option<String>,
@@ -142,6 +149,20 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "attention-observe")]
+    AttentionObserve {
+        request: u64,
+        scope: u64,
+        active: bool,
+    },
+    #[serde(rename = "open-attention-agent", rename_all = "camelCase")]
+    OpenAttentionAgent {
+        request: u64,
+        from_request: u64,
+        scope: u64,
+        roster_revision: u64,
+        key: String,
+    },
     #[serde(rename = "fleet-disconnect")]
     FleetDisconnect {
         request: u64,
@@ -321,6 +342,10 @@ impl Reader {
             || p.fleet.as_ref().is_some_and(|f| !f.valid())
             || p.appearance.as_ref().is_some_and(|a| !a.valid())
             || p.home_agents.as_ref().is_some_and(|r| !r.valid())
+            || p.attention_agents.as_ref().is_some_and(|r| !r.valid())
+            || p.attention_selection_rejected
+                .as_ref()
+                .is_some_and(|r| !r.valid())
             || p.workspace_agents.as_ref().is_some_and(|r| {
                 !r.valid()
                     || surface != Surface::Workspace
@@ -403,6 +428,9 @@ impl Reader {
             resize_gesture: p.resize_gesture,
             workspace_agents: p.workspace_agents,
             home_agents: p.home_agents,
+            attention_supported: p.attention_supported,
+            attention_selection_rejected: p.attention_selection_rejected,
+            attention_agents: p.attention_agents,
             create_session: p.create_session,
             pane_actions: p.pane_actions,
             resize_token: p.resize_token,

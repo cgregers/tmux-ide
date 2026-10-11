@@ -28,8 +28,8 @@ commands using the existing picker. It has keyboard/input-isolation tests and
 physical light/dark verification. F1 Home, F2 Terminals and F6 session search now reuse the native tab/picker
 owners, and the F5 list exposes Terminals and shortcut labels. Modified function
 keys remain available to the terminal. F5 now floats in a centered popover over the unchanged view; shared control sizing
-and theme treatments are consistent. F6 now shares this popover; full TUI action vocabulary and fleet-wide F7
-attention remain unfinished. See `evidence/native-f5-popover-2026-10-11/`. Shared icon tabs and sidebar buttons landed in
+and theme treatments are consistent. F6 now shares this popover. Fleet-wide F7 is implemented and undergoing native
+qualification; full TUI action vocabulary remains unfinished. See `evidence/native-f5-popover-2026-10-11/`. Shared icon tabs and sidebar buttons landed in
 `2b83924c`; see `evidence/native-controls-2026-10-11/` and `evidence/native-f5-2026-10-11/`.
 
 - [ ] Match TUI information hierarchy: machine, session, window, pane and agent status.
@@ -347,3 +347,23 @@ Home and Workspace, duplicate labels across machines, replaced routes, stale
 revisions, dismissal/reopen, background during activation and no underlying
 terminal input/resize. Existing Home Attention filtering also includes blocked
 and failed states; F7 must use the TUI's exact attention predicate.
+
+### F7 implementation qualification (11 October)
+
+F7 now shares the native popover and fleet observation owner with Home. A scoped
+subscription preserves Home/Workspace selection, input readiness and geometry.
+Action admission checks foreground state, scope, roster revision, exact attention
+flag and opaque live route; rejected actions retain the current terminal. Enter
+submits navigation: once admitted, dismissing observation does not undo navigation.
+Explicit newer navigation supersedes it with a higher request. Loading, partial,
+unavailable and truncated coverage remain distinct from no observed attention.
+
+Independent source review passed; the full bridge gate passed 333 tests with five
+explicit skips, and an isolated real-daemon test verified workspace preservation
+and correlated rejection for invalid scope/revision/key. Native workspace gates passed (2866 default / 2900 all-feature tests, both
+Clippy configurations, formatting, size and debug build). Physical light-theme
+Home and Workspace agent activation, paste isolation, outside dismissal and
+unchanged pane dimensions passed. F7 narrow/dark/OS-IME and remote acceptance
+remain open; this is not released parity. Unpromoted-session rows remain disabled
+until ordinary session opening establishes native identity. Evidence:
+`evidence/native-f7-attention-2026-10-11/`.

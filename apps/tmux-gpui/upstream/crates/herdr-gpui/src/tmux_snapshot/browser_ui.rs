@@ -403,6 +403,8 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.attention.pending = None;
+        self.cancel_attention();
         self.divider = None;
         self.picker = None;
         self.pane_actions = None;
@@ -418,9 +420,16 @@ impl SnapshotView {
         self.wheel = Default::default();
         window.blur(cx);
         self.discard_composition(cx);
-        let Some(request) = self.browser_request.checked_add(1) else {
+        let Some(request) = self
+            .browser_request
+            .max(self.attention.last_request)
+            .checked_add(1)
+        else {
             return;
         };
+        if request > 9_007_199_254_740_991 {
+            return;
+        }
         let changing_machine = matches!(
             selection,
             Selection::Machine(_)

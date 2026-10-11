@@ -47,6 +47,7 @@ impl SnapshotView {
             return;
         }
         self.pending_session_open = None;
+        self.cancel_attention();
         self.picker = None;
         self.pane_actions = None;
         self.divider = None;

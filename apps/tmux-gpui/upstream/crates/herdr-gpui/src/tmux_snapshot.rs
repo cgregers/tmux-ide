@@ -158,6 +158,7 @@ fn show(
                                             view.presence.flush(sender);
                                         }
                                         view.flush_resize_gesture(cx);
+                                        view.flush_attention();
                                         if view.glass.take_policy_change() {
                                             cx.notify();
                                         }
@@ -187,6 +188,10 @@ fn show(
                     let activation = cx.observe_window_activation(window, |view, window, cx| {
                         if !window.is_window_active() {
                             view.pending_session_open = None;
+                            view.cancel_attention();
+                            if view.attention_picker_open() {
+                                view.picker = None;
+                            }
                         }
                         view.divider = None;
                         view.pane_actions = None;
@@ -219,6 +224,7 @@ fn show(
                         terminal_focus: cx.focus_handle(),
                         input_interrupted: false,
                         picker: None,
+                        attention: Default::default(),
                         home_filter: None,
                         pane_actions: None,
                         new_session: None,
@@ -270,6 +276,7 @@ struct SnapshotView {
     terminal_focus: FocusHandle,
     input_interrupted: bool,
     picker: Option<picker::Picker>,
+    attention: picker::attention::Owner,
     home_filter: Option<home::filters::Controls>,
     pane_actions: Option<pane_actions::Menu>,
     new_session: Option<new_session::Dialog>,

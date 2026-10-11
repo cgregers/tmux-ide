@@ -1,4 +1,5 @@
 //! Bounded catalog switcher. Labels are searchable display text, never command targets.
+pub(super) mod attention;
 pub(super) mod commands;
 mod machine;
 mod saved_machines;
@@ -24,6 +25,11 @@ pub(super) enum Target {
     },
     FleetRetry(String),
     FleetDisconnect(String),
+    Attention {
+        scope: u64,
+        revision: u64,
+        key: String,
+    },
     Session(String),
     FleetSession {
         selection: String,
@@ -40,6 +46,7 @@ pub(super) struct Row {
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
+    Attention,
     Navigation,
     Theme,
     Commands,
@@ -175,6 +182,16 @@ fn current(state: &browser::State, target: &Target) -> bool {
             .as_ref()
             .and_then(|f| f.session(selection))
             .is_some_and(|s| s.session_id.as_ref() == Some(session_id)),
+        Target::Attention {
+            scope,
+            revision,
+            key,
+        } => state.attention_agents.as_ref().is_some_and(|p| {
+            p.scope == *scope
+                && p.roster.revision == *revision
+                && p.roster.available(key)
+                && p.roster.rows.iter().any(|r| r.key == *key && r.attention)
+        }),
         Target::Command(action) => action.available(state),
         Target::Session(id) => state.sessions.iter().any(|c| &c.id == id),
         Target::Pane(id) => state.panes.iter().any(|c| &c.id == id),
@@ -278,6 +295,7 @@ impl SnapshotView {
         if self.browser_commands.is_none() {
             return;
         }
+        self.cancel_attention();
         self.pending_session_open = None;
         self.pane_actions = None;
         self.new_session = None;
@@ -288,6 +306,7 @@ impl SnapshotView {
             let mut input = SearchInput::new(cx).with_max_bytes(1024);
             input.set_placeholder(
                 match mode {
+                    Mode::Attention => "Search attention agents…",
                     Mode::SavedMachines => "Search saved machines…",
                     Mode::ManageMachines => "Search machines to enable or disable…",
                     Mode::Machine => "SSH alias or user@host",
@@ -310,7 +329,9 @@ impl SnapshotView {
             error: None,
             search,
             _changed: changed,
-            rows: if mode == Mode::ManageMachines {
+            rows: if mode == Mode::Attention {
+                Vec::new()
+            } else if mode == Mode::ManageMachines {
                 saved_machines::management_rows(&self.browser_state, "")
             } else if mode == Mode::SavedMachines {
                 saved_machines::rows(&self.browser_state, "")
@@ -330,6 +351,11 @@ impl SnapshotView {
         cx.notify();
     }
     pub(super) fn refresh_picker(&mut self, cx: &mut Context<Self>) {
+        if self.attention.active.is_some_and(|(request, _)| {
+            request != self.browser_request || self.browser_commands.is_none()
+        }) {
+            self.cancel_attention();
+        }
         let theme = self.theme();
         let Some(picker) = &mut self.picker else {
             return;
@@ -346,7 +372,13 @@ impl SnapshotView {
             self.picker = None;
             return;
         }
-        picker.rows = if picker.mode == Mode::ManageMachines {
+        picker.rows = if picker.mode == Mode::Attention {
+            attention::rows(
+                &self.browser_state,
+                self.attention.active,
+                picker.search.read(cx).text(),
+            )
+        } else if picker.mode == Mode::ManageMachines {
             saved_machines::management_rows(&self.browser_state, picker.search.read(cx).text())
         } else if picker.mode == Mode::SavedMachines {
             saved_machines::rows(&self.browser_state, picker.search.read(cx).text())
@@ -362,6 +394,7 @@ impl SnapshotView {
         picker.selected = picker.selected.min(picker.rows.len().saturating_sub(1));
     }
     fn close_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.cancel_attention();
         self.picker = None;
         self.terminal_focus.focus(window, cx);
         cx.notify();
@@ -374,6 +407,15 @@ impl SnapshotView {
             || self.browser_commands.is_none()
             || !current(&self.browser_state, &target)
         {
+            return;
+        }
+        if let Target::Attention {
+            scope,
+            revision,
+            key,
+        } = &target
+        {
+            self.choose_attention(*scope, *revision, key, cx);
             return;
         }
         if let Target::FleetDisconnect(token) = &target {
@@ -461,7 +503,8 @@ impl SnapshotView {
                     session_id,
                 },
                 Target::Pane(id) => Selection::Pane(id),
-                Target::Theme(_)
+                Target::Attention { .. }
+                | Target::Theme(_)
                 | Target::Command(_)
                 | Target::MachineToggle { .. }
                 | Target::FleetRetry(_)
@@ -519,6 +562,7 @@ impl SnapshotView {
                     );
                 }
                 "f6" => self.open_picker(window, cx),
+                "f7" => self.open_attention(window, cx),
                 _ => self.open_commands(window, cx),
             }
             cx.stop_propagation();
@@ -578,7 +622,7 @@ impl SnapshotView {
     ) -> Option<AnyElement> {
         self.picker
             .as_ref()
-            .filter(|p| matches!(p.mode, Mode::Commands | Mode::Navigation))?;
+            .filter(|p| matches!(p.mode, Mode::Commands | Mode::Navigation | Mode::Attention))?;
         let theme = self.theme();
         let viewport = window.viewport_size();
         Some(
@@ -643,6 +687,9 @@ impl SnapshotView {
             })
             .when(picker.mode == Mode::Navigation, |panel| {
                 panel.child(div().px_2().py_1().child("Sessions and panes · F6"))
+            })
+            .when(picker.mode == Mode::Attention, |panel| {
+                panel.child(self.attention_heading())
             })
             .child(picker.search.clone());
         if picker.mode == Mode::Theme

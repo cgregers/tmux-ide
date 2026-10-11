@@ -115,7 +115,18 @@ test("malformed private config stays recoverable without leaking its contents", 
     const wireFixture = JSON.parse(
       await readFile(new URL("../fixtures/browser-initial.json", import.meta.url), "utf8"),
     );
-    assert.deepEqual(Object.keys(event).sort(), Object.keys(wireFixture).sort());
+    assert.deepEqual(
+      Object.keys(event).sort(),
+      [
+        ...Object.keys(wireFixture),
+        "attentionAgents",
+        "attentionSelectionRejected",
+        "attentionSupported",
+      ].sort(),
+    );
+    assert.equal(event.attentionSupported, true);
+    assert.equal(event.attentionAgents, null);
+    assert.equal(event.attentionSelectionRejected, null);
     assert.equal(child.exitCode, null);
     assert.equal(event.snapshot, null);
     assert.equal(event.inputReady, false);
@@ -129,7 +140,18 @@ test("malformed private config stays recoverable without leaking its contents", 
     const registryFixture = JSON.parse(
       await readFile(new URL("../fixtures/browser-machines.json", import.meta.url), "utf8"),
     );
-    assert.deepEqual(Object.keys(registryEvent).sort(), Object.keys(registryFixture).sort());
+    assert.deepEqual(
+      Object.keys(registryEvent).sort(),
+      [
+        ...Object.keys(registryFixture),
+        "attentionAgents",
+        "attentionSelectionRejected",
+        "attentionSupported",
+      ].sort(),
+    );
+    assert.equal(registryEvent.attentionSupported, true);
+    assert.equal(registryEvent.attentionAgents, null);
+    assert.equal(registryEvent.attentionSelectionRejected, null);
     assert.deepEqual(
       Object.keys(registryEvent.machines).sort(),
       Object.keys(registryFixture.machines).sort(),

@@ -42,6 +42,7 @@ fn make_view(
         terminal_focus: focus,
         input_interrupted: false,
         picker: None,
+        attention: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,
@@ -65,6 +66,9 @@ fn make_view(
             request: 0,
             workspace_agents: None,
             home_agents: None,
+            attention_supported: false,
+            attention_selection_rejected: None,
+            attention_agents: None,
             create_session: Some(browser::CreateSession {
                 phase: browser::CreatePhase::Idle,
                 error: None,

@@ -1,3 +1,8 @@
+import {
+  createAttentionOwner,
+  attentionObserveSchema,
+  openAttentionAgentSchema,
+} from "./attention.ts";
 import { verifyFleetAgentTarget } from "./fleet-agents.ts";
 import {
   projectHomeAgentRows,
@@ -93,6 +98,8 @@ const machineRegistryCommand = z.discriminatedUnion("operation", [
     .strict(),
 ]);
 const commandSchema = z.union([
+  attentionObserveSchema,
+  openAttentionAgentSchema,
   machineRegistryCommand,
   z
     .object({
@@ -275,6 +282,9 @@ let active:
     }
   | undefined;
 
+let attentionSelectionRejected: { request: number; fromRequest: number; scope: number } | null =
+  null;
+const attention = createAttentionOwner(publish);
 let agentOwner: ReturnType<typeof createHomeAgentObserver> | undefined;
 let agentPublication: ReturnType<typeof homeAgentPublication> | null = null;
 let stopFleetAgents: (() => void) | undefined;
@@ -378,7 +388,12 @@ function startAgents() {
   void refreshAgents();
 }
 
-function launchFleetSelection(selection: string, token: number, agent?: HomeAgentRow) {
+function launchFleetSelection(
+  selection: string,
+  token: number,
+  agent?: HomeAgentRow,
+  requiredCurrent: () => boolean = () => true,
+) {
   if (!fleet) throw new FleetSelectionError();
   selectedFleet = true;
   selectedMachineProfile = null;
@@ -394,6 +409,7 @@ function launchFleetSelection(selection: string, token: number, agent?: HomeAgen
   const current = () =>
     !stopped &&
     request === token &&
+    requiredCurrent() &&
     fleet === owner &&
     routeRevision === machineRouteRevision &&
     (!agent || (foreground && capturedPresence === presenceRevision));
@@ -471,6 +487,10 @@ function publish() {
       home: { phase: homePhase },
       createSession: sessionCreate.publication(),
       homeAgents: surface === "home" ? agentPublication : null,
+      // Protocol support; private hosts publish an explicit unavailable roster.
+      attentionSupported: true,
+      attentionAgents: attention.publication(),
+      attentionSelectionRejected,
       workspaceAgents:
         surface === "workspace" && selectedSession && agentPublication
           ? { ...agentPublication, sessionId: selectedSession }
@@ -519,6 +539,8 @@ process.stdout.on("drain", () => {
   }
 });
 async function retire() {
+  attentionSelectionRejected = null;
+  attention.cancel();
   const old = active;
   active = undefined;
   pendingPaneSplit = null;
@@ -659,6 +681,7 @@ async function openPane(
     let childPresentationEpoch: number | undefined;
     const unavailable = () => {
       if (stopped || request !== token || active?.child !== child) return;
+      attention.cancel();
       retireAgents();
       snapshot = null;
       inputReady = false;
@@ -1001,6 +1024,7 @@ async function command(value: unknown) {
     active?.presentation.update(undefined, [], false);
     foreground = cmd.active;
     if (!foreground) {
+      attention.cancel();
       initialPane = null;
       pendingPaneSplit = null;
     }
@@ -1210,6 +1234,52 @@ async function command(value: unknown) {
     )
       throw new Error("Input queue full");
     active.child.stdin.write(line);
+    return;
+  }
+  if (cmd.type === "attention-observe") {
+    attention.observe(cmd, request, foreground && !stopped, fleet);
+    return;
+  }
+  if (cmd.type === "open-attention-agent") {
+    if (!attention.admitAttempt(cmd.request, request)) return;
+    const target = attention.resolve(cmd, request, foreground && !stopped, fleet);
+    if (!target) {
+      attentionSelectionRejected = {
+        request: cmd.request,
+        fromRequest: cmd.fromRequest,
+        scope: cmd.scope,
+      };
+      publish();
+      return;
+    }
+    request = cmd.request;
+    const token = request;
+    const capturedPresence = presenceRevision;
+    const current = () =>
+      !stopped &&
+      token === request &&
+      foreground &&
+      capturedPresence === presenceRevision &&
+      attention.latest(cmd.scope);
+    retireAgents();
+    sessionCatalogComplete = false;
+    initialPane = null;
+    snapshot = null;
+    inputReady = false;
+    selectedPane = null;
+    paneActions = null;
+    surface = "workspace";
+    selectedSession = null;
+    panes = [];
+    layouts = [];
+    status = "Loading agent";
+    attention.cancel();
+    attentionSelectionRejected = null;
+    // Accepted navigation is published before any asynchronous retirement.
+    publish();
+    await retire();
+    if (!current()) return;
+    launchFleetSelection(target.selection, token, target.row, current);
     return;
   }
   if (cmd.type === "open-workspace-agent") {

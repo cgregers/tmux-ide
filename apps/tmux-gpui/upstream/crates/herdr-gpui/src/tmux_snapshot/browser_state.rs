@@ -7,6 +7,9 @@ impl SnapshotView {
         state: Option<browser::State>,
         cx: &mut Context<Self>,
     ) {
+        if let Some(state) = &state {
+            self.accept_attention_state(state);
+        }
         match state {
             Some(state) if state.request == self.browser_request => {
                 self.resize_gesture.observe(&state);
@@ -36,6 +39,8 @@ impl SnapshotView {
                 self.browser_state = state;
             }
             None => {
+                self.attention.pending = None;
+                self.cancel_attention();
                 self.pending_session_open = None;
                 self.discard_composition(cx);
                 self.selection = None;

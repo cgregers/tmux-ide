@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+mod attention;
 mod commands;
 mod fleet;
 mod fleet_disconnect;
@@ -51,6 +52,7 @@ fn make_view(
         terminal_focus: focus,
         input_interrupted: false,
         picker: None,
+        attention: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,

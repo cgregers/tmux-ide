@@ -75,7 +75,7 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
     rows
 }
 pub(in crate::tmux_snapshot) fn shortcut(key: &gpui::Keystroke) -> bool {
-    matches!(key.key.as_str(), "f1" | "f2" | "f5" | "f6")
+    matches!(key.key.as_str(), "f1" | "f2" | "f5" | "f6" | "f7")
         && !key.modifiers.platform
         && !key.modifiers.control
         && !key.modifiers.alt

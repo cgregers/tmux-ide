@@ -2,7 +2,7 @@ use super::*;
 
 #[test]
 fn only_unmodified_application_function_keys_are_reserved() {
-    for key in ["f1", "f2", "f5", "f6"] {
+    for key in ["f1", "f2", "f5", "f6", "f7"] {
         assert!(super::super::commands::shortcut(
             &Keystroke::parse(key).unwrap()
         ));

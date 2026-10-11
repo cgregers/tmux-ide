@@ -1,3 +1,4 @@
+import { createSharedAgentObservation } from "./shared-agent-observation.ts";
 import { createMachineAgents } from "../../../packages/daemon/src/lib/machine-agents.ts";
 import { createFleetAgentRoster } from "./fleet-agents.ts";
 import type { HomeAgentSnapshot } from "../../../packages/presentation/src/home-agent-roster.ts";
@@ -182,6 +183,31 @@ export function createNativeFleet(
     agentRoster?.refresh();
     changed();
   };
+  const observation = createSharedAgentObservation((publish) => {
+    const roster = createFleetAgentRoster(
+      createMachineAgents({ catalog, manager }),
+      (machineId, row) =>
+        [...routes].find(
+          ([, route]) =>
+            route.handle.id === machineId &&
+            current(route) &&
+            route.session.sourceId === row.sessionKey &&
+            route.session.liveSessionId === row.liveSessionId &&
+            route.session.server?.serverId === row.server?.serverId &&
+            route.session.server?.generation === row.server?.generation,
+        )?.[0] ?? null,
+      (id) => catalog.getSnapshot().groups.find((group) => group.id === id)?.label ?? "Machine",
+      publish,
+      (id) =>
+        catalog.getSnapshot().groups.find((group) => group.id === id)?.state ?? "disconnected",
+    );
+    agentRoster = roster;
+    roster.start();
+    return () => {
+      if (agentRoster === roster) agentRoster = undefined;
+      roster.dispose();
+    };
+  });
   return {
     start() {
       if (stopped || started) return;
@@ -189,32 +215,7 @@ export function createNativeFleet(
       stop = catalog.subscribe(update);
       catalog.start();
     },
-    observeAgents(publish: (snapshot: HomeAgentSnapshot) => void) {
-      agentRoster?.dispose();
-      const roster = createFleetAgentRoster(
-        createMachineAgents({ catalog, manager }),
-        (machineId, row) =>
-          [...routes].find(
-            ([, route]) =>
-              route.handle.id === machineId &&
-              current(route) &&
-              route.session.sourceId === row.sessionKey &&
-              route.session.liveSessionId === row.liveSessionId &&
-              route.session.server?.serverId === row.server?.serverId &&
-              route.session.server?.generation === row.server?.generation,
-          )?.[0] ?? null,
-        (id) => catalog.getSnapshot().groups.find((group) => group.id === id)?.label ?? "Machine",
-        publish,
-        (id) =>
-          catalog.getSnapshot().groups.find((group) => group.id === id)?.state ?? "disconnected",
-      );
-      agentRoster = roster;
-      roster.start();
-      return () => {
-        if (agentRoster === roster) agentRoster = undefined;
-        roster.dispose();
-      };
-    },
+    observeAgents: observation.subscribe,
     resolveAgent: (key: string) => agentRoster?.resolve(key) ?? null,
     publication: () => structuredClone(publication),
     select(token: string) {
@@ -255,8 +256,7 @@ export function createNativeFleet(
       if (stopped) return;
       stopped = true;
       stop();
-      agentRoster?.dispose();
-      agentRoster = undefined;
+      observation.dispose();
       catalog.dispose();
       routes.clear();
       retries.clear();
