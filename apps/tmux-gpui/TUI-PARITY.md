@@ -491,3 +491,15 @@ OS input and remote checks remain distinct and open. See
 `evidence/home-agent-context-2026-10-11/` for exact final gates and source hashes.
 This supersedes the preceding context/search implementation gap, without claiming
 full Home/fleet parity or release readiness.
+
+
+## Packaged Home/fleet checkpoint — 11 October
+
+The fresh release-mode development app at source96e1ecc6 passed five artifact/
+compatibility checks. Maintained Home machine-filter/context and empty-server
+creation fixtures now support strict explicit packaged-app mode: bundled Node and
+browser, private scratch cwd, no source fallback. Source and exact-package paths
+both passed with unchanged source sessions. Evidence and exact artifact hashes:
+`evidence/packaged-fleet-home-2026-10-11/`. This narrows the packaging gap for those
+bridge workflows only; no native UI, real remote SSH, signing or install/update
+acceptance is claimed. Saved-machine removal is still source-process qualified.

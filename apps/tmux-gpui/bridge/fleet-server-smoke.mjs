@@ -4,7 +4,8 @@ import { Buffer } from "node:buffer";
 import console from "node:console";
 import process from "node:process";
 import { spawn, execFileSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import { URL, fileURLToPath } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
@@ -15,6 +16,22 @@ import {
 } from "../../../packages/daemon-client/src/tmux-server-client.ts";
 import { stopFixtureChild } from "./fixture-child.mjs";
 
+// An explicit package is mandatory when supplied: validate before creating scratch resources.
+const app = process.env.TMUX_GPUI_TEST_APP;
+if (app !== undefined) {
+  assert.ok(isAbsolute(app), "TMUX_GPUI_TEST_APP must be a nonempty absolute path");
+  assert.ok((await stat(app)).isDirectory(), "TMUX_GPUI_TEST_APP must be a directory");
+  for (const file of ["node", "bridge/browser.bundle.mjs"]) {
+    const path = join(app, "Contents/Resources", file);
+    assert.ok((await stat(path)).isFile(), "Packaged helper must be a regular file");
+    await access(path, file === "node" ? constants.X_OK : constants.R_OK);
+  }
+}
+const browserNode = app === undefined ? process.execPath : join(app, "Contents/Resources/node");
+const browserEntry =
+  app === undefined
+    ? fileURLToPath(new URL("./browser.ts", import.meta.url))
+    : join(app, "Contents/Resources/bridge/browser.bundle.mjs");
 const cli = process.env.TMUX_GPUI_TEST_CLI;
 assert.ok(cli && isAbsolute(cli), "Provide absolute TMUX_GPUI_TEST_CLI");
 for (const key of Object.keys(process.env))
@@ -172,16 +189,15 @@ try {
   `);
   browser = ownChild(
     spawn(
-      process.execPath,
+      browserNode,
       [
-        "--import",
-        import.meta.resolve("tsx"),
+        ...(app === undefined ? ["--import", import.meta.resolve("tsx")] : []),
         "--import",
         observer,
-        fileURLToPath(new URL("./browser.ts", import.meta.url)),
+        browserEntry,
         "--local",
       ],
-      { env, stdio: ["pipe", "pipe", "pipe"] },
+      { env, stdio: ["pipe", "pipe", "pipe"], ...(app === undefined ? {} : { cwd: fleet.root }) },
     ),
   );
   for (const stream of [browser.stdin, browser.stdout, browser.stderr])
@@ -290,6 +306,7 @@ if (failures.length) throw new AggregateError(failures, "Empty fleet-server fixt
 console.log(
   JSON.stringify({
     passed: true,
+    packaged: app !== undefined,
     genuinelyEmptyServers: 2,
     duplicateLabels: true,
     selectedSecondByIdentity: true,
