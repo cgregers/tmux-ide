@@ -36,7 +36,7 @@ impl SnapshotView {
     pub(in crate::tmux_snapshot) fn machine_dialog_open(&self) -> bool {
         self.picker
             .as_ref()
-            .is_some_and(|picker| picker.mode == Mode::Machine)
+            .is_some_and(|picker| matches!(picker.mode, Mode::Machine | Mode::SavedMachines))
     }
     pub(super) fn submit_machine(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(picker) = &self.picker else {
@@ -64,6 +64,13 @@ impl SnapshotView {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if self
+            .picker
+            .as_ref()
+            .is_some_and(|picker| picker.mode == Mode::SavedMachines)
+        {
+            return Some(self.saved_machines_dialog(cx));
+        }
         let picker = self
             .picker
             .as_ref()

@@ -3,7 +3,7 @@ use super::{Error, decode};
 #[path = "home_agents.rs"]
 pub(super) mod home_agents;
 #[path = "browser_machines.rs"]
-mod machines;
+pub(super) mod machines;
 use herdr_client::protocol::FrameData;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -69,6 +69,7 @@ pub(super) struct CreateSession {
 }
 #[derive(Clone, Default)]
 pub(super) struct State {
+    pub machines: Option<machines::Registry>,
     pub split_layout: Option<super::divider::canonical::Layout>,
     pub split_gesture: Option<super::divider::canonical::Ack>,
     pub resize_gesture_supported: bool,
@@ -137,6 +138,18 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "machines")]
+    Machines {
+        request: u64,
+        #[serde(flatten)]
+        operation: machines::Operation,
+    },
+    #[serde(rename = "machine-profile")]
+    MachineProfile {
+        request: u64,
+        id: String,
+        revision: u64,
+    },
     #[serde(rename = "open-workspace-agent", rename_all = "camelCase")]
     OpenWorkspaceAgent {
         request: u64,
@@ -362,6 +375,7 @@ impl Reader {
         self.sequence = p.sequence;
         self.request = p.request;
         Ok(State {
+            machines: p.machines,
             split_layout: p.split_layout,
             split_gesture: p.split_gesture,
             resize_gesture_supported: p.resize_gesture_supported,

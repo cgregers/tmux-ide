@@ -2,6 +2,7 @@
 use super::*;
 mod commands;
 mod machine;
+mod saved_machines;
 use crate::tmux_snapshot::{decode, presence::Presence};
 use core::prelude::v1::test;
 use std::{

@@ -90,7 +90,12 @@ dialog is available through F5, with a Local action that cancels pending discove
 The bridge now exposes lazy local-registry read/save/edit/enable/disable/remove
 commands using the shared daemon-owned persistence path. Stale revisions and
 overlapping writes are rejected; uncertain replies are reconciled without replay.
-Native saved-machine controls and UUID-based routing remain pending.
+UUID-based bridge routing landed in `50dd355c`. The native F5 saved-machine
+picker now reads the shared registry, searches labels/SSH targets and submits the
+captured UUID/revision; stale, disabled and unavailable rows cannot connect.
+Dedicated headless checks cover selection fencing, command serialization, Escape,
+input isolation and a failed read queue. Native save/edit/enable/disable/remove
+controls and physical saved-picker acceptance remain pending.
 Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
 Cancellation, child cleanup, sanitized failures, generation mismatches and late

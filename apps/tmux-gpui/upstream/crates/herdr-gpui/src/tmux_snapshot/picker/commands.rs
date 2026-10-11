@@ -4,6 +4,7 @@ use super::{Row, Target, browser};
 pub(in crate::tmux_snapshot) enum Action {
     Home,
     AddMachine,
+    SavedMachines,
     LocalMachine,
     Sessions,
     Appearance,
@@ -19,6 +20,7 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
     [
         (Action::Home, "Home"),
         (Action::AddMachine, "Connect to machine…"),
+        (Action::SavedMachines, "Switch saved machine…"),
         (
             Action::LocalMachine,
             "Use local machine / cancel connection",

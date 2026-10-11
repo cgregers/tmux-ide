@@ -14,7 +14,7 @@ fn f5_search_and_escape_never_send_terminal_input(cx: &mut TestAppContext) {
                 .is_some_and(|p| p.mode == Mode::Commands)
         );
     });
-    cx.simulate_input("switch");
+    cx.simulate_input("switch session");
     view.read_with(cx, |view, _| {
         let picker = view.picker.as_ref().unwrap();
         assert_eq!(picker.rows.len(), 1);

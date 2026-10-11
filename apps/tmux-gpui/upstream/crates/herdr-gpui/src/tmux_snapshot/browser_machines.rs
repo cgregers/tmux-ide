@@ -1,28 +1,26 @@
 //! Bounded local-registry publication; connection and mutation authority stays in the bridge.
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-pub(super) struct Registry {
-    revision: u64,
-    #[serde(rename = "available")]
-    _available: bool,
+pub(in crate::tmux_snapshot) struct Registry {
+    pub(in crate::tmux_snapshot) revision: u64,
+    pub(in crate::tmux_snapshot) available: bool,
     #[serde(rename = "pending")]
     _pending: bool,
-    error: Option<String>,
-    message: Option<String>,
-    machines: Vec<Profile>,
+    pub(in crate::tmux_snapshot) error: Option<String>,
+    pub(in crate::tmux_snapshot) message: Option<String>,
+    pub(in crate::tmux_snapshot) machines: Vec<Profile>,
 }
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
-struct Profile {
-    id: String,
-    label: String,
-    ssh_target: String,
-    expected_environment_id: Option<String>,
-    #[serde(rename = "enabled")]
-    _enabled: bool,
+pub(in crate::tmux_snapshot) struct Profile {
+    pub(in crate::tmux_snapshot) id: String,
+    pub(in crate::tmux_snapshot) label: String,
+    pub(in crate::tmux_snapshot) ssh_target: String,
+    pub(in crate::tmux_snapshot) expected_environment_id: Option<String>,
+    pub(in crate::tmux_snapshot) enabled: bool,
 }
 fn uuid(value: &str) -> bool {
     value.len() == 36 && uuid::Uuid::parse_str(value).is_ok()
@@ -51,4 +49,10 @@ impl Registry {
                         .is_none_or(|value| uuid(value))
             })
     }
+}
+
+#[derive(Serialize)]
+#[serde(tag = "operation", rename_all = "lowercase")]
+pub(in crate::tmux_snapshot) enum Operation {
+    Read,
 }

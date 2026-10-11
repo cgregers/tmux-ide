@@ -1,6 +1,7 @@
 //! Bounded catalog switcher. Labels are searchable display text, never command targets.
 pub(super) mod commands;
 mod machine;
+mod saved_machines;
 use super::{SnapshotView, browser, browser_ui::Selection};
 use crate::search_input::{Changed, SearchInput};
 use commands::{Action, command_rows};
@@ -12,6 +13,7 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
+    Machine { id: String, revision: u64 },
     Session(String),
     Pane(String),
     Theme(String),
@@ -28,6 +30,7 @@ enum Mode {
     Theme,
     Commands,
     Machine,
+    SavedMachines,
 }
 pub(super) struct Picker {
     mode: Mode,
@@ -89,6 +92,14 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
 }
 fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::Machine { id, revision } => state.machines.as_ref().is_some_and(|registry| {
+            registry.available
+                && registry.revision == *revision
+                && registry
+                    .machines
+                    .iter()
+                    .any(|profile| profile.id == *id && profile.enabled)
+        }),
         Target::Command(action) => action.available(state),
         Target::Session(id) => state.sessions.iter().any(|c| &c.id == id),
         Target::Pane(id) => state.panes.iter().any(|c| &c.id == id),
@@ -124,6 +135,7 @@ impl SnapshotView {
             let mut input = SearchInput::new(cx).with_max_bytes(1024);
             input.set_placeholder(
                 match mode {
+                    Mode::SavedMachines => "Search saved machines…",
                     Mode::Machine => "SSH alias or user@host",
                     Mode::Theme => "Search themes…",
                     Mode::Commands => "Search commands…",
@@ -144,7 +156,9 @@ impl SnapshotView {
             error: None,
             search,
             _changed: changed,
-            rows: if mode == Mode::Machine {
+            rows: if mode == Mode::SavedMachines {
+                saved_machines::rows(&self.browser_state, "")
+            } else if mode == Mode::Machine {
                 Vec::new()
             } else if mode == Mode::Commands {
                 command_rows(&self.browser_state, "")
@@ -177,7 +191,9 @@ impl SnapshotView {
             self.picker = None;
             return;
         }
-        picker.rows = if picker.mode == Mode::Machine {
+        picker.rows = if picker.mode == Mode::SavedMachines {
+            saved_machines::rows(&self.browser_state, picker.search.read(cx).text())
+        } else if picker.mode == Mode::Machine {
             Vec::new()
         } else if picker.mode == Mode::Commands {
             command_rows(&self.browser_state, picker.search.read(cx).text())
@@ -206,6 +222,7 @@ impl SnapshotView {
         if let Target::Command(action) = target {
             self.close_picker(window, cx);
             match action {
+                Action::SavedMachines => self.open_saved_machines(window, cx),
                 Action::AddMachine => self.open_picker_mode(Mode::Machine, window, cx),
                 Action::LocalMachine => self.select(Selection::Machine(None), window, cx),
                 Action::Home => self.select(Selection::Home, window, cx),
@@ -232,6 +249,7 @@ impl SnapshotView {
         self.close_picker(window, cx);
         self.select(
             match target {
+                Target::Machine { id, revision } => Selection::MachineProfile { id, revision },
                 Target::Session(id) => Selection::Session(id),
                 Target::Pane(id) => Selection::Pane(id),
                 Target::Theme(_) | Target::Command(_) => return,

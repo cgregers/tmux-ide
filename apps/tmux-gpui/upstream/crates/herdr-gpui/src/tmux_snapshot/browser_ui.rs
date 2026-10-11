@@ -18,6 +18,10 @@ pub(super) enum Selection {
     },
     Home,
     Machine(Option<String>),
+    MachineProfile {
+        id: String,
+        revision: u64,
+    },
     Refresh,
     Session(String),
     Pane(String),
@@ -412,10 +416,16 @@ impl SnapshotView {
         let Some(request) = self.browser_request.checked_add(1) else {
             return;
         };
-        let changing_machine = matches!(selection, Selection::Machine(_));
+        let changing_machine = matches!(
+            selection,
+            Selection::Machine(_) | Selection::MachineProfile { .. }
+        );
         let going_home = matches!(
             selection,
-            Selection::Home | Selection::Refresh | Selection::Machine(_)
+            Selection::Home
+                | Selection::Refresh
+                | Selection::Machine(_)
+                | Selection::MachineProfile { .. }
         );
         let selecting_pane = matches!(selection, Selection::Pane(_));
         let command = match selection {
@@ -446,6 +456,11 @@ impl SnapshotView {
             Selection::Machine(ssh_target) => browser::Command::Machine {
                 request,
                 ssh_target,
+            },
+            Selection::MachineProfile { id, revision } => browser::Command::MachineProfile {
+                request,
+                id,
+                revision,
             },
             Selection::Home => browser::Command::Home { request },
             Selection::Refresh => browser::Command::Refresh { request },
