@@ -111,6 +111,11 @@ test("malformed private config stays recoverable without leaking its contents", 
     lines = createInterface({ input: child.stdout });
     const line = await firstPublication(child, lines);
     const event = JSON.parse(line);
+    // These real-producer fixtures are also decoded by Rust's strict Reader tests.
+    const wireFixture = JSON.parse(
+      await readFile(new URL("../fixtures/browser-initial.json", import.meta.url), "utf8"),
+    );
+    assert.deepEqual(Object.keys(event).sort(), Object.keys(wireFixture).sort());
     assert.equal(child.exitCode, null);
     assert.equal(event.snapshot, null);
     assert.equal(event.inputReady, false);
@@ -121,6 +126,14 @@ test("malformed private config stays recoverable without leaking its contents", 
     const registryPublication = firstPublication(child, lines);
     child.stdin.write(JSON.stringify({ type: "machines", operation: "read", request: 0 }) + "\n");
     const registryEvent = JSON.parse(await registryPublication);
+    const registryFixture = JSON.parse(
+      await readFile(new URL("../fixtures/browser-machines.json", import.meta.url), "utf8"),
+    );
+    assert.deepEqual(Object.keys(registryEvent).sort(), Object.keys(registryFixture).sort());
+    assert.deepEqual(
+      Object.keys(registryEvent.machines).sort(),
+      Object.keys(registryFixture.machines).sort(),
+    );
     assert.equal(registryEvent.machines.available, true);
     assert.deepEqual(registryEvent.machines.machines, []);
     assert.equal(registryEvent.inputReady, false);

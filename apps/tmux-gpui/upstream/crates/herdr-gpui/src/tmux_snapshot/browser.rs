@@ -2,6 +2,8 @@
 use super::{Error, decode};
 #[path = "home_agents.rs"]
 pub(super) mod home_agents;
+#[path = "browser_machines.rs"]
+mod machines;
 use herdr_client::protocol::FrameData;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -96,6 +98,7 @@ pub(super) struct State {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Publication {
+    machines: Option<machines::Registry>,
     split_layout: Option<super::divider::canonical::Layout>,
     split_gesture: Option<super::divider::canonical::Ack>,
     #[serde(default)]
@@ -282,6 +285,7 @@ impl Reader {
         if p.resize_token
             .as_ref()
             .is_some_and(|token| token.len() != 36 || uuid::Uuid::parse_str(token).is_err())
+            || p.machines.as_ref().is_some_and(|m| !m.valid())
             || p.appearance.as_ref().is_some_and(|a| !a.valid())
             || p.home_agents.as_ref().is_some_and(|r| !r.valid())
             || p.workspace_agents.as_ref().is_some_and(|r| {
@@ -462,3 +466,7 @@ mod home_tests;
 #[cfg(test)]
 #[path = "browser_session_tests.rs"]
 mod session_tests;
+
+#[cfg(test)]
+#[path = "browser_machine_tests.rs"]
+mod machine_tests;
