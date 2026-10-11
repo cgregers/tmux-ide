@@ -503,3 +503,13 @@ both passed with unchanged source sessions. Evidence and exact artifact hashes:
 `evidence/packaged-fleet-home-2026-10-11/`. This narrows the packaging gap for those
 bridge workflows only; no native UI, real remote SSH, signing or install/update
 acceptance is claimed. Saved-machine removal is still source-process qualified.
+
+
+## Home/fleet CI wiring — 11 October
+
+Source Linux and exact-package macOS Home/fleet journeys are now wired into the
+GPUI workflow, with fresh private CLI builds and retained failure logs. macOS
+builds the pinned patched tmux in a private directory. The exact journey step
+passed locally against existing qualified artifacts; a new hosted run is still
+required. This does not close native UI, remote SSH or release acceptance. See
+`evidence/packaged-fleet-ci-2026-10-11/`.

@@ -36,6 +36,22 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Bridge typecheck and deterministic tests
         run: bash apps/tmux-gpui/scripts/check-bridge.sh
+      - name: Home and fleet source journeys
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/gpui-fleet-source"
+          node scripts/build-cli.mjs --outfile "$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
+          export TMUX_GPUI_TEST_CLI="$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
+          node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/server.log"
+          node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/home.log"
+      - name: Preserve Home and fleet source evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gpui-fleet-source-evidence
+          if-no-files-found: warn
+          path: ${{ runner.temp }}/gpui-fleet-source/*.log
       - name: Real isolated daemon journeys
         run: |
           node --import tsx apps/tmux-gpui/bridge/session-create-smoke.mjs
@@ -105,6 +121,33 @@ jobs:
           node_root=$(dirname "$(dirname "$node_binary")")
           bash apps/tmux-gpui/scripts/check-packaged-app.sh \
             "$node_binary" "$node_root/LICENSE" "$RUNNER_TEMP/gpui-package-check"
+      - name: Install private tmux build prerequisites
+        working-directory: .
+        run: brew install automake autoconf pkg-config libevent ncurses utf8proc
+      - name: Build pinned tmux for packaged fleet journeys
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          repository=$(node -p 'require("./native/tmux/provenance.json").repository')
+          commit=$(node -p 'require("./native/tmux/provenance.json").commit')
+          git init --quiet "$RUNNER_TEMP/gpui-tmux-source"
+          git -C "$RUNNER_TEMP/gpui-tmux-source" remote add origin "$repository"
+          git -C "$RUNNER_TEMP/gpui-tmux-source" fetch --depth=1 origin "$commit"
+          git -C "$RUNNER_TEMP/gpui-tmux-source" checkout --detach FETCH_HEAD
+          export PKG_CONFIG_PATH="$(brew --prefix libevent)/lib/pkgconfig:$(brew --prefix ncurses)/lib/pkgconfig:$(brew --prefix utf8proc)/lib/pkgconfig"
+          node scripts/build-bundled-tmux.mjs --source "$RUNNER_TEMP/gpui-tmux-source" --output "$RUNNER_TEMP/gpui-tmux-bundle" --jobs 2 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/tmux-build.log"
+      - name: Exact packaged Home and fleet journeys (no GUI)
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/build-cli.mjs --outfile "$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
+          export PATH="$RUNNER_TEMP/gpui-tmux-bundle:$PATH"
+          export TMUX_GPUI_TEST_CLI="$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
+          export TMUX_GPUI_TEST_APP="$RUNNER_TEMP/gpui-package-check/Tmux IDE CI.app"
+          node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/fleet-server.log"
+          node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/home-machine-filter.log"
       - name: Preserve packaging evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -112,6 +155,7 @@ jobs:
           name: gpui-macos-packaging-evidence
           if-no-files-found: warn
           path: |
+            ${{ runner.temp }}/gpui-tmux-bundle/manifest.json
             ${{ runner.temp }}/gpui-package-check/*.log
             ${{ runner.temp }}/gpui-package-check/native-build.json
             ${{ runner.temp }}/gpui-package-check/Tmux IDE CI.app/Contents/Resources/development-manifest.json
