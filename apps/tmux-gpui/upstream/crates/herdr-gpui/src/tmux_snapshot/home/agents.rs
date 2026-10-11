@@ -77,6 +77,7 @@ impl SnapshotView {
                 roster.truncated_rows
             )));
         body = body.child(self.home_filter_controls(cx));
+        body = body.child(self.home_recovery_controls(cx));
         if let Some(note) = &roster.note {
             body = body.child(div().min_w_0().child(note.clone()));
         }

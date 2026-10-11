@@ -1,3 +1,4 @@
+import { createHomeAgentRecovery, homeAgentRecoverySchema } from "./home-agent-recovery.ts";
 import { admitFleetAgent, discoveredAgentRequest } from "./fleet-agent-admission.ts";
 import {
   createAttentionOwner,
@@ -140,6 +141,7 @@ const commandSchema = z.union([
     .strict(),
   openEditorSchema,
   openWorkspaceAgentSchema,
+  homeAgentRecoverySchema,
   openAgentSchema,
   sessionCreateSchema,
   paneActionSchema,
@@ -287,6 +289,7 @@ let attentionSelectionRejected: { request: number; fromRequest: number; scope: n
   null;
 const attention = createAttentionOwner(publish);
 let agentOwner: ReturnType<typeof createHomeAgentObserver> | undefined;
+const homeRecovery = createHomeAgentRecovery();
 let agentPublication: ReturnType<typeof homeAgentPublication> | null = null;
 let stopFleetAgents: (() => void) | undefined;
 let agentRevision = 0;
@@ -299,6 +302,7 @@ function retireAgents() {
   agentOwner?.dispose();
   agentOwner = undefined;
   agentPublication = null;
+  homeRecovery.clear();
 }
 function startAgents() {
   retireAgents();
@@ -311,6 +315,7 @@ function startAgents() {
         ++agentRevision,
         (row) => !!discoveredAgentRequest(fleet?.resolveAgent(row.key)?.row),
       );
+      homeRecovery.adopt(value, agentRevision);
       publish();
     });
     return;
@@ -522,6 +527,7 @@ function publish() {
       home: { phase: homePhase },
       createSession: sessionCreate.publication(),
       homeAgents: surface === "home" ? agentPublication : null,
+      homeAgentRecovery: surface === "home" && fleet ? homeRecovery.publication() : null,
       // Protocol support; private hosts publish an explicit unavailable roster.
       attentionSupported: true,
       attentionAgents: attention.publication(),
@@ -979,6 +985,14 @@ async function openPane(
 }
 async function command(value: unknown) {
   const cmd = commandSchema.parse(value);
+  if (cmd.type === "home-agent-recovery") {
+    if (stopped || !fleet) return;
+    homeRecovery.command(cmd, { request, home: surface === "home", foreground }, (action) =>
+      fleet?.recoverAgents(action),
+    );
+    publish();
+    return;
+  }
   if (cmd.type === "fleet-retry" || cmd.type === "fleet-disconnect") {
     if (stopped || !foreground || cmd.request !== request || !fleet) return;
     try {

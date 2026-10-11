@@ -1,7 +1,6 @@
 import { createSharedAgentObservation } from "./shared-agent-observation.ts";
 import { createMachineAgents } from "../../../packages/daemon/src/lib/machine-agents.ts";
 import { createFleetAgentRoster } from "./fleet-agents.ts";
-import type { HomeAgentSnapshot } from "../../../packages/presentation/src/home-agent-roster.ts";
 import { randomUUID } from "node:crypto";
 import type {
   MachineConnectionHandle,
@@ -216,6 +215,7 @@ export function createNativeFleet(
       catalog.start();
     },
     observeAgents: observation.subscribe,
+    recoverAgents: (action: "retry" | "load-more") => agentRoster?.recover(action),
     resolveAgent: (key: string) => agentRoster?.resolve(key) ?? null,
     publication: () => structuredClone(publication),
     select(token: string) {

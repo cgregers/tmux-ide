@@ -382,3 +382,15 @@ Qualify observation failure recovery without reconnecting healthy machines,
 more than 32 sessions, and stale/background rejection. This does not resolve the
 separate 256-row publication cap. Machine filtering must use exact machine identity
 before truncation, recompute Home coverage, and leave global F7 scope unchanged.
+
+## Home observation recovery checkpoint — 11 October 2026
+
+Native Retry observations and Load more sessions now use the shared observer,
+including r/m shortcuts fenced from search/IME/modal input. Physical local macOS
+Load more32→33 retained search and selection; shared F7 and unchanged tmux source
+are verified by the real-process fixture. Evidence: evidence/home-recovery-2026-10-11/.
+Unavailable-source Retry, physical shortcuts, narrow/dark/IME and remote acceptance
+remain open. Prerequisite owner fixes fb008a99 and458143b6 remove polling starvation
+and legacy full-fleet discovery during semantic subscriptions. No full-parity or
+release checkbox is closed by this checkpoint. Next Home work remains exact-machine
+filtering and clearer fleet/agent hierarchy.

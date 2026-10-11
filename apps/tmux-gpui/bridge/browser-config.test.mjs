@@ -122,8 +122,10 @@ test("malformed private config stays recoverable without leaking its contents", 
         "attentionAgents",
         "attentionSelectionRejected",
         "attentionSupported",
+        "homeAgentRecovery",
       ].sort(),
     );
+    assert.equal(event.homeAgentRecovery, null);
     assert.equal(event.attentionSupported, true);
     assert.equal(event.attentionAgents, null);
     assert.equal(event.attentionSelectionRejected, null);
@@ -147,8 +149,10 @@ test("malformed private config stays recoverable without leaking its contents", 
         "attentionAgents",
         "attentionSelectionRejected",
         "attentionSupported",
+        "homeAgentRecovery",
       ].sort(),
     );
+    assert.equal(registryEvent.homeAgentRecovery, null);
     assert.equal(registryEvent.attentionSupported, true);
     assert.equal(registryEvent.attentionAgents, null);
     assert.equal(registryEvent.attentionSelectionRejected, null);

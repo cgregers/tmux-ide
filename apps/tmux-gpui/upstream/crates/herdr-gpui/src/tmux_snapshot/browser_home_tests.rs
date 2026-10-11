@@ -169,3 +169,6 @@ fn session_pane_counts_are_optional_bounded_and_not_navigation_identity() -> any
     }
     Ok(())
 }
+
+#[path = "browser_home_tests/recovery.rs"]
+mod recovery;

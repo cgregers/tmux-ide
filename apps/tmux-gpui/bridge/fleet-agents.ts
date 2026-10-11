@@ -116,6 +116,11 @@ export function createFleetAgentRoster(
       source.start();
     },
     refresh,
+    recover(action: "retry" | "load-more") {
+      if (stopped) return;
+      if (action === "retry") source.retry();
+      else source.loadMore();
+    },
     resolve(key: string) {
       const target = targets.get(key);
       if (

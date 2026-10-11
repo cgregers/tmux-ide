@@ -3,6 +3,7 @@ use super::{SnapshotView, browser, browser_ui::Selection};
 use gpui::{prelude::*, *};
 pub(super) mod filters;
 mod fleet;
+pub(super) mod recovery;
 mod selection;
 
 /// Before the first browser publication, absence of a catalog is not an empty catalog.

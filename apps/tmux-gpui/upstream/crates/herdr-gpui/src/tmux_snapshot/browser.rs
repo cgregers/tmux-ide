@@ -79,6 +79,7 @@ pub(super) struct State {
     pub resize_gesture: Option<super::divider::gesture::Ack>,
     pub workspace_agents: Option<home_agents::WorkspaceRoster>,
     pub home_agents: Option<home_agents::Roster>,
+    pub home_agent_recovery: Option<super::home::recovery::Capability>,
     pub attention_supported: bool,
     pub attention_selection_rejected: Option<super::picker::attention::Rejected>,
     pub attention_agents: Option<super::picker::attention::Publication>,
@@ -114,6 +115,7 @@ struct Publication {
     resize_gesture: Option<super::divider::gesture::Ack>,
     workspace_agents: Option<home_agents::WorkspaceRoster>,
     home_agents: Option<home_agents::Roster>,
+    home_agent_recovery: Option<super::home::recovery::Capability>,
     #[serde(default)]
     attention_supported: bool,
     attention_selection_rejected: Option<super::picker::attention::Rejected>,
@@ -149,6 +151,12 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "home-agent-recovery", rename_all = "camelCase")]
+    HomeAgentRecovery {
+        request: u64,
+        roster_revision: u64,
+        action: super::home::recovery::Action,
+    },
     #[serde(rename = "attention-observe")]
     AttentionObserve {
         request: u64,
@@ -302,6 +310,17 @@ impl Reader {
         } else {
             Surface::Home
         });
+        if p.home_agent_recovery.as_ref().is_some_and(|c| {
+            surface != Surface::Home
+                || p.fleet.is_none()
+                || c.revision == 0
+                || c.revision > 9_007_199_254_740_991
+                || p.home_agents
+                    .as_ref()
+                    .is_none_or(|r| r.revision != c.revision)
+        }) {
+            return Err(Error::Invalid("Invalid Home agent recovery"));
+        }
         // Home is a detached catalog, never a hidden terminal authority owner.
         if surface == Surface::Home
             && (p.selected_session.is_some()
@@ -428,6 +447,7 @@ impl Reader {
             resize_gesture: p.resize_gesture,
             workspace_agents: p.workspace_agents,
             home_agents: p.home_agents,
+            home_agent_recovery: p.home_agent_recovery,
             attention_supported: p.attention_supported,
             attention_selection_rejected: p.attention_selection_rejected,
             attention_agents: p.attention_agents,

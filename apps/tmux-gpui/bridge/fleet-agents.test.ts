@@ -53,6 +53,7 @@ function fixture(count = 1) {
     })),
   }));
   let listener: (() => void) | undefined;
+  const recoveries: string[] = [];
   let live = true;
   let stopped = false;
   let route = "route-1";
@@ -68,8 +69,12 @@ function fixture(count = 1) {
     },
     isCurrentTarget: () => live && !stopped,
     start() {},
-    retry() {},
-    loadMore() {},
+    retry() {
+      recoveries.push("retry");
+    },
+    loadMore() {
+      recoveries.push("load-more");
+    },
     dispose() {
       stopped = true;
     },
@@ -86,6 +91,7 @@ function fixture(count = 1) {
   owner.start();
   return {
     owner,
+    recoveries,
     snapshot: () => snapshot!,
     emit: () => listener?.(),
     replace: () => {
@@ -271,4 +277,15 @@ test("navigation/presence and route replacement fence delayed inventory and rout
     ),
     /route replaced/,
   );
+});
+
+test("roster recovery delegates to resident source and stops after disposal", () => {
+  const f = fixture();
+  f.owner.recover("retry");
+  f.owner.recover("load-more");
+  assert.deepEqual(f.recoveries, ["retry", "load-more"]);
+  assert.equal(f.stopped(), false);
+  f.owner.dispose();
+  f.owner.recover("retry");
+  assert.equal(f.recoveries.length, 2);
 });
