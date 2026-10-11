@@ -91,6 +91,13 @@ const commandSchema = z.union([
   machineRegistryCommand,
   z
     .object({
+      type: z.literal("fleet-disconnect"),
+      request: z.number().int().nonnegative().safe(),
+      disconnect: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("fleet-retry"),
       request: z.number().int().nonnegative().safe(),
       retry: z.string().uuid(),
@@ -819,12 +826,13 @@ async function openPane(
 }
 async function command(value: unknown) {
   const cmd = commandSchema.parse(value);
-  if (cmd.type === "fleet-retry") {
+  if (cmd.type === "fleet-retry" || cmd.type === "fleet-disconnect") {
     if (stopped || !foreground || cmd.request !== request || !fleet) return;
     try {
-      fleet.retry(cmd.retry);
+      if (cmd.type === "fleet-retry") fleet.retry(cmd.retry);
+      else fleet.disconnect(cmd.disconnect);
     } catch {
-      /* Stale displayed connections cannot be retried. */
+      /* Stale displayed connections cannot operate on replacement routes. */
     }
     publish();
     return;

@@ -78,6 +78,23 @@ impl SnapshotView {
                         })),
                 );
             }
+            if let Some(token) = group.disconnect.clone() {
+                card = card.child(
+                    div()
+                        .id(("fleet-disconnect", index))
+                        .mt_2()
+                        .px_3()
+                        .py_1()
+                        .rounded(px(4.))
+                        .bg(rgb(theme.active))
+                        .cursor_pointer()
+                        .child("Disconnect")
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            cx.stop_propagation();
+                            view.disconnect_fleet_machine(request, &token, window, cx);
+                        })),
+                );
+            }
             if group.sessions.is_empty() {
                 card = card.child(
                     div()

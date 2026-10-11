@@ -142,6 +142,11 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "fleet-disconnect")]
+    FleetDisconnect {
+        request: u64,
+        disconnect: String,
+    },
     #[serde(rename = "fleet-retry")]
     FleetRetry {
         request: u64,
@@ -508,3 +513,7 @@ mod fleet_tests;
 #[cfg(test)]
 #[path = "browser_fleet_retry_tests.rs"]
 mod fleet_retry_tests;
+
+#[cfg(test)]
+#[path = "browser_fleet_disconnect_tests.rs"]
+mod fleet_disconnect_tests;

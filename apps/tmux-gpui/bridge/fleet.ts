@@ -16,6 +16,7 @@ export interface NativeFleetPublication {
     state: "ready" | "connecting" | "disconnected";
     conflict: boolean;
     retry: string | null;
+    disconnect: string | null;
     omittedSessions: number;
     sessions: {
       id: string;
@@ -61,6 +62,13 @@ export function createNativeFleet(
   let stop = () => {};
   let routes = new Map<string, Route>();
   let retries = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
+  let disconnects = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
+  const canDisconnect = (entry: { handle: MachineConnectionHandle; epoch: number }) =>
+    !stopped &&
+    manager.getMachine(entry.handle.id) === entry.handle &&
+    entry.handle.kind === "ssh" &&
+    entry.handle.endpoint().state !== "disconnected" &&
+    entry.handle.endpoint().epoch === entry.epoch;
   const canRetry = (entry: { handle: MachineConnectionHandle; epoch: number }) =>
     !stopped &&
     manager.getMachine(entry.handle.id) === entry.handle &&
@@ -85,6 +93,7 @@ export function createNativeFleet(
     const previous = new Map([...routes].map(([token, route]) => [route.key, { token, route }]));
     const next = new Map<string, Route>();
     const nextRetries = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
+    const nextDisconnects = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
     let remaining = 512;
     publication = {
       omittedGroups: Math.max(0, snapshot.groups.length - 64),
@@ -102,8 +111,20 @@ export function createNativeFleet(
             nextRetries.set(retry, entry);
           }
         }
+        let disconnect: string | null = null;
+        if (handle) {
+          const entry = { handle, epoch: handle.endpoint().epoch };
+          if (canDisconnect(entry)) {
+            disconnect =
+              [...disconnects].find(
+                ([, old]) => old.handle === handle && canDisconnect(old),
+              )?.[0] ?? randomUUID();
+            nextDisconnects.set(disconnect, entry);
+          }
+        }
         return {
           id: group.id,
+          disconnect,
           retry,
           label: group.label.slice(0, 256),
           state: group.state,
@@ -153,6 +174,7 @@ export function createNativeFleet(
     };
     routes = next;
     retries = nextRetries;
+    disconnects = nextDisconnects;
     changed();
   };
   return {
@@ -190,6 +212,13 @@ export function createNativeFleet(
       catalog.retry(entry.handle.id);
       update();
     },
+    disconnect: (token: string) => {
+      const entry = disconnects.get(token);
+      if (!entry || !canDisconnect(entry)) throw new FleetSelectionError();
+      disconnects.delete(token);
+      manager.disconnect(entry.handle.id);
+      update();
+    },
     dispose() {
       if (stopped) return;
       stopped = true;
@@ -197,6 +226,7 @@ export function createNativeFleet(
       catalog.dispose();
       routes.clear();
       retries.clear();
+      disconnects.clear();
       publication = { groups: [], omittedGroups: 0 };
     },
   };

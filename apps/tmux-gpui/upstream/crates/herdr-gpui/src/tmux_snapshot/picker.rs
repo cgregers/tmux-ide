@@ -23,6 +23,7 @@ pub(super) enum Target {
         enabled: bool,
     },
     FleetRetry(String),
+    FleetDisconnect(String),
     Session(String),
     FleetSession {
         selection: String,
@@ -133,6 +134,12 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
 }
 fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::FleetDisconnect(token) => state.fleet.as_ref().is_some_and(|fleet| {
+            fleet
+                .groups
+                .iter()
+                .any(|group| group.disconnect.as_ref() == Some(token))
+        }),
         Target::FleetRetry(token) => state.fleet.as_ref().is_some_and(|fleet| {
             fleet
                 .groups
@@ -212,6 +219,45 @@ impl SnapshotView {
         }
         if let Some(picker) = &mut self.picker {
             picker.error = Some("Retry queue unavailable — try again or restart the preview");
+        }
+        cx.notify();
+        false
+    }
+
+    pub(in crate::tmux_snapshot) fn disconnect_fleet_machine(
+        &mut self,
+        request: u64,
+        token: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.browser_commands.is_none()
+            || request != self.browser_request
+            || !self.browser_state.fleet.as_ref().is_some_and(|fleet| {
+                fleet
+                    .groups
+                    .iter()
+                    .any(|g| g.disconnect.as_deref() == Some(token))
+            })
+        {
+            return false;
+        }
+        if self.browser_commands.as_ref().is_some_and(|sender| {
+            sender
+                .try_send(browser::Command::FleetDisconnect {
+                    request,
+                    disconnect: token.into(),
+                })
+                .is_ok()
+        }) {
+            return true;
+        }
+        // Home and F5 share the same visible failure surface; do not silently close it.
+        if self.picker.is_none() {
+            self.open_commands(window, cx);
+        }
+        if let Some(picker) = &mut self.picker {
+            picker.error = Some("Disconnect queue unavailable — try again or restart the preview");
         }
         cx.notify();
         false
@@ -330,6 +376,12 @@ impl SnapshotView {
         {
             return;
         }
+        if let Target::FleetDisconnect(token) = &target {
+            if self.disconnect_fleet_machine(self.browser_request, token, window, cx) {
+                self.close_picker(window, cx);
+            }
+            return;
+        }
         if let Target::FleetRetry(token) = &target {
             if self.retry_fleet_machine(self.browser_request, token, window, cx) {
                 self.close_picker(window, cx);
@@ -412,7 +464,8 @@ impl SnapshotView {
                 Target::Theme(_)
                 | Target::Command(_)
                 | Target::MachineToggle { .. }
-                | Target::FleetRetry(_) => return,
+                | Target::FleetRetry(_)
+                | Target::FleetDisconnect(_) => return,
             },
             window,
             cx,

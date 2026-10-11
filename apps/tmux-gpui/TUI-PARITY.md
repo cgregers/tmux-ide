@@ -250,3 +250,14 @@ connection manager. Per-route tokens reject removed/replaced targets; retry does
 not change saved settings or navigation. Queue failure stays visible in the
 command picker. Physical native interaction and real SSH recovery are still open;
 see `evidence/native-fleet-retry-2026-10-11/`.
+
+## Disconnect a fleet machine
+
+Native Home and F5 now expose Disconnect through the same manager operation used
+by the TUI machine sidebar (`application-machine-navigation.ts`). This pauses that
+SSH connection without disabling/removing its saved profile or stopping remote
+sessions. A one-use capability binds the exact live handle and endpoint epoch;
+replacement/removal retires it. A catalog failure does not necessarily close the
+SSH transport, so Disconnect can remain available beside an unavailable catalog.
+Selected route retirement reuses the existing input/child retirement path. Real
+remote SSH/PTY acceptance remains a separate gate.

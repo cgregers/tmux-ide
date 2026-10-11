@@ -2,6 +2,7 @@
 use super::*;
 mod commands;
 mod fleet;
+mod fleet_disconnect;
 mod fleet_retry;
 mod machine;
 mod navigation_keys;

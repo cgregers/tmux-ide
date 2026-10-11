@@ -59,6 +59,18 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
                     });
                 }
             }
+            if let Some(token) = &group.disconnect {
+                let label = format!("Disconnect machine · {}", group.label);
+                if query
+                    .split_whitespace()
+                    .all(|term| label.to_lowercase().contains(term))
+                {
+                    rows.push(Row {
+                        target: Target::FleetDisconnect(token.clone()),
+                        label,
+                    });
+                }
+            }
         }
     }
     rows

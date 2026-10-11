@@ -303,3 +303,81 @@ test("retry token cannot reconnect a removed or replaced saved machine", async (
     f.close();
   }
 });
+
+test("disconnect retires selected input authority, preserves profiles and siblings, and allows explicit retry", async () => {
+  const f = await fixture(2);
+  try {
+    const profile = f.profiles[0]!;
+    const group = () => f.fleet.publication().groups.find((g) => g.id === profile.id)!;
+    const selected = f.fleet.select(group().sessions[0]!.selection!);
+    const sibling = f.manager.getMachine(f.profiles[1]!.id)!;
+    const epoch = sibling.endpoint().epoch;
+    const profiles = f.manager
+      .snapshot()
+      .machines.map(({ id, label, kind, sshTarget }) => ({ id, label, kind, sshTarget }));
+    const token = group().disconnect!;
+    assert.ok(token);
+    assert.equal(f.fleet.publication().groups.find((g) => g.id === "local")!.disconnect, null);
+    f.fleet.disconnect(token);
+    assert.throws(selected.assertCurrent, /changed/);
+    assert.throws(() => f.fleet.disconnect(token), /changed/);
+    assert.equal(group().disconnect, null);
+    assert.ok(group().retry);
+    assert.equal(f.manager.getMachine(profile.id)!.endpoint().state, "disconnected");
+    assert.equal(f.manager.getMachine(sibling.id), sibling);
+    assert.equal(sibling.endpoint().epoch, epoch);
+    assert.deepEqual(
+      f.manager
+        .snapshot()
+        .machines.map(({ id, label, kind, sshTarget }) => ({ id, label, kind, sshTarget })),
+      profiles,
+    );
+    // Reconciliation with unchanged saved settings must not undo deliberate disconnect.
+    f.manager.reconcile(f.profiles);
+    assert.equal(f.manager.getMachine(profile.id)!.endpoint().state, "disconnected");
+  } finally {
+    f.close();
+  }
+});
+
+test("disconnect tokens survive display edits but reject replaced, removed and disposed routes", async () => {
+  const f = await fixture();
+  try {
+    const profile = f.profiles[0]!;
+    const token = f.fleet.publication().groups.find((g) => g.id === profile.id)!.disconnect!;
+    f.manager.reconcile([{ ...profile, label: "Renamed" }]);
+    assert.equal(f.fleet.publication().groups.find((g) => g.id === profile.id)!.disconnect, token);
+    f.manager.reconcile([{ ...profile, sshTarget: "replacement" }]);
+    assert.throws(() => f.fleet.disconnect(token), /changed/);
+    await f.manager.getMachine(profile.id)!.ready;
+    const replacement = f.fleet.publication().groups.find((g) => g.id === profile.id)!.disconnect!;
+    assert.ok(replacement);
+    assert.notEqual(replacement, token);
+    f.manager.reconcile([]);
+    assert.throws(() => f.fleet.disconnect(replacement), /changed/);
+    f.fleet.dispose();
+    assert.throws(() => f.fleet.disconnect(replacement), /changed/);
+  } finally {
+    f.close();
+  }
+});
+
+test("catalog failure does not hide disconnect for a still-connected SSH transport", async () => {
+  const f = await fixture();
+  try {
+    const id = f.profiles[0]!.id;
+    f.emitters.get(id)!({
+      phase: "unavailable",
+      daemonInstanceId: null,
+      sessions: [],
+      note: "fixture",
+    });
+    const group = f.fleet.publication().groups.find((g) => g.id === id)!;
+    assert.equal(group.state, "disconnected");
+    assert.ok(group.disconnect);
+    f.fleet.disconnect(group.disconnect);
+    assert.equal(f.manager.getMachine(id)!.endpoint().state, "disconnected");
+  } finally {
+    f.close();
+  }
+});

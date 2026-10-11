@@ -17,6 +17,8 @@ pub(in crate::tmux_snapshot) struct Group {
     pub conflict: bool,
     #[serde(default)]
     pub retry: Option<String>,
+    #[serde(default)]
+    pub disconnect: Option<String>,
     pub omitted_sessions: u64,
     pub sessions: Vec<Session>,
 }
@@ -62,6 +64,11 @@ impl Fleet {
                         g.state == Phase::Disconnected
                             && !g.conflict
                             && token.len() == 36
+                            && uuid::Uuid::parse_str(token).is_ok()
+                            && tokens.insert(token)
+                    })
+                    && g.disconnect.as_ref().is_none_or(|token| {
+                        token.len() == 36
                             && uuid::Uuid::parse_str(token).is_ok()
                             && tokens.insert(token)
                     })
