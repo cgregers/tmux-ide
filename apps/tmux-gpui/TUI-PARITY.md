@@ -99,7 +99,11 @@ owner on Home refresh, and clears its catalog/input/child when the route retires
 An isolated process fixture covers connection, refresh and disconnect; real SSH
 and physical remote-terminal acceptance remain pending. A centered native SSH
 dialog is available through F5, with a Local action that cancels pending discovery.
-Saved-machine navigation and persistence remain pending. Reuse SavedMachineSchema and scoped clients;
+The bridge now exposes lazy local-registry read/save/edit/enable/disable/remove
+commands using the shared daemon-owned persistence path. Stale revisions and
+overlapping writes are rejected; uncertain replies are reconciled without replay.
+Native saved-machine controls and UUID-based routing remain pending.
+Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
 Cancellation, child cleanup, sanitized failures, generation mismatches and late
 completion after a machine switch must remain fenced through the native adapter.

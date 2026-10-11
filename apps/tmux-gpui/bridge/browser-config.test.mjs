@@ -116,6 +116,14 @@ test("malformed private config stays recoverable without leaking its contents", 
     assert.equal(event.inputReady, false);
     assert.match(event.status, /unavailable/);
     assert.ok(!line.includes("PRIVATE_TEST_SENTINEL"));
+    assert.equal(event.machines, null);
+    // Machine management remains local and usable even when terminal discovery fails.
+    const registryPublication = firstPublication(child, lines);
+    child.stdin.write(JSON.stringify({ type: "machines", operation: "read", request: 0 }) + "\n");
+    const registryEvent = JSON.parse(await registryPublication);
+    assert.equal(registryEvent.machines.available, true);
+    assert.deepEqual(registryEvent.machines.machines, []);
+    assert.equal(registryEvent.inputReady, false);
     child.stdin.end();
     const result = await Promise.race([
       closed,

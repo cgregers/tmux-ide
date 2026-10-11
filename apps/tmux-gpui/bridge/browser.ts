@@ -1,3 +1,8 @@
+import { createNativeMachineRegistry, MachineRegistryError } from "./machines.ts";
+import {
+  SavedMachineSchema,
+  SavedMachineMutationSchema,
+} from "../../../packages/contracts/src/saved-machines.ts";
 import { splitRefreshGuard, refreshSplitInventory } from "./pane-split-refresh.ts";
 import { WorkspaceWindowSplitResultSchemaZ } from "../../../packages/contracts/src/workspace-multiplexer.ts";
 import {
@@ -47,7 +52,35 @@ import { connectionSchema } from "./config.ts";
 import { createPreviewHostSource, remoteHostConfigSchema } from "./host-source.ts";
 import { RemoteRouteError } from "./remote-route.ts";
 
+const machineRegistryCommand = z.discriminatedUnion("operation", [
+  z
+    .object({
+      type: z.literal("machines"),
+      operation: z.literal("read"),
+      request: z.number().int().nonnegative().safe(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("machines"),
+      operation: z.literal("save"),
+      request: z.number().int().nonnegative().safe(),
+      revision: z.number().int().nonnegative().safe(),
+      machine: SavedMachineSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("machines"),
+      operation: z.literal("mutate"),
+      request: z.number().int().nonnegative().safe(),
+      revision: z.number().int().nonnegative().safe(),
+      change: SavedMachineMutationSchema,
+    })
+    .strict(),
+]);
 const commandSchema = z.union([
+  machineRegistryCommand,
   z
     .object({
       type: z.literal("machine"),
@@ -100,6 +133,8 @@ const commandSchema = z.union([
 const MAX_FRAME = 8 * 1024 * 1024;
 const appearance = createAppearanceOwner();
 const sessionCreate = createSessionOwner();
+let machines: ReturnType<typeof createNativeMachineRegistry> | undefined;
+let machineMessage: string | null = null;
 let hostSource: ReturnType<typeof createPreviewHostSource> | undefined;
 let machineRouteRevision = 0;
 async function readHost() {
@@ -307,6 +342,7 @@ function publish() {
       paneActions: inputReady && snapshot ? paneActions : null,
       presenceRevision: appliedPresenceRevision,
       appearance: appearance.publication(),
+      machines: machines ? { ...machines.publication(), message: machineMessage } : null,
     }) + "\n";
   if (Buffer.byteLength(line) > MAX_FRAME) throw new Error("Browser publication too large");
   if (blocked) pending = line;
@@ -364,6 +400,7 @@ async function stop() {
   if (stopped) return;
   stopped = true;
   hostSource?.dispose();
+  machines?.dispose();
   retireAgents();
   catalog?.dispose();
   await retire();
@@ -717,6 +754,36 @@ async function openPane(
 }
 async function command(value: unknown) {
   const cmd = commandSchema.parse(value);
+  if (cmd.type === "machines") {
+    if (stopped || !foreground || cmd.request !== request) return;
+    if (!machines) {
+      machines = createNativeMachineRegistry(publish);
+      machines.start();
+    }
+    machineMessage = null;
+    if (cmd.operation === "read") {
+      machines.refresh();
+      publish();
+      return;
+    }
+    const owner = machines;
+    // Mutations target the canonical local registry, never the selected SSH host.
+    // Keep stdin responsive; an uncertain response is reconciled, never replayed.
+    const operation =
+      cmd.operation === "save"
+        ? owner.save(cmd.machine, cmd.revision)
+        : owner.mutate(cmd.change, cmd.revision);
+    void operation.catch((error) => {
+      if (stopped || machines !== owner) return;
+      machineMessage =
+        error instanceof MachineRegistryError
+          ? error.message
+          : "Machine change unavailable — refresh saved machines";
+      publish();
+    });
+    publish();
+    return;
+  }
   if (cmd.type === "create-session") {
     const owner = catalog;
     const token = request;
