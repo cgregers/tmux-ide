@@ -20,10 +20,10 @@ test at apps/tmux-gpui/bridge/fleet.test.ts:1:6690
 ✖ retry uses the captured disconnected handle, leaves siblings and selection alone, and consumes its token (1.6905ms)
   AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
   + actual - expected
-  
+
   + 'disconnected'
   - 'connecting'
-  
+
       at TestContext.<anonymous> (/Users/thijs/.codex/worktrees/retire-web-desktop/tmux-ide/apps/tmux-gpui/bridge/fleet.test.ts:264:12)
       at async Test.run (node:internal/test_runner/test:1409:7)
       at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
