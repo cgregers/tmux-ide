@@ -28,6 +28,10 @@
     "./errors": {
       "types": "./dist/command-center/actions/errors.d.ts",
       "default": "./dist/command-center/actions/errors.js"
+    },
+    "./connection-owner": {
+      "types": "./dist/lib/daemon-connection-owner.d.ts",
+      "default": "./dist/lib/daemon-connection-owner.js"
     }
   },
   "files": [

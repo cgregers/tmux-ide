@@ -87,12 +87,16 @@ action and does not satisfy this section.
 
 Native preview is primarily local; a local demo does not qualify fleet parity.
 
-Next machine slice: make the existing Node SSH transport/authority owner reusable
-outside TUI internals, with TUI behavior preserved. The native adapter should reuse
-SavedMachineSchema, runtime supervision and scoped clients; it must not import the
-Solid navigation singleton or implement a second SSH stack. Test cancellation,
-child cleanup, sanitized failures, generation mismatches and late completion after
-a machine switch before exposing the Add machine dialog.
+The Node connection owner is now reusable through
+`@tmux-ide/daemon/connection-owner` (`createDaemonConnectionOwner`). The TUI retains
+its telemetry adapter and consumes the same owner; the public subpath brings in
+no TUI modules. This is a Node-only API and does not belong in host-neutral clients.
+
+Next machine slice: bind the GPUI bridge to this owner with explicit route lifetime,
+then add the native machine dialog. Reuse SavedMachineSchema and scoped clients;
+never import the Solid navigation singleton or implement a second SSH stack.
+Cancellation, child cleanup, sanitized failures, generation mismatches and late
+completion after a machine switch must remain fenced through the native adapter.
 
 - [ ] Native add-machine/SSH flow and machine/session grouping.
 - [ ] Match retry, disconnect, unavailable-machine feedback and identity conflict diagnostics.
