@@ -1,5 +1,10 @@
-import { createNativeMachineRegistry, MachineRegistryError } from "./machines.ts";
 import {
+  createNativeMachineRegistry,
+  MachineRegistryError,
+  savedMachineRouteMatches,
+} from "./machines.ts";
+import {
+  type SavedMachine,
   SavedMachineSchema,
   SavedMachineMutationSchema,
 } from "../../../packages/contracts/src/saved-machines.ts";
@@ -83,6 +88,14 @@ const commandSchema = z.union([
   machineRegistryCommand,
   z
     .object({
+      type: z.literal("machine-profile"),
+      request: z.number().int().positive().safe(),
+      id: SavedMachineSchema.shape.id,
+      revision: z.number().int().nonnegative().safe(),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("machine"),
       request: z.number().int().positive().safe(),
       sshTarget: remoteHostConfigSchema.shape.sshTarget.nullable(),
@@ -135,10 +148,28 @@ const appearance = createAppearanceOwner();
 const sessionCreate = createSessionOwner();
 let machines: ReturnType<typeof createNativeMachineRegistry> | undefined;
 let machineMessage: string | null = null;
+let selectedMachineProfile: SavedMachine | null = null;
+let savedMachineRetired = false;
+function machinesChanged() {
+  if (
+    selectedMachineProfile &&
+    machines &&
+    !savedMachineRouteMatches(selectedMachineProfile, machines.publication())
+  ) {
+    selectedMachineProfile = null;
+    savedMachineRetired = true;
+    hostSource?.dispose();
+    hostSource = undefined;
+    retireMachineRoute();
+    status = "Saved machine changed — select a machine again";
+  }
+  publish();
+}
 let hostSource: ReturnType<typeof createPreviewHostSource> | undefined;
 let machineRouteRevision = 0;
 async function readHost() {
   try {
+    if (savedMachineRetired) throw new MachineRegistryError("inactive");
     if (process.argv.length !== 3) throw new Error("Invalid browser arguments");
     hostSource ??= createPreviewHostSource(process.argv[2]!, retireMachineRoute);
     return await hostSource.read();
@@ -146,7 +177,8 @@ async function readHost() {
     if (
       error instanceof DaemonCompatibilityError ||
       error instanceof DaemonDiscoveryError ||
-      error instanceof RemoteRouteError
+      error instanceof RemoteRouteError ||
+      error instanceof MachineRegistryError
     )
       throw error;
     // Parser errors can include pieces of the private JSON document.
@@ -757,7 +789,7 @@ async function command(value: unknown) {
   if (cmd.type === "machines") {
     if (stopped || !foreground || cmd.request !== request) return;
     if (!machines) {
-      machines = createNativeMachineRegistry(publish);
+      machines = createNativeMachineRegistry(machinesChanged);
       machines.start();
     }
     machineMessage = null;
@@ -1135,7 +1167,12 @@ async function command(value: unknown) {
   paneActions = null;
   status = "Loading";
   surface =
-    cmd.type === "home" || cmd.type === "refresh" || cmd.type === "machine" ? "home" : "workspace";
+    cmd.type === "home" ||
+    cmd.type === "refresh" ||
+    cmd.type === "machine" ||
+    cmd.type === "machine-profile"
+      ? "home"
+      : "workspace";
   if (surface === "home") {
     homePhase = "loading";
     sessions = [];
@@ -1146,16 +1183,29 @@ async function command(value: unknown) {
     selectedSession = null;
   }
   publish();
-  if (cmd.type === "machine") {
+  await retire();
+  if (stopped || token !== request) return;
+  if (cmd.type === "machine" || cmd.type === "machine-profile") {
+    // A refused selection must acknowledge the new request too, or the native
+    // client (which already advanced its request) stays stuck on Loading.
+    const savedProfile =
+      cmd.type === "machine-profile" ? machines?.select(cmd.id, cmd.revision) : undefined;
+    if (cmd.type === "machine-profile" && !savedProfile) throw new MachineRegistryError("inactive");
+    selectedMachineProfile = savedProfile ?? null;
+    savedMachineRetired = false;
     machineRouteRevision++;
     hostSource ??= createPreviewHostSource(process.argv[2]!, retireMachineRoute);
-    hostSource.select(cmd.sshTarget);
+    if (savedProfile) hostSource.select(savedProfile.sshTarget, savedProfile.expectedEnvironmentId);
+    else if (cmd.type === "machine") hostSource.select(cmd.sshTarget);
     catalog?.dispose();
     catalog = undefined;
   }
-  await retire();
-  if (stopped || token !== request) return;
-  if (cmd.type === "machine" || cmd.type === "refresh" || cmd.type === "home") {
+  if (
+    cmd.type === "machine" ||
+    cmd.type === "machine-profile" ||
+    cmd.type === "refresh" ||
+    cmd.type === "home"
+  ) {
     launchRefresh(token);
     return;
   }
@@ -1191,7 +1241,8 @@ function launchRefresh(token: number) {
       error instanceof DaemonCompatibilityError ||
       error instanceof DaemonDiscoveryError ||
       error instanceof CatalogStageError ||
-      error instanceof RemoteRouteError
+      error instanceof RemoteRouteError ||
+      error instanceof MachineRegistryError
         ? error.message
         : "Connection unavailable — start the daemon and refresh";
     publish();
@@ -1223,7 +1274,8 @@ try {
           error instanceof DaemonCompatibilityError ||
           error instanceof DaemonDiscoveryError ||
           error instanceof CatalogStageError ||
-          error instanceof RemoteRouteError
+          error instanceof RemoteRouteError ||
+          error instanceof MachineRegistryError
             ? error.message
             : "Connection or selection unavailable — refresh the catalog";
         publish();

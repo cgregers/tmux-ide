@@ -1,7 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { createNativeMachineRegistry, MachineRegistryError } from "./machines.ts";
+import {
+  createNativeMachineRegistry,
+  MachineRegistryError,
+  savedMachineRouteMatches,
+} from "./machines.ts";
 import type { SavedMachineRegistry } from "../../../packages/contracts/src/saved-machines.ts";
 
 function fixture() {
@@ -169,6 +173,29 @@ test("uncertain write response refreshes local state and exposes a fixed error, 
     assert.equal(JSON.stringify(f.owner.publication()).includes("secret token"), false);
     f.owner.refresh();
     assert.equal(f.owner.publication().error, null);
+  } finally {
+    f.owner.dispose();
+  }
+});
+
+test("saved route reconciliation preserves display edits and rejects authority changes", () => {
+  const f = fixture();
+  try {
+    const selected = f.registry.machines[0]!;
+    const publication = f.owner.publication();
+    const changed = (patch: Partial<typeof selected>) => ({
+      ...publication,
+      machines: [{ ...selected, ...patch }],
+    });
+    assert.equal(savedMachineRouteMatches(selected, changed({ label: "Renamed" })), true);
+    for (const patch of [
+      { enabled: false },
+      { sshTarget: "elsewhere" },
+      { expectedEnvironmentId: randomUUID() },
+    ])
+      assert.equal(savedMachineRouteMatches(selected, changed(patch)), false);
+    assert.equal(savedMachineRouteMatches(selected, { ...publication, machines: [] }), false);
+    assert.equal(savedMachineRouteMatches(selected, { ...publication, available: false }), false);
   } finally {
     f.owner.dispose();
   }

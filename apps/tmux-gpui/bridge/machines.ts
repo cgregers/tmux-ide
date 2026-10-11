@@ -140,3 +140,20 @@ export function createNativeMachineRegistry(changed: () => void, io: typeof defa
     },
   };
 }
+
+/** Display-only edits do not replace a live route; authority changes always do. */
+export function savedMachineRouteMatches(
+  selected: SavedMachine,
+  publication: Pick<
+    ReturnType<ReturnType<typeof createNativeMachineRegistry>["publication"]>,
+    "available" | "machines"
+  >,
+): boolean {
+  const current = publication.machines.find((machine) => machine.id === selected.id);
+  return (
+    publication.available &&
+    !!current?.enabled &&
+    current.sshTarget === selected.sshTarget &&
+    current.expectedEnvironmentId === selected.expectedEnvironmentId
+  );
+}

@@ -190,6 +190,7 @@ test(
       const { DAEMON_WIRE_PROTOCOL_VERSION } =
         await import("../../../packages/contracts/src/index.ts");
       const daemon = {
+        environmentId: randomUUID(),
         pid: 1234,
         port: 4000,
         protocolVersion: DAEMON_WIRE_PROTOCOL_VERSION,
@@ -223,6 +224,7 @@ test(
             ...isolatedEnvironment(directory),
             PATH: `${directory}:${dirname(process.execPath)}`,
             GPUI_TEST_REMOTE_DIRECTORY: directory,
+            TMUX_IDE_REGISTRY_DIR: directory,
           },
         },
       );
@@ -319,6 +321,73 @@ test(
         child.stdin.write(JSON.stringify(command) + "\n");
       await until((event) => event.request === 5 && event.home.phase === "unavailable");
       assert.ok(Date.now() - cancelStarted < 3000, "Local cancellation waited for SSH timeout");
+      await rm(join(directory, "disconnect"));
+      const profile = {
+        id: randomUUID(),
+        label: "Saved fixture",
+        sshTarget: "fixture-only",
+        expectedEnvironmentId: daemon.environmentId,
+        enabled: true,
+      };
+      const saveFixture = (machine) =>
+        writeFile(
+          join(directory, "machines.json"),
+          JSON.stringify({ version: 1, machines: [machine] }),
+          { mode: 0o600 },
+        );
+      await saveFixture(profile);
+      const send = (command) => child.stdin.write(JSON.stringify(command) + "\n");
+      send({ type: "machines", operation: "read", request: 5 });
+      let registry = (
+        await until((event) => event.machines?.available && event.machines.machines.length === 1)
+      ).machines;
+      send({ type: "machine-profile", request: 6, id: profile.id, revision: registry.revision });
+      await until((event) => event.request === 6 && event.home.phase === "live");
+      const traceBeforeRename = await readFile(join(directory, "transport.log"), "utf8");
+      await saveFixture({ ...profile, label: "Renamed" });
+      registry = (await until((event) => event.machines?.machines[0]?.label === "Renamed"))
+        .machines;
+      assert.equal(await readFile(join(directory, "transport.log"), "utf8"), traceBeforeRename);
+      await saveFixture({ ...profile, sshTarget: "slow-fixture" });
+      const revoked = await until((event) => /Saved machine changed/.test(event.status));
+      assert.equal(revoked.inputReady, false);
+      assert.deepEqual(revoked.sessions, []);
+      registry = revoked.machines;
+      send({ type: "refresh", request: 7 });
+      await until((event) => event.request === 7 && event.home.phase === "unavailable");
+      // Refresh must not silently fall back to the original private host route.
+      assert.equal(
+        (await readFile(join(directory, "transport.log"), "utf8")).split("opened").length,
+        traceBeforeRename.split("opened").length,
+      );
+      await rm(join(directory, "slow-open"));
+      send({ type: "machine-profile", request: 8, id: profile.id, revision: registry.revision });
+      for (let attempt = 0; attempt < 200; attempt++) {
+        try {
+          await readFile(join(directory, "slow-open"));
+          break;
+        } catch {
+          await delay(10);
+        }
+      }
+      await readFile(join(directory, "slow-open"));
+      await saveFixture({ ...profile, sshTarget: "slow-fixture", enabled: false });
+      await until((event) => event.request === 8 && /Saved machine changed/.test(event.status));
+      send({ type: "refresh", request: 9 });
+      await until((event) => event.request === 9 && event.home.phase === "unavailable");
+      send({ type: "machine", request: 10, sshTarget: null });
+      await until((event) => event.request === 10 && event.home.phase === "unavailable");
+      const transportBeforeRefusal = await readFile(join(directory, "transport.log"), "utf8");
+      send({ type: "machine-profile", request: 11, id: profile.id, revision: 0 });
+      const refused = await until(
+        (event) => event.request === 11 && event.home.phase === "unavailable",
+      );
+      assert.equal(refused.inputReady, false);
+      assert.equal(refused.selectedSession, null);
+      assert.equal(
+        await readFile(join(directory, "transport.log"), "utf8"),
+        transportBeforeRefusal,
+      );
       child.stdin.end();
       const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
       try {

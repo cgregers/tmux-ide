@@ -28,6 +28,7 @@ if (index < 0 && args.includes("slow-fixture")) {
       result = {
         status: "ok",
         daemon: {
+          environmentId: daemon.environmentId,
           protocolVersion: daemon.protocolVersion,
           productVersion: daemon.productVersion,
           instanceId: daemon.instanceId,

@@ -34,7 +34,7 @@ export function createPreviewHostSource(
   let route: RemotePreviewRoute | null = null;
   let removeAbort = () => {};
   const lifetime = new AbortController();
-  let selection: { sshTarget: string } | null | undefined;
+  let selection: z.infer<typeof remoteHostConfigSchema> | null | undefined;
   const clearRoute = () => {
     removeAbort();
     removeAbort = () => {};
@@ -47,8 +47,11 @@ export function createPreviewHostSource(
     remote = null;
   };
   return {
-    select(sshTarget: string | null) {
-      const next = sshTarget === null ? null : remoteHostConfigSchema.parse({ sshTarget });
+    select(sshTarget: string | null, expectedEnvironmentId?: string) {
+      const next =
+        sshTarget === null
+          ? null
+          : remoteHostConfigSchema.parse({ sshTarget, expectedEnvironmentId });
       revision++;
       clearRemote();
       selection = next;

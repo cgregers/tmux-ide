@@ -8,6 +8,7 @@ import { createPreviewHostSource, remoteHostConfigSchema } from "./host-source.t
 
 function fixture() {
   const daemon = {
+    environmentId: randomUUID(),
     pid: 1234,
     port: 4000,
     protocolVersion: DAEMON_WIRE_PROTOCOL_VERSION,
@@ -65,6 +66,7 @@ function fixture() {
             return Response.json({
               status: "ok",
               daemon: {
+                environmentId: daemon.environmentId,
                 protocolVersion: daemon.protocolVersion,
                 productVersion: daemon.productVersion,
                 instanceId: daemon.instanceId,
@@ -81,6 +83,7 @@ function fixture() {
   };
   return {
     host,
+    daemon,
     dependencies,
     owners,
     setConfig: (next: unknown) => {
@@ -200,6 +203,22 @@ test("native machine selection replaces owned SSH and can return to local discov
     assert.deepEqual(await source.read(), f.host);
     assert.equal(f.counts().dials, 2);
     assert.throws(() => source.select("-bad-target"));
+  } finally {
+    source.dispose();
+  }
+});
+
+test("saved selection carries its environment pin into the shared SSH owner", async () => {
+  const f = fixture();
+  const source = f.source();
+  try {
+    source.select("build", f.daemon.environmentId);
+    assert.deepEqual(await source.read(), f.host);
+    source.select("build", randomUUID());
+    await assert.rejects(source.read(), /unavailable/);
+    assert.equal(f.counts().disposed, 2);
+    source.select("build", f.daemon.environmentId);
+    assert.deepEqual(await source.read(), f.host);
   } finally {
     source.dispose();
   }
