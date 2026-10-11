@@ -1,5 +1,5 @@
 //! Primary application navigation is distinct from daemon-owned tmux windows.
-use super::{SnapshotView, browser, browser_ui::Selection, navigation};
+use super::{SnapshotView, browser, browser_ui::Selection, controls, navigation};
 use gpui::{prelude::*, *};
 
 pub(super) const APPLICATION_TABS_HEIGHT: f32 = 36.;
@@ -114,30 +114,22 @@ impl SnapshotView {
             ),
         ] {
             tabs = tabs.child(
-                div()
-                    .id(id)
-                    .debug_selector(move || id.to_owned())
-                    .h_full()
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .px_3()
-                    .border_b_2()
-                    .border_color(if selected {
-                        rgb(self.accent()).into()
-                    } else {
-                        transparent_black()
-                    })
-                    .text_color(rgb(if selected {
-                        theme.foreground
-                    } else {
-                        theme.muted
-                    }))
-                    .cursor_pointer()
-                    .child(label)
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.dispatch_application_tab(request, tab, window, cx);
-                    })),
+                controls::tab(
+                    id,
+                    label,
+                    match tab {
+                        ApplicationTab::Home => controls::Icon::Home,
+                        ApplicationTab::Terminals => controls::Icon::Terminal,
+                    },
+                    selected,
+                    &theme,
+                    self.accent(),
+                )
+                .h_full()
+                .debug_selector(move || id.to_owned())
+                .on_click(cx.listener(move |view, _, window, cx| {
+                    view.dispatch_application_tab(request, tab, window, cx);
+                })),
             );
         }
         tabs.into_any_element()
@@ -210,30 +202,20 @@ impl SnapshotView {
         for (index, choice) in choices.into_iter().enumerate() {
             let session = session.clone();
             strip = strip.child(
-                div()
-                    .id(("window-choice", index))
-                    .debug_selector(move || format!("workspace-window-{index}"))
-                    .flex_shrink_0()
-                    .max_w(px(200.))
-                    .truncate()
-                    .px_3()
-                    .py_1()
-                    .border_b_2()
-                    .border_color(if choice.selected {
-                        rgb(self.accent()).into()
-                    } else {
-                        transparent_black()
-                    })
-                    .text_color(rgb(if choice.selected {
-                        theme.foreground
-                    } else {
-                        theme.muted
-                    }))
-                    .cursor_pointer()
-                    .child(choice.label.clone())
-                    .on_click(cx.listener(move |view, _, window, cx| {
-                        view.select_window(request, &session, &choice, window, cx);
-                    })),
+                controls::tab(
+                    ("window-choice", index),
+                    choice.label.clone(),
+                    controls::Icon::Terminal,
+                    choice.selected,
+                    &theme,
+                    self.accent(),
+                )
+                .debug_selector(move || format!("workspace-window-{index}"))
+                .max_w(px(200.))
+                .overflow_hidden()
+                .on_click(cx.listener(move |view, _, window, cx| {
+                    view.select_window(request, &session, &choice, window, cx);
+                })),
             );
         }
         strip.into_any_element()

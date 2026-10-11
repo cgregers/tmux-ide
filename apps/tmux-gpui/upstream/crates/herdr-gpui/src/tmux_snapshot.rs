@@ -5,6 +5,7 @@ mod browser;
 mod browser_state;
 mod browser_ui;
 mod composition;
+mod controls;
 mod copy;
 mod decode;
 mod divider;
@@ -88,7 +89,8 @@ fn show(
 ) -> Result<(), Error> {
     let failed = Rc::new(std::cell::Cell::new(false));
     let open_failed = failed.clone();
-    gpui_platform::application().run(move |cx| {
+    let application = gpui_platform::application().with_assets(crate::icons::Icons);
+    application.run(move |cx| {
         cx.on_window_closed(|cx, _| {
             if cx.windows().is_empty() {
                 cx.quit();

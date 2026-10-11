@@ -2,7 +2,7 @@
 mod sidebar;
 #[path = "workspace_agents.rs"]
 mod workspace_agents;
-use super::{SnapshotView, browser};
+use super::{SnapshotView, browser, controls};
 use gpui::{prelude::*, *};
 pub(super) enum Selection {
     WorkspaceAgent {
@@ -607,29 +607,38 @@ impl SnapshotView {
                 .px_2()
                 .py_2()
                 .child(
-                    div()
-                        .id("open-picker")
-                        .cursor_pointer()
-                        .child("Switch…")
-                        .on_click(cx.listener(|view, _, window, cx| view.open_picker(window, cx))),
+                    controls::button(
+                        "open-picker",
+                        Some("Switch"),
+                        "Switch session",
+                        controls::Icon::Sessions,
+                        &theme,
+                    )
+                    .on_click(cx.listener(|view, _, window, cx| view.open_picker(window, cx))),
                 )
                 .child(
-                    div()
-                        .id("open-theme-picker")
-                        .cursor_pointer()
-                        .child("Theme…")
-                        .on_click(
-                            cx.listener(|view, _, window, cx| view.open_theme_picker(window, cx)),
-                        ),
+                    controls::button(
+                        "open-theme-picker",
+                        None,
+                        "Choose theme",
+                        controls::Icon::Theme,
+                        &theme,
+                    )
+                    .on_click(
+                        cx.listener(|view, _, window, cx| view.open_theme_picker(window, cx)),
+                    ),
                 )
                 .child(
-                    div()
-                        .id("refresh-sessions")
-                        .cursor_pointer()
-                        .child("↻")
-                        .on_click(cx.listener(|view, _, window, cx| {
-                            view.select(Selection::Refresh, window, cx)
-                        })),
+                    controls::button(
+                        "refresh-sessions",
+                        None,
+                        "Refresh sessions",
+                        controls::Icon::Refresh,
+                        &theme,
+                    )
+                    .on_click(cx.listener(|view, _, window, cx| {
+                        view.select(Selection::Refresh, window, cx)
+                    })),
                 ),
         );
         let application_tabs = self.application_tabs(window, cx);

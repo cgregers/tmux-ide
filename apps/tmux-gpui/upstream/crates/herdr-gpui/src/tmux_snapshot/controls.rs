@@ -1,0 +1,105 @@
+//! Native chrome primitives. Terminal geometry and routing stay with their owners.
+use crate::config::Theme;
+use gpui::{prelude::*, *};
+
+pub(super) const CONTROL_HEIGHT: f32 = 32.;
+const ICON_SIZE: f32 = 16.;
+
+#[derive(Clone, Copy)]
+pub(super) enum Icon {
+    Home,
+    Terminal,
+    Sessions,
+    Theme,
+    Refresh,
+}
+impl Icon {
+    fn path(self) -> &'static str {
+        match self {
+            Self::Home => "icons/tmux-home.svg",
+            Self::Terminal => "icons/terminal.svg",
+            Self::Sessions => "icons/sessions.svg",
+            Self::Theme => "icons/theme.svg",
+            Self::Refresh => "icons/refresh.svg",
+        }
+    }
+}
+
+fn glyph(icon: Icon, foreground: u32) -> Svg {
+    svg()
+        .path(icon.path())
+        .size(px(ICON_SIZE))
+        .flex_shrink_0()
+        // GPUI SVG paint requires its own color; parent text is insufficient.
+        .text_color(rgb(foreground))
+}
+
+pub(super) fn button(
+    id: &'static str,
+    label: Option<&'static str>,
+    hint: &'static str,
+    icon: Icon,
+    theme: &Theme,
+) -> Stateful<Div> {
+    let (foreground, surface, active) = (theme.foreground, theme.surface, theme.active);
+    div()
+        .id(id)
+        .debug_selector(move || id.to_owned())
+        .h(px(CONTROL_HEIGHT))
+        .min_w(px(CONTROL_HEIGHT))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .gap(px(6.))
+        .px(px(8.))
+        .rounded(px(4.))
+        .text_color(rgb(foreground))
+        .cursor_pointer()
+        .hover(move |style| style.bg(rgb(active)))
+        .child(glyph(icon, foreground))
+        .children(label.map(|label| div().child(label)))
+        .tooltip(move |_, cx| {
+            cx.new(|_| crate::usage::Hint {
+                text: hint.into(),
+                foreground,
+                surface,
+            })
+            .into()
+        })
+}
+
+pub(super) fn tab(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    icon: Icon,
+    selected: bool,
+    theme: &Theme,
+    accent: u32,
+) -> Stateful<Div> {
+    let foreground = if selected {
+        theme.foreground
+    } else {
+        theme.muted
+    };
+    let hover = theme.active;
+    div()
+        .id(id)
+        .h(px(CONTROL_HEIGHT))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .px(px(12.))
+        .border_b_2()
+        .border_color(if selected {
+            rgb(accent).into()
+        } else {
+            transparent_black()
+        })
+        .text_color(rgb(foreground))
+        .cursor_pointer()
+        .hover(move |style| style.bg(rgb(hover)))
+        .child(glyph(icon, foreground))
+        .child(div().min_w_0().truncate().child(label.into()))
+}

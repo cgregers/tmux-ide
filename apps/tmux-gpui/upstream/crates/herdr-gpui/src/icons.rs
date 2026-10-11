@@ -143,6 +143,7 @@ impl AssetSource for Icons {
             return Ok(Some(Cow::Borrowed(icon.bytes())));
         }
         let bytes: &'static [u8] = match path {
+            "icons/tmux-home.svg" => include_bytes!("../../../assets/icons/tmux-home.svg"),
             "icons/devices.svg" => include_bytes!("../../../assets/icons/devices.svg"),
             "icons/sessions.svg" => include_bytes!("../../../assets/icons/sessions.svg"),
             "icons/settings.svg" => include_bytes!("../../../assets/icons/settings.svg"),
@@ -211,6 +212,7 @@ impl AssetSource for Icons {
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
         Ok([
+            "icons/tmux-home.svg",
             "icons/devices.svg",
             "icons/sessions.svg",
             "icons/settings.svg",

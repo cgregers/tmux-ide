@@ -1,5 +1,14 @@
 # Changes from the pinned upstream revision
 
+- `tmux_snapshot/controls.rs` introduces shared native icon-and-label tabs using
+  existing theme colors and the attributed Herdr terminal SVG. `workspace_chrome.rs`
+  uses them for app navigation and tmux window tabs. `icons.rs` registers the new
+  tmux-ide-authored `assets/icons/tmux-home.svg`; upstream provenance is unchanged.
+  The dedicated preview installs the asset source. SVGs receive explicit semantic
+  foreground colors because GPUI does not paint an SVG without its own color.
+  Shared icon buttons now render sidebar switch/theme/refresh controls with hints;
+  their existing action listeners and ownership checks are retained.
+
 - `upstream/crates/herdr-gpui/src/main.rs`: thin upstream-reference entry.
   Its original module composition and preview interception moved to new `lib.rs`.
 - `upstream/crates/herdr-gpui/Cargo.toml`: adds the dedicated `tmux-ide-gpui`
