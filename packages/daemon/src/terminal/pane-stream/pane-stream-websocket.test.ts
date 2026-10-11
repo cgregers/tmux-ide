@@ -2541,6 +2541,144 @@ describe("PaneStreamAdmissionCoordinator", () => {
     socket.close();
   });
 
+  it.each(["drain", "close", "fault", "pre-negotiation"] as const)(
+    "preserves chunk order when live delivery arrives during staged seed drain: %s",
+    async (mode) => {
+      const panes = ["pane.shell"];
+      let releaseOpen!: () => void;
+      const openGate = new Promise<void>((resolve) => {
+        releaseOpen = resolve;
+      });
+      const closeDelivery = vi.fn(async () => undefined);
+      let emit!: Parameters<SessionRuntimePaneStreamTransportBinding["openTerminalDelivery"]>[2];
+      const transactionId = "00000000-0000-4000-8000-000000000095";
+      const chunk = (index: number) => ({
+        type: "terminal.delivery.chunk" as const,
+        transactionId,
+        index,
+        bytes: new Uint8Array([index]),
+      });
+      const nonce = "00000000-0000-4000-8000-000000000098";
+      const h = harness({
+        panes,
+        budgets: {
+          "ws-send-buffer": { maxOutstanding: 300, resumeAt: 0 },
+          "renderer-backlog": { maxOutstanding: 1048576, resumeAt: 0 },
+        },
+        openTerminalDelivery: async (pane, _offer, onMessage) => {
+          emit = onMessage;
+          void onMessage({
+            type: "terminal.delivery",
+            workspaceName: "workspace.alpha",
+            semanticPaneId: pane,
+            generation: INSTANCE,
+            incarnation: `${INSTANCE}:0`,
+            deliveryNonce: nonce,
+            transactionId: "00000000-0000-4000-8000-000000000095",
+            protocolVersion: 1,
+            encoding: "semantic-v1",
+            frame: "seed",
+            baseRevision: null,
+            canonicalRevision: 0,
+            canonicalStateHash: "1111111111111111",
+            representationHash: "2222222222222222",
+            representationBytes: 3,
+            chunkCount: 3,
+            canonicalEquivalent: true,
+            history: "complete",
+            richPlacements: false,
+          });
+          void onMessage(chunk(0));
+          void onMessage(chunk(1));
+          if (mode === "pre-negotiation") {
+            void onMessage({
+              type: "terminal.delivery.fault",
+              reason: "source-closed",
+              message: "closed",
+              deliveryNonce: nonce,
+            });
+            await openGate;
+          }
+          return {
+            negotiation: {
+              accepted: true,
+              negotiated: {
+                protocolVersion: 1,
+                encoding: "semantic-v1",
+                richPlacements: false,
+                generation: INSTANCE,
+                deliveryNonce: nonce,
+              },
+            },
+            ack: () => undefined,
+            nack: () => undefined,
+            setVisibility: () => undefined,
+            close: closeDelivery,
+          };
+        },
+      });
+      const { socket } = await connect(h, { panes, semanticDelivery: true });
+      if (mode === "pre-negotiation") {
+        try {
+          expect(socket.framesOfType("terminal-delivery-ready")).toHaveLength(0);
+          expect(socket.framesOfType("terminal-delivery-fault")).toHaveLength(0);
+        } finally {
+          socket.close();
+          releaseOpen();
+        }
+        await vi.waitFor(() => expect(closeDelivery).toHaveBeenCalledTimes(1));
+        expect(socket.framesOfType("terminal-delivery-fault")).toHaveLength(0);
+        return;
+      }
+      await vi.waitFor(() =>
+        expect(socket.framesOfType("terminal-delivery-envelope")).toHaveLength(1),
+      );
+      try {
+        expect(socket.bufferedAmount).toBeGreaterThan(300);
+        if (mode === "fault") {
+          await emit({
+            type: "terminal.delivery.fault",
+            reason: "source-closed",
+            message: "closed",
+            deliveryNonce: nonce,
+          });
+          // No credit has been returned: lifecycle truth cannot wait for bulk replay.
+          expect(socket.framesOfType("terminal-delivery-fault")).toHaveLength(1);
+          expect(socket.framesOfType("terminal-delivery-chunk")).toHaveLength(0);
+          return;
+        }
+        const live = emit(chunk(2));
+        if (mode === "close") {
+          socket.close();
+          const frameCount = socket.frames.length;
+          await live;
+          await vi.waitFor(() => expect(closeDelivery).toHaveBeenCalledTimes(1));
+          await settled();
+          expect(socket.frames).toHaveLength(frameCount);
+          return;
+        }
+        const draining = setInterval(() => {
+          socket.drainAll();
+          h.scheduler.runDue();
+        }, 1);
+        try {
+          await vi.waitFor(() =>
+            expect(socket.framesOfType("terminal-delivery-chunk")).toHaveLength(3),
+          );
+          await live;
+          expect(
+            socket.framesOfType("terminal-delivery-chunk").map((frame) => frame.index),
+          ).toEqual([0, 1, 2]);
+          expect(socket.closed).toBeNull();
+        } finally {
+          clearInterval(draining);
+        }
+      } finally {
+        socket.close();
+      }
+    },
+  );
+
   it("publishes no staged layout when a blocked delivery observes a newer invalid authority", async () => {
     let releaseEditor!: () => void;
     const editorGate = new Promise<void>((resolve) => {

@@ -1459,11 +1459,13 @@ export class PaneStreamLiveConnection {
     const openings = channels.map(async (channel) => {
       const pending: TerminalDeliveryServerMessage[] = [];
       let ready = false;
+      let negotiated = false;
       const delivery = await binding.openTerminalDelivery(
         channel.semanticPaneId,
         offer,
         (message) => {
-          if (!ready) pending.push(message);
+          if (!ready && !(negotiated && message.type === "terminal.delivery.fault"))
+            pending.push(message);
           else return this.#sendTerminalDelivery(channel.semanticPaneId, message);
         },
         this.#descriptor.workspaceName,
@@ -1472,6 +1474,9 @@ export class PaneStreamLiveConnection {
         channel,
         delivery,
         pending,
+        markNegotiated: () => {
+          negotiated = true;
+        },
         markReady: () => {
           ready = true;
         },
@@ -1570,7 +1575,7 @@ export class PaneStreamLiveConnection {
         Number(visibleAtDelivery.has(right.channel.semanticPaneId)) -
         Number(visibleAtDelivery.has(left.channel.semanticPaneId)),
     );
-    for (const { channel, delivery } of opened) {
+    for (const { channel, delivery, markNegotiated } of opened) {
       if (this.#closed || channel.closed) {
         await delivery.close();
         continue;
@@ -1599,15 +1604,21 @@ export class PaneStreamLiveConnection {
         pane: channel.semanticPaneId,
         negotiation: delivery.negotiation,
       });
+      // Lifecycle faults may bypass bulk replay only after validated negotiation.
+      markNegotiated();
     }
     // Every observer can now subscribe without waiting behind another pane's
     // seed/backpressure. Readiness is negotiation only; canonical seeds still
     // gate pane input and visible activation at the consumer.
     for (const { channel, pending, markReady } of opened) {
       if (this.#closed || channel.closed) continue;
-      markReady();
+      // Keep live arrivals in the same FIFO while replay yields for credit.
+      // Array iteration includes messages appended during those awaits; only
+      // switch to direct delivery once the entire staged queue is drained.
       for (const message of pending)
         await this.#sendTerminalDelivery(channel.semanticPaneId, message);
+      pending.length = 0;
+      markReady();
     }
     this.#closeIfAllPanesGone();
   }
