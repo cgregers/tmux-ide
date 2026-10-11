@@ -85,8 +85,11 @@ The existing multi-machine manager is now also shared through the Node-only
 `@tmux-ide/daemon/machine-connections` subpath; the TUI retains its singleton and
 telemetry adapter. The Home/multi-machine catalogs are also shared via the
 Node-only `@tmux-ide/daemon/machine-catalog` subpath, retaining disabled stale rows
-and per-machine identity scopes. Native fleet publication/rendering integration
-remains pending.
+and per-machine identity scopes. The native `bridge/fleet.ts` adapter now projects
+bounded, credential-free groups and issues exact-route selection tokens. Returned
+selections retire on navigation, catalog failure or connection replacement.
+Browser wire integration and grouped Home/F5 rendering remain pending; the adapter
+is currently covered by headless controlled-transport tests only.
 
 The bridge now has a tested `remote-route.ts` adapter that borrows one verified
 SSH epoch, rejects stale inventory, and cancels on retirement. The browser now
@@ -198,7 +201,6 @@ comparisons remain a separate measured workstream.
   and `runtime/application-machine-*.tsx`.
 - GPUI baseline and limits: `apps/tmux-gpui/README.md`, `INTEGRATION.md`, `VALIDATION.md`.
 - GPUI native action implementation: `upstream/crates/herdr-gpui/src/tmux_snapshot/pane_actions.rs`.
-
 
 ## Zed reference for native machine workflows
 
