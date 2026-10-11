@@ -192,3 +192,33 @@ those cards complete. Performance comparisons remain a separate measured workstr
   and `runtime/application-machine-*.tsx`.
 - GPUI baseline and limits: `apps/tmux-gpui/README.md`, `INTEGRATION.md`, `VALIDATION.md`.
 - GPUI native action implementation: `upstream/crates/herdr-gpui/src/tmux_snapshot/pane_actions.rs`.
+
+
+## Zed reference for native machine workflows
+
+Inspected Zed main at `93d745668805029476e6d7fbb19652116fed51de` (11 October 2026).
+Use these concrete patterns when completing native machine controls:
+
+- A shared modal header/body/footer, with scroll confined to the body and stable
+  action placement. Apply to Connect, Save/edit machine and removal confirmation.
+  Source: [modal components](https://github.com/zed-industries/zed/blob/93d745668805029476e6d7fbb19652116fed51de/crates/ui/src/components/modal.rs).
+- Distinct list, server-options, edit and connection states. Keep saved UUIDs as
+  authority; labels are display/search text. A connection form should not double
+  as an implicit Save operation.
+  Reference: [remote server modes](https://github.com/zed-industries/zed/blob/93d745668805029476e6d7fbb19652116fed51de/crates/recent_projects/src/remote_servers.rs).
+- A shared modal owner that captures previous focus, focuses the dialog, and
+  coordinates dismissal. For tmux-ide, restore the previous valid focus without
+  replaying input or accidentally granting terminal authority.
+  Source: [modal layer](https://github.com/zed-industries/zed/blob/93d745668805029476e6d7fbb19652116fed51de/crates/workspace/src/modal_layer.rs).
+- Explicit disconnected presentation with a named target and deliberate recovery
+  action. Adapt this to our shared connection-owner states and sanitized errors;
+  never copy Zed's remote-server startup behavior into tmux-ide implicitly.
+  Source: [disconnected overlay](https://github.com/zed-industries/zed/blob/93d745668805029476e6d7fbb19652116fed51de/crates/recent_projects/src/disconnected_overlay.rs).
+- Build dialogs, rows, buttons, icon actions and tab treatments from consistent
+  native primitives instead of one-off styling. Verify keyboard/pointer parity,
+  long labels, narrow windows, focus loss and pending-operation cancellation.
+
+These are implementation/design references, not completed acceptance items.
+No Zed application code was copied. Its `ui` crate declares GPL-3.0-or-later;
+GPUI declares Apache-2.0. Keep source provenance explicit for any future reuse;
+existing Herdr-derived controls and tmux-ide theme tokens remain our starting point.
