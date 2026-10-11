@@ -25,7 +25,9 @@ GPUI owns presentation, not a second source of terminal or fleet truth.
 Present: Home/Terminals, session sidebar, window strip, pane headers, switcher and theme picker.
 The first F5 slice adds searchable Home, Switch session, Appearance and Refresh
 commands using the existing picker. It has keyboard/input-isolation tests and
-physical light/dark verification. The centered palette design and full TUI action
+physical light/dark verification. F1 Home, F2 Terminals and F6 session search now reuse the native tab/picker
+owners, and the F5 list exposes Terminals and shortcut labels. Modified function
+keys remain available to the terminal. The centered palette design and full TUI action
 vocabulary remain unfinished. Shared icon tabs and sidebar buttons landed in
 `2b83924c`; see `evidence/native-controls-2026-10-11/` and `evidence/native-f5-2026-10-11/`.
 

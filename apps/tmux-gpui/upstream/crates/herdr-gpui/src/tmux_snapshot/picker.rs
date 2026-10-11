@@ -226,6 +226,12 @@ impl SnapshotView {
                 Action::AddMachine => self.open_picker_mode(Mode::Machine, window, cx),
                 Action::LocalMachine => self.select(Selection::Machine(None), window, cx),
                 Action::Home => self.select(Selection::Home, window, cx),
+                Action::Terminals => self.dispatch_application_tab(
+                    self.browser_request,
+                    super::workspace_chrome::ApplicationTab::Terminals,
+                    window,
+                    cx,
+                ),
                 Action::Sessions => self.open_picker(window, cx),
                 Action::Appearance => self.open_theme_picker(window, cx),
                 Action::Refresh => self.select(Selection::Refresh, window, cx),
@@ -284,7 +290,27 @@ impl SnapshotView {
         }
         let key = &event.keystroke;
         if commands::shortcut(key) {
-            self.open_commands(window, cx);
+            match key.key.as_str() {
+                "f1" => self.dispatch_application_tab(
+                    self.browser_request,
+                    super::workspace_chrome::ApplicationTab::Home,
+                    window,
+                    cx,
+                ),
+                "f2" => {
+                    if self.picker.is_some() {
+                        self.close_picker(window, cx);
+                    }
+                    self.dispatch_application_tab(
+                        self.browser_request,
+                        super::workspace_chrome::ApplicationTab::Terminals,
+                        window,
+                        cx,
+                    );
+                }
+                "f6" => self.open_picker(window, cx),
+                _ => self.open_commands(window, cx),
+            }
             cx.stop_propagation();
             window.prevent_default();
             return;

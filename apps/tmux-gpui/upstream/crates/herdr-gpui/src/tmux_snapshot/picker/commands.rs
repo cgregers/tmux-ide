@@ -3,6 +3,7 @@ use super::{Row, Target, browser};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::tmux_snapshot) enum Action {
     Home,
+    Terminals,
     AddMachine,
     SavedMachines,
     LocalMachine,
@@ -18,14 +19,15 @@ impl Action {
 pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
     let query: String = query.chars().take(256).collect::<String>().to_lowercase();
     [
-        (Action::Home, "Home"),
+        (Action::Home, "Home · F1"),
+        (Action::Terminals, "Terminals · F2"),
         (Action::AddMachine, "Connect to machine…"),
         (Action::SavedMachines, "Switch saved machine…"),
         (
             Action::LocalMachine,
             "Use local machine / cancel connection",
         ),
-        (Action::Sessions, "Switch session"),
+        (Action::Sessions, "Switch session · F6"),
         (Action::Appearance, "Appearance…"),
         (Action::Refresh, "Refresh sessions"),
     ]
@@ -43,7 +45,7 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
     .collect()
 }
 pub(in crate::tmux_snapshot) fn shortcut(key: &gpui::Keystroke) -> bool {
-    key.key == "f5"
+    matches!(key.key.as_str(), "f1" | "f2" | "f5" | "f6")
         && !key.modifiers.platform
         && !key.modifiers.control
         && !key.modifiers.alt

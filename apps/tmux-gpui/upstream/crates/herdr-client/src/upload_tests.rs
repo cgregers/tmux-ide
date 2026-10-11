@@ -199,7 +199,7 @@ fn short_and_growing_sources_are_rejected_and_prior_success_is_removed() {
             |s| temp.remote(s),
         )
         .unwrap_err();
-        assert!(matches!(error, Error::UploadSourceChanged));
+        assert!(matches!(error, Error::UploadSourceChanged), "grow={grow}: {error:?}");
         assert!(temp.staged().is_empty());
     }
 }

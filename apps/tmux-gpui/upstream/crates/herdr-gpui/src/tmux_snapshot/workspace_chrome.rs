@@ -45,13 +45,13 @@ impl WindowReveal {
 }
 
 #[derive(Clone, Copy)]
-enum ApplicationTab {
+pub(super) enum ApplicationTab {
     Home,
     Terminals,
 }
 
 impl SnapshotView {
-    fn dispatch_application_tab(
+    pub(super) fn dispatch_application_tab(
         &mut self,
         request: u64,
         tab: ApplicationTab,
