@@ -11,6 +11,8 @@ import {
 export interface HomeAgentObservationHandlers {
   ready(unavailableSessionKeys: readonly string[]): void;
   invalidate(sessionKey?: string): void;
+  /** Advisory cadence: an already-running read satisfies this refresh. */
+  refresh?(sessionKey?: string): void;
   unavailable(): void;
 }
 
@@ -50,6 +52,7 @@ type Slot = {
   status: "loading" | "live" | "unavailable";
   rows: HomeAgentRow[];
   dirty: boolean;
+  lastRead: number;
   revision: number;
   controller: AbortController | null;
   observationAvailable: boolean;
@@ -63,6 +66,7 @@ export function createHomeAgentObserver(deps: HomeAgentDependencies): HomeAgentO
   let limit = 32;
   let generation = 0;
   let inFlight = 0;
+  let readOrder = 0;
   let ready = false;
   let transportFailed = false;
   let daemon: CanonicalDaemonInfo | null = null;
@@ -146,10 +150,12 @@ export function createHomeAgentObserver(deps: HomeAgentDependencies): HomeAgentO
   };
   const pump = () => {
     if (!active || disposed || !ready || !daemon) return;
-    for (const slot of slots.values()) {
+    // Least-recently-served slots run first; hot invalidations cannot starve siblings.
+    for (const slot of [...slots.values()].sort((a, b) => a.lastRead - b.lastRead)) {
       if (inFlight >= 2) break;
       if (!slot.dirty || slot.controller) continue;
       slot.dirty = false;
+      slot.lastRead = ++readOrder;
       const requestGeneration = generation;
       const requestDaemon = daemon;
       const revision = slot.revision;
@@ -200,6 +206,17 @@ export function createHomeAgentObserver(deps: HomeAgentDependencies): HomeAgentO
         });
     }
   };
+  const refresh = (sessionKey?: string) => {
+    if (!active || disposed) return;
+    for (const [key, slot] of slots) {
+      if (sessionKey !== undefined && sessionKey !== key) continue;
+      if (!slot.observationAvailable || slot.controller) continue;
+      slot.dirty = true;
+      slot.status = "loading";
+    }
+    publish();
+    pump();
+  };
   const invalidate = (sessionKey?: string) => {
     if (!active || disposed) return;
     for (const [key, slot] of slots) {
@@ -245,6 +262,7 @@ export function createHomeAgentObserver(deps: HomeAgentDependencies): HomeAgentO
           previous.get(session.id)?.rows.map((row) => ({ ...row, sessionName: session.name })) ??
           [],
         dirty: true,
+        lastRead: 0,
         revision: 0,
         controller: null,
         observationAvailable: true,
@@ -274,6 +292,9 @@ export function createHomeAgentObserver(deps: HomeAgentDependencies): HomeAgentO
         },
         invalidate(key) {
           if (token === generation) invalidate(key);
+        },
+        refresh(key) {
+          if (token === generation) refresh(key);
         },
         unavailable() {
           if (token !== generation || disposed) return;

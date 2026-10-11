@@ -119,7 +119,7 @@ export function createHomeAgentTransport(options: {
           if (!closed)
             for (const session of scoped) {
               if (!pushHealthy || session.server?.generation !== daemon.instanceId)
-                handlers.invalidate(session.id);
+                (handlers.refresh ?? handlers.invalidate)(session.id);
             }
         }, 5_000);
         interval.unref?.();
