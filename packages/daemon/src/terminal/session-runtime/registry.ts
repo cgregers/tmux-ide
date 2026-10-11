@@ -1516,7 +1516,9 @@ class SessionRuntime {
     const candidate = this.#validatedLease(lease);
     const releaseKey = this.#leaseKey(candidate);
     if (this.#releasedLeases.has(releaseKey) && candidate.clientId === callerClientId) return;
-    this.assertController(candidate, callerClientId);
+    // Surrendering ownership must remain possible while topology is being verified.
+    // Exact lease identity is still required; only use/acquisition needs topology authority.
+    this.#assertControllerIdentity(candidate, callerClientId);
     this.#releasedLeases.add(releaseKey);
     if (this.#releasedLeases.size > 32) {
       this.#releasedLeases.delete(this.#releasedLeases.values().next().value!);
@@ -1528,6 +1530,10 @@ class SessionRuntime {
 
   assertController(lease: SessionRuntimeControllerLease, callerClientId?: string): void {
     this.assertNoSharedWindow();
+    this.#assertControllerIdentity(lease, callerClientId);
+  }
+
+  #assertControllerIdentity(lease: SessionRuntimeControllerLease, callerClientId?: string): void {
     const parsedLease = this.#validatedLease(lease);
     if (
       parsedLease.generation !== this.generation ||
