@@ -1,0 +1,12 @@
+{
+  "workspace": {
+    "passed": 2891,
+    "failed": 0,
+    "ignored": 10
+  },
+  "all-features": {
+    "passed": 2925,
+    "failed": 0,
+    "ignored": 17
+  }
+}

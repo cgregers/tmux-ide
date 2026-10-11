@@ -3,6 +3,7 @@ pub(super) mod attention;
 pub(super) mod commands;
 mod fleet_servers;
 mod machine;
+mod machine_remove;
 mod pane_commands;
 mod saved_machines;
 use super::{SnapshotView, browser, browser_ui::Selection};
@@ -16,6 +17,10 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
+    MachineRemove {
+        id: String,
+        revision: u64,
+    },
     FleetServer(Option<String>),
     PaneAction {
         captured: Option<super::pane_actions::Target>,
@@ -64,6 +69,7 @@ enum Mode {
 pub(super) struct Picker {
     mode: Mode,
     error: Option<&'static str>,
+    removal: Option<machine_remove::Confirmation>,
     search: Entity<SearchInput>,
     _changed: Subscription,
     rows: Vec<Row>,
@@ -176,6 +182,12 @@ fn current(state: &browser::State, target: &Target) -> bool {
                 .groups
                 .iter()
                 .any(|group| group.retry.as_ref() == Some(token))
+        }),
+        Target::MachineRemove { id, revision } => state.machines.as_ref().is_some_and(|registry| {
+            registry.available
+                && !registry.pending
+                && registry.revision == *revision
+                && registry.machines.iter().any(|p| &p.id == id)
         }),
         Target::MachineToggle {
             id,
@@ -341,7 +353,7 @@ impl SnapshotView {
                 match mode {
                     Mode::Attention => "Search attention agents…",
                     Mode::SavedMachines => "Search saved machines…",
-                    Mode::ManageMachines => "Search machines to enable or disable…",
+                    Mode::ManageMachines => "Search machine actions…",
                     Mode::Machine => "SSH alias or user@host",
                     Mode::Theme => "Search themes…",
                     Mode::Commands => "Search commands…",
@@ -360,6 +372,7 @@ impl SnapshotView {
         self.picker = Some(Picker {
             mode,
             error: None,
+            removal: None,
             search,
             _changed: changed,
             rows: if mode == Mode::Attention {
@@ -513,6 +526,10 @@ impl SnapshotView {
             }
             return;
         }
+        if let Target::MachineRemove { id, revision } = &target {
+            self.begin_machine_removal(id, *revision, window, cx);
+            return;
+        }
         if let Target::MachineToggle {
             id,
             revision,
@@ -520,9 +537,9 @@ impl SnapshotView {
         } = target
         {
             let change = if enabled {
-                browser::machines::Toggle::Enable { id }
+                browser::machines::Change::Enable { id }
             } else {
-                browser::machines::Toggle::Disable { id }
+                browser::machines::Change::Disable { id }
             };
             if let Some(sender) = &self.browser_commands {
                 let error = sender
@@ -572,6 +589,7 @@ impl SnapshotView {
                 | Target::Theme(_)
                 | Target::Command(_)
                 | Target::MachineToggle { .. }
+                | Target::MachineRemove { .. }
                 | Target::FleetRetry(_)
                 | Target::FleetDisconnect(_) => return,
             },
@@ -637,6 +655,16 @@ impl SnapshotView {
         if key.modifiers.platform && !key.modifiers.control && !key.modifiers.alt && key.key == "k"
         {
             self.open_picker(window, cx);
+            cx.stop_propagation();
+            window.prevent_default();
+            return;
+        }
+        if self.picker.as_ref().is_some_and(|p| p.removal.is_some()) {
+            match key.key.as_str() {
+                "escape" => self.close_picker(window, cx),
+                "enter" => self.confirm_machine_removal(window, cx),
+                _ => {}
+            }
             cx.stop_propagation();
             window.prevent_default();
             return;

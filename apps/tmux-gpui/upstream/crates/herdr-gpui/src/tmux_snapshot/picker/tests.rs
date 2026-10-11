@@ -393,3 +393,5 @@ mod machine_management;
 mod pane_commands;
 
 mod fleet_servers;
+
+mod machine_remove;

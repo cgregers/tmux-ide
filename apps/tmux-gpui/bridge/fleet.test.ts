@@ -516,3 +516,28 @@ test("session beyond server display cap survives catalog updates but cannot auth
     f.close();
   }
 });
+
+test("removing the selected saved profile retires only its route and leaves sibling transport current", async () => {
+  const f = await fixture(2);
+  try {
+    const profile = f.profiles[0]!;
+    const token = f.fleet.publication().groups.find((group) => group.id === profile.id)!
+      .sessions[0]!.selection!;
+    const selected = f.fleet.select(token);
+    const sibling = f.manager.getMachine(f.profiles[1]!.id)!;
+    const siblingEpoch = sibling.endpoint().epoch;
+    const siblingReady = sibling.read();
+    f.manager.reconcile([f.profiles[1]!]);
+    assert.equal(f.manager.getMachine(profile.id), null);
+    assert.throws(selected.assertCurrent, /changed/);
+    assert.throws(() => f.fleet.select(token), /changed/);
+    assert.equal(f.manager.getMachine(sibling.id), sibling);
+    assert.equal(sibling.endpoint().epoch, siblingEpoch);
+    assert.deepEqual(sibling.read(), siblingReady);
+    assert.equal(f.manager.snapshot().selectedMachineId, "local");
+    const remaining = f.fleet.publication().groups.find((group) => group.id === sibling.id)!;
+    f.fleet.select(remaining.sessions[0]!.selection!).assertCurrent();
+  } finally {
+    f.close();
+  }
+});

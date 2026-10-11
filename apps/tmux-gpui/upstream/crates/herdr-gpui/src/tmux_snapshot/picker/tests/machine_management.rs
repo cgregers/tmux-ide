@@ -59,7 +59,7 @@ fn management_rows_and_stale_pending_unavailable_actions_are_fenced() {
         machines: Some(registry()),
         ..Default::default()
     };
-    let rows = super::super::saved_machines::management_rows(&state, "build spark");
+    let rows = super::super::saved_machines::management_rows(&state, "disable build spark");
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].target, disable());
     assert!(current(&state, &disable()));
@@ -78,7 +78,7 @@ fn management_rows_and_stale_pending_unavailable_actions_are_fenced() {
     assert_eq!(
         serde_json::to_value(browser::machines::Operation::Mutate {
             revision: 13,
-            change: browser::machines::Toggle::Enable { id: ID.into() }
+            change: browser::machines::Change::Enable { id: ID.into() }
         })
         .unwrap(),
         serde_json::json!({"operation":"mutate","revision":13,"change":{"operation":"enable","id":ID}})

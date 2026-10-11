@@ -54,12 +54,13 @@ impl Registry {
 #[serde(tag = "operation", rename_all = "lowercase")]
 pub(in crate::tmux_snapshot) enum Operation {
     Read,
-    Mutate { revision: u64, change: Toggle },
+    Mutate { revision: u64, change: Change },
 }
 
 #[derive(Serialize)]
 #[serde(tag = "operation", rename_all = "lowercase")]
-pub(in crate::tmux_snapshot) enum Toggle {
+pub(in crate::tmux_snapshot) enum Change {
+    Remove { id: String },
     Enable { id: String },
     Disable { id: String },
 }

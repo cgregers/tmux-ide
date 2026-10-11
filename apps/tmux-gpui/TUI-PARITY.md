@@ -419,3 +419,54 @@ is not rearmed and the tested canvas stays unchanged. Independent review, focuse
 format/size checks and debug build passed. Physical F5 pane-action QA remains open.
 See `evidence/native-f5-pane-actions-2026-10-11/`; this does not close the full
 F5 action-vocabulary or release acceptance checklist.
+
+
+## Exact fleet-server navigation — 11 October checkpoint
+
+Commits `2d889407` and `5ca94577` add retained-empty-server catalog handling and
+native machine/server/session navigation. Home and F5/F6 use opaque exact server
+routes; New session identifies its machine/server destination. Ordinary sessions
+remain navigable when bounded server metadata is omitted, but creation requires
+an explicitly published current destination.
+
+The full private bridge workflow passed with two genuinely empty duplicate-label
+servers: select the second by identity, create exactly one session there, preserve
+the first empty server and source session identity/geometry/stamps. Failed-before
+and passing-after evidence, independent reviews and source hashes are in
+`evidence/fleet-server-navigation-2026-10-11/` and
+`evidence/empty-server-owner-2026-10-11/`. Bridge 354 passed/5 optional skips;
+native focused 207 and both full workspace configurations passed, as did both
+Clippy configurations and the debug build. Physical native server selection and
+creation, remote SSH and packaged acceptance remain open. This supersedes the
+implementation gap for server hierarchy, not the broader physical checklist.
+
+
+## Next Home context/search slice
+
+Current TUI `application-home-fleet.ts` searches agent, team, harness, project,
+session, machine and server names. Native `bridge/home-agent-publication.ts`
+currently retains only agent and session labels, and `home/filters.rs` searches
+only those. Reuse existing shared HomeAgentRow metadata as bounded display/search
+fields and show machine/server context without changing opaque navigation keys or
+admission. Verify context-only queries, duplicate labels, absent metadata, stale
+selection and narrow layouts. This is a current Home parity gap; embedded editors
+and legacy project-launch surfaces remain outside v1.
+
+
+## Saved-machine removal checkpoint — 11 October
+
+F5 Manage saved machines now exposes Remove through the existing canonical local
+registry API. Confirmation displays captured label/SSH target and binds UUID,
+revision, browser request and a unique modal identity. Queue acceptance is not
+success; registry publication drives the result, and uncertain replies are never
+replayed. This adds a native management control over an existing API, not a port
+of a production TUI remove dialog. Saved-machine editing remains unimplemented.
+
+Evidence: `evidence/native-machine-remove-2026-10-11/`. Independent review approved;
+211 focused native tests, full default/all-feature workspace suites, both Clippy
+configurations, format/size/debug build and bridge gate (356 pass/5 optional skips)
+passed. Actual isolated browser/canonical HTTP handler verifies registry removal;
+manager-level tests verify selected-route retirement and sibling preservation.
+Real remote SSH and physical macOS dialog acceptance remain open. Registry
+revision is local preflight, not daemon-side atomic compare-and-swap. User demos
+and actual saved profiles were left untouched.
