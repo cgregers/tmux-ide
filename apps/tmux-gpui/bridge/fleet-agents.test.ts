@@ -29,6 +29,9 @@ const row: HomeAgentRow = {
   interactionEndpoint: null,
 };
 function fixture(count = 1) {
+  let machine: string | null = null;
+  let starts = 0,
+    publications = 0;
   let groups: MachineAgentGroup[] = ["local", "remote"].map((machineId) => ({
     machineId,
     available: true,
@@ -68,7 +71,9 @@ function fixture(count = 1) {
       };
     },
     isCurrentTarget: () => live && !stopped,
-    start() {},
+    start() {
+      starts++;
+    },
     retry() {
       recoveries.push("retry");
     },
@@ -85,12 +90,21 @@ function fixture(count = 1) {
     (id) => (id === "local" ? "Local" : "Spark"),
     (value) => {
       snapshot = value;
+      publications++;
     },
     () => "ready",
+    () => machine,
   );
   owner.start();
   return {
     owner,
+    filter(id: string | null) {
+      machine = id;
+      owner.refresh(false);
+    },
+    groups: () => groups,
+    starts: () => starts,
+    publications: () => publications,
     recoveries,
     snapshot: () => snapshot!,
     emit: () => listener?.(),
@@ -288,4 +302,90 @@ test("roster recovery delegates to resident source and stops after disposal", ()
   f.owner.dispose();
   f.owner.recover("retry");
   assert.equal(f.recoveries.length, 2);
+});
+
+test("Home machine projection precedes row cap and preserves global attention targets", () => {
+  const f = fixture(300);
+  // Equal display labels are not machine identity; the last rows require attention.
+  const groups = f.groups().map((group) => ({
+    ...group,
+    agents: group.agents.map((agent, i) => ({
+      ...agent,
+      name: "Duplicate",
+      attention: i >= 290,
+    })),
+  }));
+  f.setRows(groups);
+  const global = f.snapshot();
+  const attentionKeys = global.rows.filter((row) => row.attention).map((row) => row.key);
+  assert.ok(attentionKeys.every((key) => f.owner.resolve(key)));
+  const before = f.publications();
+  f.filter("remote");
+  const selected = f.owner.homeSnapshot()!;
+  const wire = homeAgentPublication(selected, 2);
+  assert.equal(selected.totalSessions, 1);
+  assert.equal(selected.observedSessions, 1);
+  assert.equal(selected.phase, "live");
+  assert.equal(wire.rows.length, 256);
+  assert.equal(wire.truncatedRows, 44);
+  assert.ok(wire.rows.every((row) => f.owner.resolve(row.key)?.machineId === "remote"));
+  assert.ok(attentionKeys.every((key) => f.owner.resolve(key)));
+  assert.equal(f.publications(), before, "filter must not republish F7's global observation");
+  assert.equal(f.starts(), 1);
+  assert.ok(f.snapshot().rows.filter((row) => f.owner.resolve(row.key)).length <= 512);
+  f.owner.dispose();
+});
+test("selected machine coverage and failure exclude healthy siblings", () => {
+  const f = fixture();
+  const groups = f.groups();
+  f.setRows(
+    groups.map((group) =>
+      group.machineId === "remote"
+        ? {
+            ...group,
+            available: false,
+            observation: {
+              ...group.observation!,
+              phase: "unavailable",
+              observedSessions: 0,
+              totalSessions: 9,
+              unavailableSessions: 9,
+              truncatedSessions: 3,
+            },
+          }
+        : group,
+    ),
+  );
+  f.filter("remote");
+  const value = f.owner.homeSnapshot()!;
+  assert.equal(value.phase, "unavailable");
+  assert.equal(value.totalSessions, 9);
+  assert.equal(value.observedSessions, 0);
+  assert.equal(value.unavailableSessions, 9);
+  assert.equal(value.truncatedSessions, 3);
+  f.filter(null);
+  assert.equal(f.owner.homeSnapshot()!.totalSessions, 10);
+  f.owner.dispose();
+});
+
+test("connected partial Home coverage does not claim machine disconnection", () => {
+  const f = fixture();
+  f.setRows(
+    f
+      .groups()
+      .map((group) => ({
+        ...group,
+        available: false,
+        observation: { ...group.observation!, phase: "partial", truncatedSessions: 1 },
+      })),
+  );
+  f.filter("remote");
+  assert.equal(f.owner.homeSnapshot()!.phase, "partial");
+  assert.equal(f.owner.homeSnapshot()!.note, "Agent activity observation is incomplete.");
+  assert.equal(
+    f.snapshot().note,
+    "Some machines are connecting or unavailable.",
+    "F7 global projection remains unchanged",
+  );
+  f.owner.dispose();
 });

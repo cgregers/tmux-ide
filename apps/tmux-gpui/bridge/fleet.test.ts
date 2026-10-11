@@ -59,6 +59,8 @@ async function fixture(count = 1) {
       },
     ],
   };
+  let agentStarts = 0,
+    agentStops = 0;
   let notifications = 0;
   const fleet = createNativeFleet(
     manager,
@@ -92,6 +94,22 @@ async function fixture(count = 1) {
           };
         },
       }),
+    () => ({
+      getSnapshot: () => [],
+      subscribe(listener) {
+        listener([]);
+        return () => {};
+      },
+      isCurrentTarget: () => false,
+      start() {
+        agentStarts++;
+      },
+      retry() {},
+      loadMore() {},
+      dispose() {
+        agentStops++;
+      },
+    }),
   );
   fleet.start();
   return {
@@ -101,6 +119,7 @@ async function fixture(count = 1) {
     snapshot,
     emitters,
     notifications: () => notifications,
+    agentCounts: () => ({ starts: agentStarts, stops: agentStops }),
     close() {
       fleet.dispose();
       manager.dispose();
@@ -377,6 +396,48 @@ test("catalog failure does not hide disconnect for a still-connected SSH transpo
     assert.ok(group.disconnect);
     f.fleet.disconnect(group.disconnect);
     assert.equal(f.manager.getMachine(id)!.endpoint().state, "disconnected");
+  } finally {
+    f.close();
+  }
+});
+
+test("Home filter removal resets All while shared F7 observer and selected route survive", async () => {
+  const f = await fixture();
+  const home: (string | null)[] = [];
+  let attention = 0;
+  const stopHome = f.fleet.observeHomeAgents((value) => home.push(value.machineId));
+  const stopAttention = f.fleet.observeAgents(() => attention++);
+  try {
+    const selected = f.manager.snapshot().selectedMachineId;
+    const before = attention;
+    assert.equal(f.fleet.filterHomeAgents(f.profiles[0]!.id), true);
+    assert.equal(home.at(-1), f.profiles[0]!.id);
+    assert.equal(attention, before);
+    assert.equal(f.fleet.filterHomeAgents("removed"), false);
+    assert.equal(home.at(-1), f.profiles[0]!.id);
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    f.manager.reconcile([]);
+    assert.equal(home.at(-1), null);
+    assert.equal(f.manager.snapshot().selectedMachineId, selected);
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    stopHome();
+    assert.equal(f.agentCounts().stops, 0);
+    stopAttention();
+    assert.equal(f.agentCounts().stops, 1);
+  } finally {
+    stopHome();
+    stopAttention();
+    f.close();
+  }
+});
+
+test("Home filter cannot select a machine omitted from the bounded publication", async () => {
+  const f = await fixture(64);
+  try {
+    const visible = new Set(f.fleet.publication().groups.map((group) => group.id));
+    const hidden = f.profiles.find((profile) => !visible.has(profile.id));
+    assert.ok(hidden);
+    assert.equal(f.fleet.filterHomeAgents(hidden.id), false);
   } finally {
     f.close();
   }

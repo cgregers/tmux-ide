@@ -41,6 +41,8 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     start: () => fleet.start(),
     publication: fleet.publication,
     observeAgents: fleet.observeAgents,
+    observeHomeAgents: fleet.observeHomeAgents,
+    filterHomeAgents: fleet.filterHomeAgents,
     recoverAgents: fleet.recoverAgents,
     resolveAgent: fleet.resolveAgent,
     retry: fleet.retry,

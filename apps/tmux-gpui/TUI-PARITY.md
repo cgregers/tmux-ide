@@ -394,3 +394,17 @@ remain open. Prerequisite owner fixes fb008a99 and458143b6 remove polling starva
 and legacy full-fleet discovery during semantic subscriptions. No full-parity or
 release checkbox is closed by this checkpoint. Next Home work remains exact-machine
 filtering and clearer fleet/agent hierarchy.
+
+## Home exact-machine filtering — 11 October checkpoint
+
+Native Home now cycles All/published machines with `f` or the shared icon button.
+The bridge projects the selected machine before its row cap and retains routes for
+both Home and global F7; duplicate labels are not identities. Current request,
+roster revision, acknowledged foreground presence and modal guards remain enforced.
+Machine removal resets All. Search/activity selection is retained.
+
+Independent review, bridge346/5optional skips, real private two-session smoke and
+full native gates passed; see `evidence/home-machine-filter-2026-10-11/`. Physical
+filter acceptance remains open because the user took over the isolated QA app.
+This supersedes earlier implementation-gap statements about machine filtering,
+without closing the broader Home/fleet acceptance checklist.

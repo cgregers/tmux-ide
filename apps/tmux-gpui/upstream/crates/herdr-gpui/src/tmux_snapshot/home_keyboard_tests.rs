@@ -143,3 +143,6 @@ mod selection;
 
 #[path = "home_keyboard_tests/recovery.rs"]
 mod recovery;
+
+#[path = "home_keyboard_tests/machine_filter.rs"]
+mod machine_filter;

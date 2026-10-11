@@ -1,3 +1,4 @@
+import { applyHomeAgentFilter, homeAgentFilterSchema } from "./home-agent-filter.ts";
 import { createHomeAgentRecovery, homeAgentRecoverySchema } from "./home-agent-recovery.ts";
 import { admitFleetAgent, discoveredAgentRequest } from "./fleet-agent-admission.ts";
 import {
@@ -142,6 +143,7 @@ const commandSchema = z.union([
   openEditorSchema,
   openWorkspaceAgentSchema,
   homeAgentRecoverySchema,
+  homeAgentFilterSchema,
   openAgentSchema,
   sessionCreateSchema,
   paneActionSchema,
@@ -290,6 +292,7 @@ let attentionSelectionRejected: { request: number; fromRequest: number; scope: n
 const attention = createAttentionOwner(publish);
 let agentOwner: ReturnType<typeof createHomeAgentObserver> | undefined;
 const homeRecovery = createHomeAgentRecovery();
+let homeAgentFilter: { revision: number; machineId: string | null } | null = null;
 let agentPublication: ReturnType<typeof homeAgentPublication> | null = null;
 let stopFleetAgents: (() => void) | undefined;
 let agentRevision = 0;
@@ -303,18 +306,20 @@ function retireAgents() {
   agentOwner = undefined;
   agentPublication = null;
   homeRecovery.clear();
+  homeAgentFilter = null;
 }
 function startAgents() {
   retireAgents();
   if (fleet && surface === "home" && foreground && !stopped) {
     const token = request;
-    stopFleetAgents = fleet.observeAgents((value) => {
+    stopFleetAgents = fleet.observeHomeAgents(({ snapshot: value, machineId }) => {
       if (stopped || !foreground || surface !== "home" || request !== token) return;
       agentPublication = homeAgentPublication(
         value,
         ++agentRevision,
         (row) => !!discoveredAgentRequest(fleet?.resolveAgent(row.key)?.row),
       );
+      homeAgentFilter = { revision: agentRevision, machineId };
       homeRecovery.adopt(value, agentRevision);
       publish();
     });
@@ -528,6 +533,7 @@ function publish() {
       createSession: sessionCreate.publication(),
       homeAgents: surface === "home" ? agentPublication : null,
       homeAgentRecovery: surface === "home" && fleet ? homeRecovery.publication() : null,
+      homeAgentFilter: surface === "home" && fleet ? homeAgentFilter : null,
       // Protocol support; private hosts publish an explicit unavailable roster.
       attentionSupported: true,
       attentionAgents: attention.publication(),
@@ -985,6 +991,16 @@ async function openPane(
 }
 async function command(value: unknown) {
   const cmd = commandSchema.parse(value);
+  if (cmd.type === "home-agent-filter") {
+    if (stopped || !fleet) return;
+    applyHomeAgentFilter(
+      cmd,
+      { request, revision: agentPublication?.revision, home: surface === "home", foreground },
+      fleet.filterHomeAgents,
+    );
+    publish();
+    return;
+  }
   if (cmd.type === "home-agent-recovery") {
     if (stopped || !fleet) return;
     homeRecovery.command(cmd, { request, home: surface === "home", foreground }, (action) =>

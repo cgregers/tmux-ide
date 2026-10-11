@@ -41,6 +41,8 @@ pub(in crate::tmux_snapshot) struct Controls {
     pub(super) selected: Option<String>,
     pub(super) recovery_queued: Option<(u64, u64)>,
     pub(super) recovery_error: bool,
+    pub(super) machine_queued: Option<(u64, u64)>,
+    pub(super) machine_error: bool,
     pub(super) rendered_revision: Option<u64>,
     pub(super) visible: Vec<(String, bool)>,
     pub(super) scroll: ScrollHandle,
@@ -65,6 +67,8 @@ impl SnapshotView {
                 selected: None,
                 recovery_queued: None,
                 recovery_error: false,
+                machine_queued: None,
+                machine_error: false,
                 rendered_revision: None,
                 visible: Vec::new(),
                 scroll: ScrollHandle::new(),
@@ -114,6 +118,21 @@ impl SnapshotView {
         }
         self.prepare_home_filter(cx);
         if self.home_agent_key(event, window, cx) {
+            return true;
+        }
+        if key.key == "f"
+            && self.home_filter.as_ref().is_some_and(|c| {
+                let input = c.search.read(cx);
+                !input.focus.is_focused(window) && !input.is_composing()
+            })
+        {
+            if !event.is_held
+                && let Some(capability) = &self.browser_state.home_agent_filter
+            {
+                self.cycle_home_machine(self.browser_request, capability.revision, cx);
+            }
+            cx.stop_propagation();
+            window.prevent_default();
             return true;
         }
         if matches!(key.key.as_str(), "r" | "m")
@@ -174,7 +193,11 @@ impl SnapshotView {
             return div().into_any_element();
         };
         let theme = self.theme();
-        let mut tabs = div().flex().flex_wrap().gap_2();
+        let mut tabs = div()
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .child(self.home_machine_control(cx));
         for filter in [Filter::All, Filter::Working, Filter::Attention] {
             tabs = tabs.child(
                 div()

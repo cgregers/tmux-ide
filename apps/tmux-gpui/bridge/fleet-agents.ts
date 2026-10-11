@@ -21,12 +21,15 @@ export function createFleetAgentRoster(
   machineLabel: (machineId: string) => string,
   changed: (snapshot: HomeAgentSnapshot) => void,
   machineState: (id: string) => "ready" | "connecting" | "disconnected",
+  homeMachine: () => string | null = () => null,
+  machineSessions?: (id: string) => number,
 ) {
   let stopped = false;
   let stop = () => {};
   let targets = new Map<string, Target>();
   let keys = new Map<string, string>();
-  const refresh = () => {
+  let homeSnapshot: HomeAgentSnapshot | null = null;
+  const refresh = (notify = true) => {
     if (stopped) return;
     const groups = source.getSnapshot();
     const next = new Map<string, Target>();
@@ -60,62 +63,117 @@ export function createFleetAgentRoster(
         disabled: !selection,
       };
     });
-    const sorted = rows;
-    const visible = new Set(sorted.slice(0, 256).map((row) => row.key));
+    const selected = homeMachine();
+    const homeRows = rows.filter((row) => selected === null || row.machineId === selected);
+    const visible = new Set(
+      [...homeRows.slice(0, 256), ...rows.filter((row) => row.attention).slice(0, 256)].map(
+        (row) => row.key,
+      ),
+    );
     targets = new Map([...next].filter(([key]) => visible.has(key)));
     keys = nextKeys;
-    const observations = groups.flatMap((group) => (group.observation ? [group.observation] : []));
-    const sum = (
-      field:
-        | "observedSessions"
-        | "totalSessions"
-        | "loadingSessions"
-        | "unavailableSessions"
-        | "truncatedSessions",
-    ) => observations.reduce((total, observation) => total + observation[field], 0);
-    const incomplete = groups.some((group) => !group.available);
-    const loading =
-      !groups.length ||
-      groups.some(
-        (group) =>
-          machineState(group.machineId) === "connecting" ||
-          (machineState(group.machineId) === "ready" &&
-            (!group.observation || group.observation.loadingSessions > 0)),
+    const project = (
+      groups: ReturnType<Source["getSnapshot"]>,
+      visibleRows: HomeAgentRow[],
+      home = false,
+    ): HomeAgentSnapshot => {
+      const observations = groups.flatMap((group) =>
+        group.observation && (!home || machineState(group.machineId) === "ready")
+          ? [group.observation]
+          : [],
       );
-    const allUnavailable =
-      groups.length > 0 &&
-      groups.every(
-        (group) =>
-          machineState(group.machineId) === "disconnected" ||
-          group.observation?.phase === "unavailable",
-      );
-    const phase =
-      loading && !sum("observedSessions")
-        ? "loading"
-        : allUnavailable
-          ? "unavailable"
-          : incomplete
-            ? "partial"
-            : "live";
-    changed({
-      phase,
-      rows: sorted,
-      observedSessions: sum("observedSessions"),
-      totalSessions: sum("totalSessions"),
-      loadingSessions: sum("loadingSessions"),
-      unavailableSessions: sum("unavailableSessions"),
-      truncatedSessions: sum("truncatedSessions"),
-      refreshingSessionKeys: [],
-      unavailableSessionKeys: [],
-      note: incomplete ? "Some machines are connecting or unavailable." : null,
-    });
+      const sum = (
+        field:
+          | "observedSessions"
+          | "totalSessions"
+          | "loadingSessions"
+          | "unavailableSessions"
+          | "truncatedSessions",
+      ) => observations.reduce((total, observation) => total + observation[field], 0);
+      const incomplete = groups.some((group) => !group.available);
+      const loading =
+        !groups.length ||
+        groups.some(
+          (group) =>
+            machineState(group.machineId) === "connecting" ||
+            (machineState(group.machineId) === "ready" &&
+              (!group.observation || group.observation.loadingSessions > 0)),
+        );
+      const allUnavailable =
+        groups.length > 0 &&
+        groups.every(
+          (group) =>
+            machineState(group.machineId) === "disconnected" ||
+            group.observation?.phase === "unavailable",
+        );
+      const phase =
+        loading && !sum("observedSessions")
+          ? "loading"
+          : allUnavailable
+            ? "unavailable"
+            : incomplete
+              ? "partial"
+              : "live";
+      return {
+        phase,
+        rows: visibleRows,
+        observedSessions: sum("observedSessions"),
+        totalSessions: home
+          ? groups.reduce(
+              (count, group) =>
+                count +
+                (machineSessions?.(group.machineId) ?? group.observation?.totalSessions ?? 0),
+              0,
+            )
+          : sum("totalSessions"),
+        loadingSessions:
+          sum("loadingSessions") +
+          (home
+            ? groups
+                .filter((group) => machineState(group.machineId) === "connecting")
+                .reduce(
+                  (count, group) =>
+                    count +
+                    (machineSessions?.(group.machineId) ?? group.observation?.totalSessions ?? 0),
+                  0,
+                )
+            : 0),
+        unavailableSessions:
+          sum("unavailableSessions") +
+          (home
+            ? groups
+                .filter((group) => machineState(group.machineId) === "disconnected")
+                .reduce(
+                  (count, group) =>
+                    count +
+                    (machineSessions?.(group.machineId) ?? group.observation?.totalSessions ?? 0),
+                  0,
+                )
+            : 0),
+        truncatedSessions: sum("truncatedSessions"),
+        refreshingSessionKeys: [],
+        unavailableSessionKeys: [],
+        note: incomplete
+          ? home && groups.every((group) => machineState(group.machineId) === "ready")
+            ? "Agent activity observation is incomplete."
+            : "Some machines are connecting or unavailable."
+          : null,
+      };
+    };
+    homeSnapshot = project(
+      groups.filter((group) => selected === null || group.machineId === selected),
+      homeRows,
+      true,
+    );
+    if (notify) changed(project(groups, rows));
   };
   return {
     start() {
-      stop = source.subscribe(refresh);
+      stop = source.subscribe(() => refresh());
       source.start();
     },
     refresh,
+    homeSnapshot: () => homeSnapshot,
     recover(action: "retry" | "load-more") {
       if (stopped) return;
       if (action === "retry") source.retry();

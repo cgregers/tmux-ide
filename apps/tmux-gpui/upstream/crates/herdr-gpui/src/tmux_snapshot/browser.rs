@@ -79,6 +79,7 @@ pub(super) struct State {
     pub resize_gesture: Option<super::divider::gesture::Ack>,
     pub workspace_agents: Option<home_agents::WorkspaceRoster>,
     pub home_agents: Option<home_agents::Roster>,
+    pub home_agent_filter: Option<super::home::machine_filter::Capability>,
     pub home_agent_recovery: Option<super::home::recovery::Capability>,
     pub attention_supported: bool,
     pub attention_selection_rejected: Option<super::picker::attention::Rejected>,
@@ -115,6 +116,7 @@ struct Publication {
     resize_gesture: Option<super::divider::gesture::Ack>,
     workspace_agents: Option<home_agents::WorkspaceRoster>,
     home_agents: Option<home_agents::Roster>,
+    home_agent_filter: Option<super::home::machine_filter::Capability>,
     home_agent_recovery: Option<super::home::recovery::Capability>,
     #[serde(default)]
     attention_supported: bool,
@@ -151,6 +153,12 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "home-agent-filter", rename_all = "camelCase")]
+    HomeAgentFilter {
+        request: u64,
+        roster_revision: u64,
+        machine_id: Option<String>,
+    },
     #[serde(rename = "home-agent-recovery", rename_all = "camelCase")]
     HomeAgentRecovery {
         request: u64,
@@ -321,6 +329,21 @@ impl Reader {
         }) {
             return Err(Error::Invalid("Invalid Home agent recovery"));
         }
+        if p.home_agent_filter.as_ref().is_some_and(|c| {
+            surface != Surface::Home
+                || c.revision == 0
+                || c.revision > 9_007_199_254_740_991
+                || p.home_agents
+                    .as_ref()
+                    .is_none_or(|r| r.revision != c.revision)
+                || p.fleet.as_ref().is_none_or(|f| {
+                    c.machine_id
+                        .as_ref()
+                        .is_some_and(|id| !f.groups.iter().any(|g| &g.id == id))
+                })
+        }) {
+            return Err(Error::Invalid("Invalid Home agent filter"));
+        }
         // Home is a detached catalog, never a hidden terminal authority owner.
         if surface == Surface::Home
             && (p.selected_session.is_some()
@@ -447,6 +470,7 @@ impl Reader {
             resize_gesture: p.resize_gesture,
             workspace_agents: p.workspace_agents,
             home_agents: p.home_agents,
+            home_agent_filter: p.home_agent_filter,
             home_agent_recovery: p.home_agent_recovery,
             attention_supported: p.attention_supported,
             attention_selection_rejected: p.attention_selection_rejected,

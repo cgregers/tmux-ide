@@ -3,6 +3,7 @@ use super::{SnapshotView, browser, browser_ui::Selection};
 use gpui::{prelude::*, *};
 pub(super) mod filters;
 mod fleet;
+pub(super) mod machine_filter;
 pub(super) mod recovery;
 mod selection;
 

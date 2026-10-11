@@ -1,3 +1,4 @@
+import type { HomeAgentSnapshot } from "../../../packages/presentation/src/home-agent-roster.ts";
 import { createSharedAgentObservation } from "./shared-agent-observation.ts";
 import { createMachineAgents } from "../../../packages/daemon/src/lib/machine-agents.ts";
 import { createFleetAgentRoster } from "./fleet-agents.ts";
@@ -57,8 +58,18 @@ export function createNativeFleet(
   changed: () => void,
   makeCatalog: (manager: MachineConnectionManager) => Catalog = (manager) =>
     createMachineCatalog({ manager }),
+  makeAgents: typeof createMachineAgents = createMachineAgents,
 ) {
   const catalog = makeCatalog(manager);
+  let homeMachineId: string | null = null;
+  const homeListeners = new Set<
+    (value: { machineId: string | null; snapshot: HomeAgentSnapshot }) => void
+  >();
+  const publishHome = () => {
+    const snapshot = agentRoster?.homeSnapshot();
+    if (snapshot)
+      for (const listener of [...homeListeners]) listener({ machineId: homeMachineId, snapshot });
+  };
   let agentRoster: ReturnType<typeof createFleetAgentRoster> | undefined;
   let stopped = false;
   let started = false;
@@ -176,6 +187,8 @@ export function createNativeFleet(
         };
       }),
     };
+    if (homeMachineId !== null && !publication.groups.some((group) => group.id === homeMachineId))
+      homeMachineId = null;
     routes = next;
     retries = nextRetries;
     disconnects = nextDisconnects;
@@ -184,7 +197,7 @@ export function createNativeFleet(
   };
   const observation = createSharedAgentObservation((publish) => {
     const roster = createFleetAgentRoster(
-      createMachineAgents({ catalog, manager }),
+      makeAgents({ catalog, manager }),
       (machineId, row) =>
         [...routes].find(
           ([, route]) =>
@@ -199,6 +212,8 @@ export function createNativeFleet(
       publish,
       (id) =>
         catalog.getSnapshot().groups.find((group) => group.id === id)?.state ?? "disconnected",
+      () => homeMachineId,
+      (id) => catalog.getSnapshot().groups.find((group) => group.id === id)?.sessions.length ?? 0,
     );
     agentRoster = roster;
     roster.start();
@@ -215,6 +230,30 @@ export function createNativeFleet(
       catalog.start();
     },
     observeAgents: observation.subscribe,
+    observeHomeAgents(
+      listener: (value: { machineId: string | null; snapshot: HomeAgentSnapshot }) => void,
+    ) {
+      homeListeners.add(listener);
+      const stop = observation.subscribe(() => {
+        const snapshot = agentRoster?.homeSnapshot();
+        if (snapshot) listener({ machineId: homeMachineId, snapshot });
+      });
+      return () => {
+        homeListeners.delete(listener);
+        stop();
+      };
+    },
+    filterHomeAgents(machineId: string | null) {
+      if (
+        stopped ||
+        (machineId !== null && !publication.groups.some((group) => group.id === machineId))
+      )
+        return false;
+      homeMachineId = machineId;
+      agentRoster?.refresh(false);
+      publishHome();
+      return true;
+    },
     recoverAgents: (action: "retry" | "load-more") => agentRoster?.recover(action),
     resolveAgent: (key: string) => agentRoster?.resolve(key) ?? null,
     publication: () => structuredClone(publication),
@@ -257,6 +296,7 @@ export function createNativeFleet(
       stopped = true;
       stop();
       observation.dispose();
+      homeListeners.clear();
       catalog.dispose();
       routes.clear();
       retries.clear();
