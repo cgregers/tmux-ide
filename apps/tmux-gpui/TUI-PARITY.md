@@ -30,11 +30,11 @@ vocabulary remain unfinished. Shared icon tabs and sidebar buttons landed in
 
 - [ ] Match TUI information hierarchy: machine, session, window, pane and agent status.
 - [ ] Match Home search, machine filter, All/Working/Needs attention and jump-to-agent workflows.
-  Native Home now filters loaded agents by name/session label and All/Working/Needs
-  attention, preserving coverage, unavailable rows and identity/revision fences.
-  Headless tests and physical light/dark checks are recorded in
-  `evidence/home-filters-2026-10-11/`. Broader team/project/machine search, machine
-  filters, keyboard shortcuts and remaining physical acceptance stay open.
+      Native Home now filters loaded agents by name/session label and All/Working/Needs
+      attention, preserving coverage, unavailable rows and identity/revision fences.
+      Headless tests and physical light/dark checks are recorded in
+      `evidence/home-filters-2026-10-11/`. Broader team/project/machine search, machine
+      filters, keyboard shortcuts and remaining physical acceptance stay open.
 - [ ] Complete sidebar show/hide, grouping, overflow, long labels and keyboard navigation.
 - [ ] Add full command palette with the TUI action vocabulary and contextual availability.
 - [ ] Match help, shortcut reference and relevant user-facing connection diagnostics.
@@ -92,7 +92,9 @@ The Node connection owner is now reusable through
 its telemetry adapter and consumes the same owner; the public subpath brings in
 no TUI modules. This is a Node-only API and does not belong in host-neutral clients.
 
-Next machine slice: bind the GPUI bridge to this owner with explicit route lifetime,
+The bridge now has a tested `remote-route.ts` adapter that borrows one verified
+SSH epoch, rejects stale inventory, and cancels on retirement. It is not wired
+into navigation yet. Next bind route retirement to browser catalog/child cleanup,
 then add the native machine dialog. Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
 Cancellation, child cleanup, sanitized failures, generation mismatches and late
@@ -118,11 +120,11 @@ Present: theme picker. This is not the complete TUI settings surface.
 Use the TUI for product structure and Zed/Herdr for native interaction quality.
 
 - [ ] Establish shared native design tokens: semantic colors mapped to all tmux-ide themes,
-  typography, spacing, radii, borders, elevation and focus states.
+      typography, spacing, radii, borders, elevation and focus states.
 - [ ] Build reusable Icon, IconButton, Button, Tab, PaneHeader, SidebarRow, Menu,
-  Tooltip, Dialog and StatusBadge components; migrate existing chrome to them.
+      Tooltip, Dialog and StatusBadge components; migrate existing chrome to them.
 - [ ] Use one attributed SVG icon family with consistent optical size/stroke,
-  accessible labels and tooltips; keep agent/product logos separate from action icons.
+      accessible labels and tooltips; keep agent/product logos separate from action icons.
 - [ ] Add a component gallery with light/dark, disabled, hover, selected and keyboard-focus specimens.
 
 - [ ] Compact pane headers with title, selected state and discoverable contextual actions.
@@ -156,10 +158,10 @@ launcher does not satisfy this requirement. See [upstream research](HERDR-DESIGN
 - [ ] Handle webview focus, resizing, overlay occlusion, navigation and close correctly.
 - [ ] Embed VS Code web as a tab or side panel using the selected live workspace context.
 - [ ] Adapt server discovery/supervision, loopback token authentication, readiness,
-  failure/retry and shutdown; preserve explicit user acceptance of server terms.
+      failure/retry and shutdown; preserve explicit user acceptance of server terms.
 - [ ] Keep browser/editor tabs client-owned and distinguish them from tmux windows/panes.
 - [ ] Verify session switches, server exit, app exit and overlays without leaking
-  terminal input or opening a stale/remote path as a local folder.
+      terminal input or opening a stale/remote path as a local folder.
 
 ## Execution order
 
