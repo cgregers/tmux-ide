@@ -17,6 +17,7 @@ const base = {
 };
 export const paneActionSchema = z.discriminatedUnion("action", [
   z.object({ ...base, action: z.literal("new-window") }).strict(),
+  z.object({ ...base, action: z.literal("close") }).strict(),
   z.object({ ...base, action: z.literal("split"), direction: z.enum(["right", "down"]) }).strict(),
   z
     .object({ ...base, action: z.literal("rename"), name: WorkspaceMultiplexerNameSchemaZ })
@@ -80,7 +81,7 @@ export function createPaneActionExecutor() {
     command: PaneAction,
   ): Promise<boolean | WorkspaceWindowSplitResult> => {
     const input = paneActionSchema.parse(command);
-    if (input.action === "new-window") return false; // Separate scoped owner-action protocol.
+    if (input.action === "new-window" || input.action === "close") return false; // Separate scoped owner-action protocol.
     const expected = current();
     if (
       !expected ||

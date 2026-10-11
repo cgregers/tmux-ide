@@ -1,3 +1,4 @@
+import { createClosePanePreflight } from "./close-pane.ts";
 import { createNewWindowExecutor } from "./new-window.ts";
 import { createSplitGestureOwner, splitGestureSchema } from "./split-gesture.ts";
 import { createSplitLayoutReader } from "./split-layout.ts";
@@ -52,6 +53,13 @@ const resizeFence = createPaneResizeFence();
 let currentResizeToken: string | null = null;
 const actionFence = createPaneActionFence();
 const executePaneAction = createPaneActionExecutor();
+const prepareClose = createClosePanePreflight();
+let closePaneReady: {
+  token: string;
+  id: string;
+  presenceRevision: number;
+  hostClientId: string;
+} | null = null;
 const executeNewWindow = createNewWindowExecutor();
 let newWindowReceipt: {
   token: string;
@@ -125,6 +133,18 @@ function output(snapshot: typeof latest.snapshot) {
                 : null,
             paneSplitReceipt,
             newWindowReceipt,
+            closePaneReady:
+              inputReady &&
+              runtime?.ownsConnectionAuthority("geometry") &&
+              !!closePaneReady &&
+              closePaneReady.token ===
+                actionFence.current(
+                  resizeLayout,
+                  closePaneReady.id,
+                  lifetimes.get(closePaneReady.id),
+                )?.token
+                ? closePaneReady
+                : null,
             paneActionError: actionFailed
               ? "Pane action unavailable — reselect pane to retry"
               : null,
@@ -466,6 +486,7 @@ try {
         const presence = presenceSchema.safeParse(value);
         if (presence.success) {
           admittedPresenceRevision = presence.data.revision;
+          closePaneReady = null;
           actionFence.invalidate();
           foreground = presence.data.active;
           if (!foreground) splitGesture.retire();
@@ -529,6 +550,36 @@ try {
               : null;
           };
           if (target()?.token !== paneAction.data.token) continue;
+          if (paneAction.data.action === "close") {
+            const revision = admittedPresenceRevision;
+            actionBusy = true;
+            closePaneReady = null;
+            output(latest.snapshot);
+            void prepareClose(runtime, () => {
+              const value = target();
+              return value && admittedPresenceRevision === revision
+                ? { ...value, session: config.liveSessionId, presenceRevision: revision }
+                : null;
+            })
+              .then((result) => {
+                actionFailed = !result;
+                if (result)
+                  closePaneReady = {
+                    token: result.token,
+                    id: result.id,
+                    hostClientId,
+                    presenceRevision: revision,
+                  };
+              })
+              .catch(() => {
+                actionFailed = true;
+              })
+              .finally(() => {
+                actionBusy = false;
+                if (!stopped) output(latest.snapshot);
+              });
+            continue;
+          }
           if (paneAction.data.action === "new-window") {
             const revision = admittedPresenceRevision;
             actionBusy = true;

@@ -559,3 +559,23 @@ journey on Linux source and macOS packaged bridges. Evidence:
 `evidence/new-window-2026-10-11/` and `evidence/controller-release-2026-10-11/`.
 Physical pointer/F5/narrow-window acceptance remains open; the user's active
 demo is unchanged. Pane close confirmation and harness creation remain gaps.
+
+## Close pane checkpoint — 11 October
+
+F5 Close pane now opens an explicit captured-target confirmation with Cancel
+and destructive-action icons. Old callbacks, changed targets, backgrounding and
+duplicate confirmation cannot dispatch a close. The surviving bridge owns the
+daemon response, verifies exact removal and uses fresh canonical topology to
+select a surviving active pane. The daemon still refuses the last session pane;
+an unconfirmed close requalifies only the original pane, without replaying it.
+
+Both source and exact packaged journeys cover same-window panes and closing a
+nonlast window, with actual survivor input, preserved sibling identity and usable
+input after last-pane refusal. New-window regression also passes. Native gates:
+220 focused, 2,900 default and 2,934 all-feature tests; both Clippy configurations,
+format, size and build passed. Bridge: 381 passed, five explicit skips. Packaging:
+seven passed. Evidence: `evidence/close-pane-2026-10-11/`.
+
+Physical confirmation/pointer/IME acceptance remains open. Existing user demos
+are unchanged. New agent, Help, Keyboard shortcuts and What's new remain missing
+F5 workflows; real remote acceptance and signed release qualification remain open.

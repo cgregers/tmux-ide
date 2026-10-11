@@ -1,3 +1,4 @@
+import { closePane, confirmsClosedPane } from "./close-pane.ts";
 import { confirmsNewWindow, newWindowReceiptSchema } from "./new-window.ts";
 import { completeFleetServerSelection } from "./fleet-server-selection.ts";
 import { createOnFleetRoute } from "./fleet-server-create.ts";
@@ -269,6 +270,12 @@ let pendingPaneSplit:
       presenceRevision: number;
     })
   | null = null;
+let pendingClose: {
+  token: string;
+  id: string;
+  presenceRevision: number;
+  submitted: boolean;
+} | null = null;
 let pendingNewWindow: { token: string; window: string; presenceRevision: number } | null = null;
 let paneActions: z.infer<typeof paneActionsSchema> | null = null;
 let editorPending = false;
@@ -613,6 +620,7 @@ async function retire() {
   active = undefined;
   pendingPaneSplit = null;
   pendingNewWindow = null;
+  pendingClose = null;
   splitLayout = null;
   splitGesture = null;
   activeSplitGesture = null;
@@ -699,6 +707,8 @@ async function openPane(
     originalPane?: string;
   },
   requiredCurrent?: () => boolean,
+  closeConfirmation?: { killed: string; current: () => boolean },
+  recoveryNotice?: string,
 ) {
   const owningCatalog = catalog;
   const directory = await mkdtemp(join(tmpdir(), "tmux-gpui-pane-"));
@@ -757,6 +767,13 @@ async function openPane(
     let childPresentationEpoch: number | undefined;
     const unavailable = () => {
       if (stopped || request !== token || active?.child !== child) return;
+      if (pendingClose?.submitted) {
+        snapshot = null;
+        inputReady = false;
+        status = "Closing pane";
+        publish();
+        return;
+      }
       attention.cancel();
       retireAgents();
       snapshot = null;
@@ -791,6 +808,40 @@ async function openPane(
           layouts = topologySchema.parse(event.layouts ?? []);
           if (catalogOnly) {
             if (event.catalogReady !== true) throw new Error("Layout catalog unavailable");
+            if (closeConfirmation) {
+              if (
+                !closeConfirmation.current() ||
+                !confirmsClosedPane(
+                  layouts.flatMap((l) =>
+                    l.panes.map((p) => p.pane).filter((id): id is string => !!id),
+                  ),
+                  closeConfirmation.killed,
+                )
+              )
+                throw new Error("Closed pane still present");
+              const preferred = preferredPane(
+                panes.map((p) => p.semanticPaneId),
+                layouts,
+              );
+              const survivor = panes.find((p) => p.semanticPaneId === preferred);
+              if (survivor) {
+                void retire()
+                  .then(async () => {
+                    if (!closeConfirmation.current()) return;
+                    selectedPane = survivor.semanticPaneId;
+                    await openPane(survivor, token, false, undefined, closeConfirmation.current);
+                  })
+                  .catch(() => {
+                    if (closeConfirmation.current()) {
+                      snapshot = null;
+                      inputReady = false;
+                      status = "Pane closed; survivor unavailable — refresh";
+                      publish();
+                    }
+                  });
+                return;
+              }
+            }
             if (splitConfirmation) {
               const matching = layouts.filter(
                 (layout) => layout.semanticWindowId === splitConfirmation.window,
@@ -835,6 +886,145 @@ async function openPane(
             void retire();
             return;
           }
+          if (event.closePaneReady && pendingClose && !pendingClose.submitted) {
+            const ready = z
+              .object({
+                token: z.string().uuid(),
+                id: z.string().min(1).max(512),
+                hostClientId: z
+                  .string()
+                  .refine(
+                    (value) =>
+                      value.startsWith("gpui:") &&
+                      z.string().uuid().safeParse(value.slice(5)).success,
+                  ),
+                presenceRevision: z.number().int().nonnegative().safe(),
+              })
+              .strict()
+              .parse(event.closePaneReady);
+            if (
+              ready.token !== pendingClose.token ||
+              ready.id !== pendingClose.id ||
+              ready.id !== config.semanticPaneId ||
+              ready.presenceRevision !== pendingClose.presenceRevision ||
+              presenceRevision !== ready.presenceRevision ||
+              !foreground ||
+              !catalog ||
+              !selectedSession ||
+              event.inputReady !== true
+            )
+              throw new Error("Close target retired");
+            pendingClose.submitted = true;
+            const host = catalog,
+              session = selectedSession,
+              killed = ready.id;
+            const current = splitRefreshGuard(() => ({
+              request,
+              session: selectedSession,
+              catalog,
+              presenceRevision,
+              foreground,
+              stopped,
+            }));
+            snapshot = null;
+            inputReady = false;
+            paneActions = null;
+            status = "Closing pane";
+            publish();
+            void (async () => {
+              if (
+                !(await closePane({
+                  current,
+                  generation: config.scope.generation,
+                  workspace: config.workspaceName,
+                  pane: killed,
+                  submit: (operation) =>
+                    host.closePane(
+                      operation,
+                      config.workspaceName,
+                      session,
+                      killed,
+                      ready.hostClientId,
+                    ),
+                }))
+              )
+                return;
+              await retire();
+              if (!current()) return;
+              const freshSessions = (await host.sessions()).map(sessionChoice);
+              if (!current()) return;
+              if (freshSessions.length > 512) throw new Error("Session catalog exceeds limit");
+              sessions = freshSessions;
+              if (!freshSessions.some((s) => s.id === session)) {
+                selectedPane = null;
+                selectedSession = null;
+                panes = [];
+                layouts = [];
+                surface = "home";
+                homePhase = "live";
+                status = "Session no longer available after pane close";
+                snapshot = null;
+                inputReady = false;
+                publish();
+                startAgents();
+                return;
+              }
+              const choices = await host.workspacePanes(session, config.workspaceName);
+              if (!current()) return;
+              if (
+                !confirmsClosedPane(
+                  choices.map((p) => p.semanticPaneId),
+                  killed,
+                )
+              )
+                throw new Error("Pane close absence not confirmed");
+              panes = choices;
+              selectedPane = null;
+              layouts = [];
+              snapshot = null;
+              inputReady = false;
+              status = "Loading surviving panes";
+              publish();
+              if (choices[0])
+                await openPane(choices[0], token, true, undefined, current, { killed, current });
+              else {
+                status = "No available panes — refresh";
+                publish();
+              }
+            })().catch(async () => {
+              if (!current()) return;
+              await retire();
+              if (!current()) return;
+              snapshot = null;
+              inputReady = false;
+              paneActions = null;
+              status = "Pane close not confirmed — reselect pane or refresh";
+              publish();
+              // A failed response is not proof of refusal. Requalify only the exact
+              // original semantic pane; never replay the mutation or pick a substitute.
+              try {
+                const choices = await host.workspacePanes(session, config.workspaceName);
+                if (!current() || choices.length > 512) return;
+                const matches = choices.filter((pane) => pane.semanticPaneId === killed);
+                if (matches.length !== 1) return;
+                panes = choices;
+                layouts = [];
+                selectedPane = killed;
+                await openPane(
+                  matches[0],
+                  token,
+                  false,
+                  undefined,
+                  current,
+                  undefined,
+                  "Close not confirmed — original pane reconnected",
+                );
+              } catch {
+                // Keep the explicit unavailable state if exact requalification fails.
+              }
+            });
+            return;
+          }
           if (
             event.newWindowReceipt &&
             pendingNewWindow &&
@@ -863,6 +1053,7 @@ async function openPane(
             const host = catalog,
               session = selectedSession;
             pendingNewWindow = null;
+            pendingClose = null;
             snapshot = null;
             inputReady = false;
             paneActions = null;
@@ -947,6 +1138,7 @@ async function openPane(
               session = selectedSession;
             pendingPaneSplit = null;
             pendingNewWindow = null;
+            pendingClose = null;
             snapshot = null;
             inputReady = false;
             paneActions = null;
@@ -1006,6 +1198,7 @@ async function openPane(
             .parse(event.scrollOffset ?? 0);
           appliedPresenceRevision = event.presenceRevision;
           const hasAuthority =
+            !pendingClose &&
             foreground &&
             appliedPresenceRevision === presenceRevision &&
             event.inputReady === true &&
@@ -1081,19 +1274,21 @@ async function openPane(
               ? offeredActions
               : null;
           status =
-            event.paneActionError === "Pane action unavailable — reselect pane to retry"
-              ? event.paneActionError
-              : snapshot && scrollOffset > 0
-                ? `History: ${scrollOffset} lines above live — Shift-End returns to live`
-                : snapshot
-                  ? inputReady
-                    ? event.resizeBlocked === true
-                      ? "Resize unavailable — reselect pane to retry"
-                      : "Keyboard ready — click terminal to type"
-                    : !foreground
-                      ? "Window inactive — activate tmux-ide to type"
-                      : "Waiting for input authority"
-                  : "Pane unavailable — select again or refresh";
+            recoveryNotice && inputReady
+              ? recoveryNotice
+              : event.paneActionError === "Pane action unavailable — reselect pane to retry"
+                ? event.paneActionError
+                : snapshot && scrollOffset > 0
+                  ? `History: ${scrollOffset} lines above live — Shift-End returns to live`
+                  : snapshot
+                    ? inputReady
+                      ? event.resizeBlocked === true
+                        ? "Resize unavailable — reselect pane to retry"
+                        : "Keyboard ready — click terminal to type"
+                      : !foreground
+                        ? "Window inactive — activate tmux-ide to type"
+                        : "Waiting for input authority"
+                    : "Pane unavailable — select again or refresh";
           publish();
         }
         if (buffer.length > MAX_FRAME) throw new Error("Oversized child publication");
@@ -1223,6 +1418,7 @@ async function command(value: unknown) {
       initialPane = null;
       pendingPaneSplit = null;
       pendingNewWindow = null;
+      pendingClose = null;
     }
     if (foreground) startAgents();
     else retireAgents();
@@ -1308,6 +1504,8 @@ async function command(value: unknown) {
     )
       throw new Error("Pane action queue full");
     paneActions = null;
+    if (cmd.action === "close")
+      pendingClose = { token: cmd.token, id: cmd.id, presenceRevision, submitted: false };
     if (cmd.action === "split" || cmd.action === "new-window") {
       const window = layouts.find((layout) =>
         layout.panes.some((pane) => pane.pane === cmd.id),

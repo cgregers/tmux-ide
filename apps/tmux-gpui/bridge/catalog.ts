@@ -52,6 +52,28 @@ export function createPreviewCatalog(hostInput: PreviewHost) {
         throw new Error("Home session is unavailable for this server");
       return client.applicationShell(session.workspaceName, session.liveSessionId, signal);
     },
+    async closePane(
+      operationId: string,
+      workspaceName: string,
+      liveSessionId: string,
+      semanticPaneId: string,
+      hostClientId: string,
+    ) {
+      // Principal comes only from the current trusted helper's preflight, never native input.
+      const controller = createTmuxServerClient(
+        { ...host, hostClientId, origin: "tmux-ide://app" },
+        host.scope,
+      );
+      try {
+        return await controller.mutate(
+          operationId,
+          { verb: "workspace.pane.kill", workspaceName, semanticPaneId },
+          liveSessionId,
+        );
+      } finally {
+        controller.dispose();
+      }
+    },
     createSession(operationId: string, displayName: string) {
       return client.createSession(operationId, {
         displayName,

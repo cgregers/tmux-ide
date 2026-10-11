@@ -14,6 +14,8 @@ mod tests;
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
     Plus,
+    Trash,
+    Close,
     Home,
     Terminal,
     Sessions,
@@ -23,6 +25,8 @@ pub(super) enum Icon {
 impl Icon {
     fn path(self) -> &'static str {
         match self {
+            Self::Trash => "icons/trash.svg",
+            Self::Close => "icons/close.svg",
             Self::Plus => "icons/plus.svg",
             Self::Home => "icons/tmux-home.svg",
             Self::Terminal => "icons/terminal.svg",

@@ -5,6 +5,7 @@ mod fleet_servers;
 mod machine;
 mod machine_edit;
 mod machine_remove;
+mod pane_close;
 mod pane_commands;
 mod saved_machines;
 use super::{SnapshotView, browser, browser_ui::Selection};
@@ -76,6 +77,7 @@ pub(super) struct Picker {
     error: Option<&'static str>,
     removal: Option<machine_remove::Confirmation>,
     edit: Option<machine_edit::Form>,
+    closing: Option<pane_close::Confirmation>,
     search: Entity<SearchInput>,
     _changed: Subscription,
     rows: Vec<Row>,
@@ -382,6 +384,7 @@ impl SnapshotView {
             error: None,
             removal: None,
             edit: None,
+            closing: None,
             search,
             _changed: changed,
             rows: if mode == Mode::Attention {
@@ -489,13 +492,17 @@ impl SnapshotView {
             if self
                 .picker
                 .as_ref()
-                .is_none_or(|picker| picker.mode != Mode::Commands)
+                .is_none_or(|picker| picker.mode != Mode::Commands || picker.closing.is_some())
                 || self.new_session.is_some()
                 || self.pane_actions.is_some()
             {
                 return;
             }
             if let Some(captured) = captured {
+                if matches!(action, pane_commands::Action::Close) {
+                    self.begin_pane_close(captured.clone(), window, cx);
+                    return;
+                }
                 if self.dispatch_captured_pane_action(captured, action.wire(), window, cx) {
                     self.close_picker(window, cx);
                 } else if let Some(picker) = &mut self.picker {
@@ -642,6 +649,10 @@ impl SnapshotView {
             .as_ref()
             .is_some_and(|p| p.search.read(cx).is_composing())
         {
+            return;
+        }
+        if self.picker.as_ref().is_some_and(|p| p.closing.is_some()) {
+            self.pane_close_key(event, window, cx);
             return;
         }
         if self.machine_edit_composing(cx) {
@@ -802,6 +813,9 @@ impl SnapshotView {
         )
     }
     pub(super) fn picker_render(&self, cx: &mut Context<Self>) -> AnyElement {
+        if self.picker.as_ref().is_some_and(|p| p.closing.is_some()) {
+            return self.pane_close_render(cx);
+        }
         let Some(picker) = &self.picker else {
             return div().into_any_element();
         };

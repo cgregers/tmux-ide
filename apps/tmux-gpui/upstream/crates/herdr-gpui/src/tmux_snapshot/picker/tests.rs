@@ -399,3 +399,5 @@ mod machine_remove;
 mod attention_context;
 
 mod machine_edit;
+
+mod pane_close;

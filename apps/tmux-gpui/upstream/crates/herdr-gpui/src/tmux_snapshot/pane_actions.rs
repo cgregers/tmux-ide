@@ -9,6 +9,7 @@ use serde::Serialize;
 pub(super) enum Action {
     #[serde(rename = "new-window")]
     NewWindow,
+    Close,
     Rename {
         name: String,
     },
