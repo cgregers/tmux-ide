@@ -389,3 +389,5 @@ fn system_notifications_are_change_only_and_do_not_select(cx: &mut TestAppContex
 }
 
 mod machine_management;
+
+mod pane_commands;

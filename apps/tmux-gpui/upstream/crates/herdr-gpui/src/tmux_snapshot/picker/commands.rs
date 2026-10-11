@@ -44,6 +44,7 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
         label: label.into(),
     })
     .collect();
+    rows.extend(super::pane_commands::rows(state, &query));
     if let Some(fleet) = &state.fleet {
         for group in &fleet.groups {
             if let Some(token) = &group.retry {

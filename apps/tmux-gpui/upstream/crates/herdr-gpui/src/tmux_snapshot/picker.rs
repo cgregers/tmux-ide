@@ -2,6 +2,7 @@
 pub(super) mod attention;
 pub(super) mod commands;
 mod machine;
+mod pane_commands;
 mod saved_machines;
 use super::{SnapshotView, browser, browser_ui::Selection};
 use crate::search_input::{Changed, SearchInput};
@@ -14,6 +15,10 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
+    PaneAction {
+        captured: Option<super::pane_actions::Target>,
+        action: pane_commands::Action,
+    },
     Machine {
         id: String,
         revision: u64,
@@ -192,6 +197,9 @@ fn current(state: &browser::State, target: &Target) -> bool {
                 && p.roster.available(key)
                 && p.roster.rows.iter().any(|r| r.key == *key && r.attention)
         }),
+        Target::PaneAction { captured, .. } => captured
+            .as_ref()
+            .is_some_and(|target| target.current(state)),
         Target::Command(action) => action.available(state),
         Target::Session(id) => state.sessions.iter().any(|c| &c.id == id),
         Target::Pane(id) => state.panes.iter().any(|c| &c.id == id),
@@ -430,6 +438,26 @@ impl SnapshotView {
             }
             return;
         }
+        if let Target::PaneAction { captured, action } = &target {
+            if self
+                .picker
+                .as_ref()
+                .is_none_or(|picker| picker.mode != Mode::Commands)
+                || self.new_session.is_some()
+                || self.pane_actions.is_some()
+            {
+                return;
+            }
+            if let Some(captured) = captured {
+                if self.dispatch_captured_pane_action(captured, action.wire(), window, cx) {
+                    self.close_picker(window, cx);
+                } else if let Some(picker) = &mut self.picker {
+                    picker.error = Some("Action queue unavailable — cancel and reselect the pane.");
+                    cx.notify();
+                }
+            }
+            return;
+        }
         if let Target::Command(action) = target {
             self.close_picker(window, cx);
             match action {
@@ -503,7 +531,8 @@ impl SnapshotView {
                     session_id,
                 },
                 Target::Pane(id) => Selection::Pane(id),
-                Target::Attention { .. }
+                Target::PaneAction { .. }
+                | Target::Attention { .. }
                 | Target::Theme(_)
                 | Target::Command(_)
                 | Target::MachineToggle { .. }

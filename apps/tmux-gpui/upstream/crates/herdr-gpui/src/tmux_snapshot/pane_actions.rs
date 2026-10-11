@@ -23,14 +23,14 @@ pub(super) enum SplitDirection {
     Right,
     Down,
 }
-#[derive(Clone)]
-struct Target {
+#[derive(Clone, PartialEq, Eq)]
+pub(super) struct Target {
     request: u64,
     session: String,
     actions: browser::PaneActions,
 }
 impl Target {
-    fn capture(state: &browser::State) -> Option<Self> {
+    pub(super) fn capture(state: &browser::State) -> Option<Self> {
         let actions = state.pane_actions.clone()?;
         if state.surface != browser::Surface::Workspace
             || !state.input_ready
@@ -46,12 +46,19 @@ impl Target {
             actions,
         })
     }
-    fn current(&self, state: &browser::State) -> bool {
+    pub(super) fn current(&self, state: &browser::State) -> bool {
         Self::capture(state).is_some_and(|now| {
             now.request == self.request
                 && now.session == self.session
                 && now.actions == self.actions
         })
+    }
+}
+impl std::fmt::Debug for Target {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PaneActionTarget")
+            .field("request", &self.request)
+            .finish_non_exhaustive()
     }
 }
 pub(super) struct Menu {
@@ -201,25 +208,46 @@ impl SnapshotView {
         let Some(menu) = self.pane_actions.as_ref() else {
             return;
         };
+        let target = menu.target.clone();
+        if self.dispatch_captured_pane_action(&target, action, window, cx) {
+            return;
+        }
+        if let Some(menu) = &mut self.pane_actions {
+            menu.error = Some("Action queue unavailable — cancel and reselect the pane.");
+            cx.notify();
+        }
+    }
+    /// Shared queue admission for the pane menu and F5; never recapture a newer token.
+    pub(super) fn dispatch_captured_pane_action(
+        &mut self,
+        target: &Target,
+        action: Action,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.browser_request != target.request
+            || !self.presence.ready()
+            || !target.current(&self.browser_state)
+        {
+            return false;
+        }
         let command = browser::Command::PaneAction {
-            request: menu.target.request,
-            id: menu.target.actions.id.clone(),
-            token: menu.target.actions.token.clone(),
+            request: target.request,
+            id: target.actions.id.clone(),
+            token: target.actions.token.clone(),
             action,
         };
         if self
             .browser_commands
             .as_ref()
-            .is_some_and(|sender| sender.try_send(command).is_ok())
+            .is_none_or(|sender| sender.try_send(command).is_err())
         {
-            // Queue admission is not acknowledgement. The one-use token prevents
-            // another action until a fresh daemon publication grants capability.
-            self.browser_state.pane_actions = None;
-            self.close_pane_actions(window, cx);
-        } else if let Some(menu) = &mut self.pane_actions {
-            menu.error = Some("Action queue unavailable — cancel and reselect the pane.");
-            cx.notify();
+            return false;
         }
+        // Admission consumes the one-use capability, not terminal input interruption.
+        self.browser_state.pane_actions = None;
+        self.close_pane_actions(window, cx);
+        true
     }
     pub(super) fn pane_actions_key(
         &mut self,

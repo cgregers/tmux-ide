@@ -408,3 +408,14 @@ full native gates passed; see `evidence/home-machine-filter-2026-10-11/`. Physic
 filter acceptance remains open because the user took over the isolated QA app.
 This supersedes earlier implementation-gap statements about machine filtering,
 without closing the broader Home/fleet acceptance checklist.
+
+## F5 pane actions — 11 October checkpoint
+
+Workspace F5 exposes Zoom/Unzoom pane, Split right and Split down through the
+existing captured pane-action capability. Queue refusal leaves the picker open;
+stale tokens and callbacks from a replaced picker cannot dispatch. Terminal input
+is not rearmed and the tested canvas stays unchanged. Independent review, focused
+202 native tests, both full workspace configurations, both Clippy configurations,
+format/size checks and debug build passed. Physical F5 pane-action QA remains open.
+See `evidence/native-f5-pane-actions-2026-10-11/`; this does not close the full
+F5 action-vocabulary or release acceptance checklist.
