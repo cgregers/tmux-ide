@@ -22,6 +22,7 @@ import {
 import { createNativeTmuxSessionCreator } from "./tmux-server-session-create.ts";
 import { createTmuxSessionMutationFence } from "./tmux-session-mutation-fence.ts";
 import { createNativeTmuxSessionOpener } from "./tmux-server-session-open.ts";
+import { observedAgentSchema } from "./tmux-server-agent-admission.ts";
 import { createPaneEditorContextResolver } from "./tmux-pane-editor-context.ts";
 import {
   createServerGenerationFencedTmuxRunner,
@@ -1856,6 +1857,15 @@ async function startEmbeddedDaemonGeneration(
               throw new WindowSplitLayoutUnavailable();
             if (!sessionRuntimeRegistry) throw new WindowSplitLayoutUnavailable();
             return sessionRuntimeRegistry.readWindowSplitLayout(sessionName, target);
+          },
+          openAgent: async (liveSessionId, observed) => {
+            const target = observedAgentSchema.parse(observed);
+            await createNativeTmuxServerCatalog(workspaceRegistry, fleetFactsTmuxRunner)();
+            try {
+              return await defaultSessionOpener.openAgent(liveSessionId, target);
+            } finally {
+              terminalInventoryRuntime!.invalidate();
+            }
           },
           openSession: async (liveSessionId) => {
             await createNativeTmuxServerCatalog(workspaceRegistry, fleetFactsTmuxRunner)();

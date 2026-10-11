@@ -1,3 +1,4 @@
+import { discoveredAgentRequest } from "./fleet-agent-admission.ts";
 import { z } from "zod";
 import { homeAgentPublication, openAgentSchema } from "./home-agent-publication.ts";
 import type { HomeAgentSnapshot } from "../../../packages/presentation/src/home-agent-roster.ts";
@@ -66,6 +67,7 @@ export function createAttentionOwner(changed: () => void) {
           ...homeAgentPublication(
             { ...value, rows: value.rows.filter((row) => row.attention) },
             ++revision,
+            (row) => !!discoveredAgentRequest(fleet?.resolveAgent(row.key)?.row),
           ),
           scope: active.scope,
         };

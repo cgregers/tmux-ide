@@ -25,6 +25,7 @@ import { createNativeTmuxSessionCreator } from "./tmux-server-session-create.ts"
 import type { WorkspacePaneCreateMutationRequest } from "@tmux-ide/contracts";
 import { createTmuxSessionMutationFence } from "./tmux-session-mutation-fence.ts";
 import { createNativeTmuxSessionOpener } from "./tmux-server-session-open.ts";
+import { observedAgentSchema } from "./tmux-server-agent-admission.ts";
 import { createPaneEditorContextResolver } from "./tmux-pane-editor-context.ts";
 import { createHash, randomUUID } from "node:crypto";
 import {
@@ -602,6 +603,18 @@ export async function createNativeTmuxServerOwner(options: NativeTmuxServerOwner
       return resource;
     },
     openSession,
+    openAgent: async (
+      liveSessionId: string,
+      observed: Parameters<typeof sessionOpener.openAgent>[1],
+    ) => {
+      const target = observedAgentSchema.parse(observed);
+      await catalog();
+      try {
+        return await sessionOpener.openAgent(liveSessionId, target);
+      } finally {
+        terminalInventoryRuntime.invalidate();
+      }
+    },
     createSession: sessionCreator.createSession,
     createSessionPane: async (
       liveSessionId: string,

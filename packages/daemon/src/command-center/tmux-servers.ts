@@ -8,6 +8,9 @@ import { projectApplicationShellResource } from "./resources/application-shell.t
 import { fleetSessionIdForName } from "./resources/fleet-catalog.ts";
 import { z } from "zod";
 import {
+  TmuxAgentOpenRequestSchemaZ,
+  TmuxAgentOpenResponseSchemaZ,
+  WorkspaceCatalogLiveSessionIdSchemaZ,
   WindowLinkTargetSchemaZ,
   WindowSplitLayoutResourceSchemaZ,
   TMUX_SERVERS_API_PATH,
@@ -211,6 +214,24 @@ export function mountTmuxServerRoutes(app: Hono, options: TmuxServerRoutesOption
           }),
         ),
       );
+    }),
+  );
+  app.post(
+    `${scoped}/sessions/:liveSessionId/open-agent`,
+    route(async (c) => {
+      const server = scope(c);
+      const liveSessionId = WorkspaceCatalogLiveSessionIdSchemaZ.parse(
+        c.req.param("liveSessionId"),
+      );
+      const target = TmuxAgentOpenRequestSchemaZ.parse(await boundedJson(c.req.raw, 8192));
+      c.req.raw.signal.throwIfAborted();
+      const result = await options.owners.withOwner(server, (owner) =>
+        owner.openAgent(liveSessionId, target),
+      );
+      c.req.raw.signal.throwIfAborted();
+      if (result.liveSessionId !== liveSessionId)
+        return c.json({ error: { code: "stale-agent" } }, 409);
+      return c.json(TmuxAgentOpenResponseSchemaZ.parse({ version: 1, server, ...result }));
     }),
   );
   app.post(

@@ -30,7 +30,11 @@ const display = (value: string, max: number) =>
 export function agentAvailable(row: HomeAgentRow) {
   return id(row.paneId) && !!(row.nativeIdentity || row.interactionEndpoint) && !row.disabled;
 }
-export function homeAgentPublication(snapshot: HomeAgentSnapshot, revision: number) {
+export function homeAgentPublication(
+  snapshot: HomeAgentSnapshot,
+  revision: number,
+  admissionAvailable: (row: HomeAgentRow) => boolean = () => false,
+) {
   if (!Number.isSafeInteger(revision) || revision < 1) throw new Error("Invalid roster revision");
   const rows = snapshot.rows
     .filter(
@@ -45,7 +49,7 @@ export function homeAgentPublication(snapshot: HomeAgentSnapshot, revision: numb
       sessionLabel: display(row.sessionName, 160),
       status: homeAgentStatusLabel(row.activity),
       attention: row.attention,
-      available: agentAvailable(row),
+      available: agentAvailable(row) || (!row.disabled && admissionAvailable(row)),
     }));
   return {
     revision,

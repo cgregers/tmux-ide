@@ -1,4 +1,7 @@
 import {
+  TmuxAgentOpenRequestSchemaZ,
+  TmuxAgentOpenResponseSchemaZ,
+  type TmuxAgentOpenRequest,
   PaneEditorContextTargetSchemaZ,
   PaneEditorContextResponseSchemaZ,
   type PaneEditorContextTarget,
@@ -181,6 +184,24 @@ export function createTmuxServerClient(
           ([key, value]) => response.data.context[key as keyof PaneEditorContextTarget] !== value,
         )
       )
+        throw new TmuxServerClientError("scope-mismatch");
+      return response.data;
+    },
+    /** A single admission attempt may promote a session; never automatically retry. */
+    async openAgent(liveSessionId: string, input: TmuxAgentOpenRequest, signal?: AbortSignal) {
+      const session = WorkspaceCatalogLiveSessionIdSchemaZ.parse(liveSessionId);
+      const target = TmuxAgentOpenRequestSchemaZ.parse(input);
+      signal?.throwIfAborted();
+      const raw = await scopedRequest(
+        `sessions/${encodeURIComponent(session)}/open-agent`,
+        target,
+        undefined,
+        signal,
+      );
+      const response = TmuxAgentOpenResponseSchemaZ.safeParse(raw);
+      if (!response.success) throw new TypeError("Invalid scoped agent-open response");
+      assertScope(response.data.server);
+      if (response.data.liveSessionId !== session)
         throw new TmuxServerClientError("scope-mismatch");
       return response.data;
     },

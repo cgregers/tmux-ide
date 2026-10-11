@@ -1,3 +1,4 @@
+import type { TmuxAgentOpenRequest } from "../../../packages/contracts/src/tmux-agent-open.ts";
 import { TmuxServerSessionsResourceSchemaZ } from "../../../packages/contracts/src/tmux-server-scope.ts";
 import { catalogStage, CatalogStageError } from "./catalog-errors.ts";
 import { randomUUID } from "node:crypto";
@@ -15,6 +16,9 @@ export function createPreviewCatalog(hostInput: PreviewHost) {
   );
   return {
     localProof,
+    openAgent(liveSessionId: string, target: TmuxAgentOpenRequest) {
+      return client.openAgent(liveSessionId, target);
+    },
     paneEditorContext(
       workspaceName: string,
       liveSessionId: string,

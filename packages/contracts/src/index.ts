@@ -113,3 +113,5 @@ export * from "./visual-terminal-palette.ts";
 
 export * from "./window-split-layout.ts";
 export * from "./pane-editor-context.ts";
+
+export * from "./tmux-agent-open.ts";

@@ -1,3 +1,4 @@
+import { admitFleetAgent, discoveredAgentRequest } from "./fleet-agent-admission.ts";
 import {
   createAttentionOwner,
   attentionObserveSchema,
@@ -305,7 +306,11 @@ function startAgents() {
     const token = request;
     stopFleetAgents = fleet.observeAgents((value) => {
       if (stopped || !foreground || surface !== "home" || request !== token) return;
-      agentPublication = homeAgentPublication(value, ++agentRevision);
+      agentPublication = homeAgentPublication(
+        value,
+        ++agentRevision,
+        (row) => !!discoveredAgentRequest(fleet?.resolveAgent(row.key)?.row),
+      );
       publish();
     });
     return;
@@ -425,11 +430,41 @@ function launchFleetSelection(
       if (list.length > 512) throw new Error("Too many sessions for preview");
       sessions = list.map(sessionChoice);
       if (!sessions.some((session) => session.id === sessionId)) throw new FleetSelectionError();
-      const choices = await fresh.panes(sessionId);
+      const admission =
+        agent && discoveredAgentRequest(agent)
+          ? await admitFleetAgent(
+              agent,
+              (target) => fresh.openAgent(sessionId, target),
+              async (result) => {
+                const identity = {
+                  id: session.sourceId,
+                  name: session.name,
+                  liveSessionId: sessionId,
+                  workspaceName: result.workspaceName,
+                  server: session.server,
+                };
+                const shell = await fresh.readHomeShell(identity, new AbortController().signal);
+                return projectHomeAgentRows(identity, {
+                  resource: shell.resource,
+                  daemon: { instanceId: shell.server.generation },
+                });
+              },
+              owner.read,
+              () => current() && catalog === fresh,
+            )
+          : null;
+      if (!current() || catalog !== fresh) return;
+      const choices = admission
+        ? await fresh.workspacePanes(sessionId, admission.workspaceName)
+        : await fresh.panes(sessionId);
       if (!current() || catalog !== fresh) return;
       if (choices.length > 512) throw new Error("Too many panes for preview");
       let target: (typeof choices)[number] | undefined = choices[0];
-      if (agent) {
+      if (admission) {
+        const matches = choices.filter((pane) => pane.semanticPaneId === admission.semanticPaneId);
+        if (matches.length !== 1) throw new FleetSelectionError();
+        target = matches[0];
+      } else if (agent) {
         if (!session.workspaceName) throw new FleetSelectionError();
         const identity = {
           id: session.sourceId,
