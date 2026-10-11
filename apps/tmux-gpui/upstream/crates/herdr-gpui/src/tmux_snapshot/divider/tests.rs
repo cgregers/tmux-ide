@@ -270,6 +270,7 @@ fn make_view(
         terminal_focus: focus,
         input_interrupted: false,
         picker: None,
+        home_filter: None,
         pane_actions: None,
         new_session: None,
         new_session_queued: None,

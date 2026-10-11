@@ -1,5 +1,11 @@
 # Changes from the pinned upstream revision
 
+- `tmux_snapshot/home/filters.rs` reuses Herdr SearchInput for bounded local
+  agent name/session search and All/Working/Needs attention filters. Published
+  roster identities, availability, coverage and selection fences stay authoritative.
+  `composition.rs` excludes Home from deferred AppKit terminal composition cleanup
+  so roster updates cannot discard search input composition.
+
 - `tmux_snapshot/picker/commands.rs` adds the initial native F5 command vocabulary
   (Home, sessions, appearance and refresh), reusing the existing Herdr SearchInput
   adapter and tmux action owners. Terminal key forwarding yields F5 to the shell;

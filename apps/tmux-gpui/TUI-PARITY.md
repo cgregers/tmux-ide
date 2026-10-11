@@ -30,10 +30,11 @@ vocabulary remain unfinished. Shared icon tabs and sidebar buttons landed in
 
 - [ ] Match TUI information hierarchy: machine, session, window, pane and agent status.
 - [ ] Match Home search, machine filter, All/Working/Needs attention and jump-to-agent workflows.
-  First slice can filter loaded agents by name/session label and existing status/attention
-  fields without a bridge change. Preserve roster coverage, unavailable rows, opaque
-  identities and revision fences. Broader team/project/machine search needs additional
-  published data; session cards should not disappear under an agents-only filter.
+  Native Home now filters loaded agents by name/session label and All/Working/Needs
+  attention, preserving coverage, unavailable rows and identity/revision fences.
+  Headless tests and physical light/dark checks are recorded in
+  `evidence/home-filters-2026-10-11/`. Broader team/project/machine search, machine
+  filters, keyboard shortcuts and remaining physical acceptance stay open.
 - [ ] Complete sidebar show/hide, grouping, overflow, long labels and keyboard navigation.
 - [ ] Add full command palette with the TUI action vocabulary and contextual availability.
 - [ ] Match help, shortcut reference and relevant user-facing connection diagnostics.

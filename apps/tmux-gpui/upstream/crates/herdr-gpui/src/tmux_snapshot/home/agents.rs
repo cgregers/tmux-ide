@@ -43,6 +43,19 @@ impl SnapshotView {
         let theme = self.theme();
         let request = self.browser_request;
         let revision = roster.revision;
+        let query = self
+            .home_filter
+            .as_ref()
+            .map_or_else(String::new, |c| c.search.read(cx).text().to_owned());
+        let filter = self
+            .home_filter
+            .as_ref()
+            .map_or(filters::Filter::All, |c| c.filter);
+        let matches = roster
+            .rows
+            .iter()
+            .filter(|row| filter.matches(roster, row, &query))
+            .count();
         let heading = match roster.phase {
             Phase::Loading => "Discovering agents…",
             Phase::Unavailable => "Agent observations unavailable",
@@ -63,13 +76,29 @@ impl SnapshotView {
                 roster.truncated_sessions,
                 roster.truncated_rows
             )));
+        body = body.child(self.home_filter_controls(cx));
         if let Some(note) = &roster.note {
             body = body.child(div().min_w_0().child(note.clone()));
         }
         if roster.rows.is_empty() && roster.phase == Phase::Live {
             body = body.child("No observed agents");
         }
-        for (index, row) in roster.rows.iter().enumerate() {
+        if !roster.rows.is_empty()
+            && matches == 0
+            && matches!(roster.phase, Phase::Live | Phase::Partial)
+        {
+            body = body.child(
+                div()
+                    .id("home-agents-no-matches")
+                    .child("No matching loaded agents"),
+            );
+        }
+        for (index, row) in roster
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| filter.matches(roster, row, &query))
+        {
             let key = row.key.clone();
             let enabled = self.browser_commands.is_some() && roster.available(&key);
             let mut item = div()

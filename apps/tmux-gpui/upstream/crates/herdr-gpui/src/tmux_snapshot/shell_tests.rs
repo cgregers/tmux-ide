@@ -94,6 +94,7 @@ fn browser_fixture(
         terminal_focus: cx.focus_handle(),
         input_interrupted: true,
         picker: None,
+        home_filter: None,
         pane_actions: None,
         new_session: None,
         new_session_queued: None,

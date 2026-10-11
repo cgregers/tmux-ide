@@ -1,6 +1,7 @@
 //! Catalog-backed Home. No daemon queries or invented activity in the render path.
 use super::{SnapshotView, browser, browser_ui::Selection};
 use gpui::{prelude::*, *};
+pub(super) mod filters;
 
 /// Before the first browser publication, absence of a catalog is not an empty catalog.
 pub(super) fn initial_state() -> browser::State {
@@ -60,6 +61,7 @@ impl SnapshotView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.refresh_new_session(cx);
+        self.prepare_home_filter(cx);
         let theme = self.theme();
         let request = self.browser_request;
         let connected = self.browser_commands.is_some();

@@ -42,6 +42,7 @@ fn make_view(
         terminal_focus: focus,
         input_interrupted: false,
         picker: None,
+        home_filter: None,
         pane_actions: None,
         new_session: None,
         new_session_queued: None,
@@ -144,3 +145,6 @@ fn home_dispatch_fences_request_surface_catalog_and_channel(cx: &mut TestAppCont
 
 #[path = "tests/render.rs"]
 mod render;
+
+#[path = "tests/filters.rs"]
+mod filters;

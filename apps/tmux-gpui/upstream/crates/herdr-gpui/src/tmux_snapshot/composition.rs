@@ -22,17 +22,20 @@ fn replacement(marked: &str, range: Option<Range<usize>>, text: &str) -> Option<
 }
 
 impl SnapshotView {
+    #[cfg(any(target_os = "macos", test))]
+    pub(super) fn terminal_composition_owner(&self) -> bool {
+        self.browser_state.surface != super::browser::Surface::Home
+            && self.picker.is_none()
+            && self.pane_actions.is_none()
+            && self.new_session.is_none()
+    }
     pub(super) fn discard_composition(&mut self, cx: &mut Context<Self>) {
         self.marked.clear();
         self.marked_selection = None;
         #[cfg(target_os = "macos")]
         cx.spawn(async move |entity, cx| {
             let terminal_owns_input = entity
-                .update(cx, |view, _| {
-                    view.picker.is_none()
-                        && view.pane_actions.is_none()
-                        && view.new_session.is_none()
-                })
+                .update(cx, |view, _| view.terminal_composition_owner())
                 .unwrap_or(false);
             if terminal_owns_input
                 && let Some(mtm) = objc2::MainThreadMarker::new()

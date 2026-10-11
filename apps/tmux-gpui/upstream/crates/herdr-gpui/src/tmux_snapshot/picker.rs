@@ -252,6 +252,9 @@ impl SnapshotView {
         {
             return;
         }
+        if self.home_search_composing(window, cx) {
+            return;
+        }
         let key = &event.keystroke;
         if commands::shortcut(key) {
             self.open_commands(window, cx);
