@@ -1,5 +1,10 @@
 # TUI to GPUI parity checklist
 
+Current priority: full TUI parity with a coherent native design system is the next
+delivery goal. Proper icons, buttons, tabs, pane headers and sidebars are part of
+parity acceptance, not a later cosmetic pass. Embedded browser and VS Code follow
+this milestone; they must not displace missing TUI workflows.
+
 Baseline: 11 October 2026, GPUI branch `codex/tmux-gpui-bootstrap` at `fceac5a4`.
 The native terminal foundation works, but the native application is not yet a full
 equivalent of the TUI. Full parity includes the surrounding workspace, Files/editor,
@@ -137,7 +142,8 @@ launcher does not satisfy this requirement. See [upstream research](HERDR-DESIGN
 
 ## Execution order
 
-1. Complete shell/sidebar/palette design and the action inventory.
+1. Establish native tokens, icons and shared controls; migrate shell/sidebar/tabs
+   and complete the palette/action inventory.
 2. Finish pane/window controls and terminal correctness acceptance.
 3. Add Files/editor and Changes as native workspace surfaces.
 4. Complete fleet, agent workflows, settings and persistence.
