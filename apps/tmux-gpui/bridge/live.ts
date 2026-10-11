@@ -16,7 +16,7 @@ import type { Layout } from "./topology.ts";
 import { applyPresence, presenceSchema } from "./presence.ts";
 import { resizeSchema, resizeWindow, windowForLayout } from "./geometry.ts";
 import { deliverPreviewInput, MAX_INPUT_LINE } from "./input.ts";
-import { connectionSchema, readPrivateConfig } from "./config.ts";
+import { connectionSchema, readPrivateConfig, paneStreamSocketUrl } from "./config.ts";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
 import { createTmuxServerClient } from "../../../packages/daemon-client/src/tmux-server-client.ts";
@@ -346,10 +346,14 @@ try {
       stream,
       requestInitialInputAuthority: false,
       createSocket: (descriptor, headers) => {
-        const socket = new WebSocket(descriptor.webSocketUrl, [descriptor.subprotocol], {
-          headers,
-          maxPayload: 1024 * 1024,
-        });
+        const socket = new WebSocket(
+          paneStreamSocketUrl(config, descriptor.webSocketUrl),
+          [descriptor.subprotocol],
+          {
+            headers,
+            maxPayload: 1024 * 1024,
+          },
+        );
         type Listener = Parameters<PaneStreamClientSocket["addEventListener"]>[1];
         const listeners = new Map<
           Listener,

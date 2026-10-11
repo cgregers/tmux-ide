@@ -1,3 +1,4 @@
+import { canonicalDaemonUrl } from "../../../packages/daemon/src/lib/canonical-daemon.ts";
 import { randomUUID } from "node:crypto";
 import type { createDaemonConnectionOwner } from "../../../packages/daemon/src/lib/daemon-connection-owner.ts";
 import {
@@ -152,8 +153,11 @@ export async function createRemotePreviewRoute(
     if (scope && matches.length !== 1) throw new RemoteRouteError("server-changed");
     if (!scope && online.length !== 1)
       throw new RemoteRouteError(online.length ? "multiple-servers" : "no-server");
+    const remoteSocketOrigin = new URL(canonicalDaemonUrl("ws", daemon.bindHostname, daemon.port))
+      .origin;
     const host = hostSchema.parse({
       baseUrl,
+      remoteSocketOrigin,
       ownerToken: daemon.authToken,
       scope: { serverId: matches[0]!.serverId, generation: matches[0]!.generation },
     });

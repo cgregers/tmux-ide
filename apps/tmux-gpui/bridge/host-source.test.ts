@@ -106,12 +106,12 @@ test("native host source reuses SSH across Home refresh and retires exactly once
   const f = fixture();
   const source = f.source();
   try {
-    assert.deepEqual(await source.read(), f.host);
-    assert.deepEqual(await source.read(), f.host);
+    assert.deepEqual(await source.read(), { ...f.host, remoteSocketOrigin: "ws://127.0.0.1:4000" });
+    assert.deepEqual(await source.read(), { ...f.host, remoteSocketOrigin: "ws://127.0.0.1:4000" });
     assert.deepEqual(f.counts(), { dials: 1, disposed: 0, retired: 0 });
     f.owners[0]!.disconnect();
     assert.deepEqual(f.counts(), { dials: 1, disposed: 1, retired: 1 });
-    assert.deepEqual(await source.read(), f.host);
+    assert.deepEqual(await source.read(), { ...f.host, remoteSocketOrigin: "ws://127.0.0.1:4000" });
     assert.equal(f.counts().dials, 2);
   } finally {
     source.dispose();
@@ -213,12 +213,12 @@ test("saved selection carries its environment pin into the shared SSH owner", as
   const source = f.source();
   try {
     source.select("build", f.daemon.environmentId);
-    assert.deepEqual(await source.read(), f.host);
+    assert.deepEqual(await source.read(), { ...f.host, remoteSocketOrigin: "ws://127.0.0.1:4000" });
     source.select("build", randomUUID());
     await assert.rejects(source.read(), /unavailable/);
     assert.equal(f.counts().disposed, 2);
     source.select("build", f.daemon.environmentId);
-    assert.deepEqual(await source.read(), f.host);
+    assert.deepEqual(await source.read(), { ...f.host, remoteSocketOrigin: "ws://127.0.0.1:4000" });
   } finally {
     source.dispose();
   }
@@ -229,7 +229,7 @@ test("private SSH host scope reaches verified routing and rejects a replaced ser
   f.setConfig({ sshTarget: "test-machine", scope: f.host.scope });
   const source = f.source();
   try {
-    assert.deepEqual(await source.read(), f.host);
+    assert.deepEqual(await source.read(), { ...f.host, remoteSocketOrigin: "ws://127.0.0.1:4000" });
     f.setConfig({
       sshTarget: "test-machine",
       scope: { ...f.host.scope, generation: randomUUID() },
