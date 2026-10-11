@@ -1,3 +1,4 @@
+import { selectedWindowSurfaces } from "./selected-window-surfaces.ts";
 import { createClosePanePreflight } from "./close-pane.ts";
 import { createNewWindowExecutor } from "./new-window.ts";
 import { createSplitGestureOwner, splitGestureSchema } from "./split-gesture.ts";
@@ -154,7 +155,7 @@ function output(snapshot: typeof latest.snapshot) {
             layouts,
             surfaces: catalogOnly
               ? []
-              : [...surfaces].map(([paneId, snapshot]) => ({ paneId, snapshot })),
+              : selectedWindowSurfaces(layouts, selectedActionPane, surfaces),
           }
         : {}),
     }) + "\n";
