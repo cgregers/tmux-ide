@@ -193,6 +193,7 @@ const connection = randomUUID();
 let request = 0,
   sequence = 0,
   stopped = false;
+let shutdownRequested = false;
 let sessions: ReturnType<typeof sessionChoice>[] = [];
 let panes: z.infer<typeof connectionSchema>[] = [];
 let selectedSession: string | null = null,
@@ -442,8 +443,12 @@ async function stop() {
   process.stdin.destroy();
   process.stdout.end();
 }
-process.on("SIGINT", () => void stop());
-process.on("SIGTERM", () => void stop());
+function requestShutdown() {
+  shutdownRequested = true;
+  void stop();
+}
+process.on("SIGINT", requestShutdown);
+process.on("SIGTERM", requestShutdown);
 process.stdout.on("error", () => void stop());
 async function refresh(token: number) {
   const routeRevision = machineRouteRevision;
@@ -1325,9 +1330,18 @@ try {
     }
     if (buffer.length > MAX_INPUT_LINE) throw new Error("Oversized browser command");
   }
-} catch {
-  process.stderr.write("Native browser connection failed\n");
-  process.exitCode = 1;
+} catch (error) {
+  // Destroying stdin during an intentional signal shutdown rejects its async
+  // iterator. Preserve failure reporting for every other command/stream error.
+  const expectedClose =
+    shutdownRequested &&
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "ERR_STREAM_PREMATURE_CLOSE";
+  if (!expectedClose) {
+    process.stderr.write("Native browser connection failed\n");
+    process.exitCode = 1;
+  }
 } finally {
   await stop();
 }
