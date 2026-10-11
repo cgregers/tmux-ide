@@ -240,3 +240,11 @@ These are implementation/design references, not completed acceptance items.
 No Zed application code was copied. Its `ui` crate declares GPL-3.0-or-later;
 GPUI declares Apache-2.0. Keep source provenance explicit for any future reuse;
 existing Herdr-derived controls and tmux-ide theme tokens remain our starting point.
+
+## Disconnected fleet retry
+
+Native Home cards and F5 expose Retry for disconnected SSH machines via the shared
+connection manager. Per-route tokens reject removed/replaced targets; retry does
+not change saved settings or navigation. Queue failure stays visible in the
+command picker. Physical native interaction and real SSH recovery are still open;
+see `evidence/native-fleet-retry-2026-10-11/`.

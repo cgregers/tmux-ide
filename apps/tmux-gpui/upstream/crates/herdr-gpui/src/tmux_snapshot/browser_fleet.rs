@@ -15,6 +15,8 @@ pub(in crate::tmux_snapshot) struct Group {
     pub label: String,
     pub state: Phase,
     pub conflict: bool,
+    #[serde(default)]
+    pub retry: Option<String>,
     pub omitted_sessions: u64,
     pub sessions: Vec<Session>,
 }
@@ -56,6 +58,13 @@ impl Fleet {
             && self.groups.iter().all(|g| {
                 let mut ids = HashSet::new();
                 text(&g.id, 256)
+                    && g.retry.as_ref().is_none_or(|token| {
+                        g.state == Phase::Disconnected
+                            && !g.conflict
+                            && token.len() == 36
+                            && uuid::Uuid::parse_str(token).is_ok()
+                            && tokens.insert(token)
+                    })
                     && groups.insert(&g.id)
                     && text(&g.label, 256)
                     && g.sessions.len() <= 128

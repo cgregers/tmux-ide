@@ -22,6 +22,7 @@ pub(super) enum Target {
         revision: u64,
         enabled: bool,
     },
+    FleetRetry(String),
     Session(String),
     FleetSession {
         selection: String,
@@ -132,6 +133,12 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
 }
 fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::FleetRetry(token) => state.fleet.as_ref().is_some_and(|fleet| {
+            fleet
+                .groups
+                .iter()
+                .any(|group| group.retry.as_ref() == Some(token))
+        }),
         Target::MachineToggle {
             id,
             revision,
@@ -171,6 +178,45 @@ fn current(state: &browser::State, target: &Target) -> bool {
     }
 }
 impl SnapshotView {
+    pub(in crate::tmux_snapshot) fn retry_fleet_machine(
+        &mut self,
+        request: u64,
+        token: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.browser_commands.is_none()
+            || request != self.browser_request
+            || !self.browser_state.fleet.as_ref().is_some_and(|fleet| {
+                fleet
+                    .groups
+                    .iter()
+                    .any(|g| g.retry.as_deref() == Some(token))
+            })
+        {
+            return false;
+        }
+        if self.browser_commands.as_ref().is_some_and(|sender| {
+            sender
+                .try_send(browser::Command::FleetRetry {
+                    request,
+                    retry: token.into(),
+                })
+                .is_ok()
+        }) {
+            return true;
+        }
+        // Home and F5 share the same visible failure surface; do not silently close it.
+        if self.picker.is_none() {
+            self.open_commands(window, cx);
+        }
+        if let Some(picker) = &mut self.picker {
+            picker.error = Some("Retry queue unavailable — try again or restart the preview");
+        }
+        cx.notify();
+        false
+    }
+
     pub(super) fn open_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_picker_mode(Mode::Commands, window, cx);
     }
@@ -284,6 +330,12 @@ impl SnapshotView {
         {
             return;
         }
+        if let Target::FleetRetry(token) = &target {
+            if self.retry_fleet_machine(self.browser_request, token, window, cx) {
+                self.close_picker(window, cx);
+            }
+            return;
+        }
         if let Target::Command(action) = target {
             self.close_picker(window, cx);
             match action {
@@ -357,7 +409,10 @@ impl SnapshotView {
                     session_id,
                 },
                 Target::Pane(id) => Selection::Pane(id),
-                Target::Theme(_) | Target::Command(_) | Target::MachineToggle { .. } => return,
+                Target::Theme(_)
+                | Target::Command(_)
+                | Target::MachineToggle { .. }
+                | Target::FleetRetry(_) => return,
             },
             window,
             cx,

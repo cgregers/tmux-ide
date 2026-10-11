@@ -244,3 +244,62 @@ test("fleet publication is globally bounded and disposal leaves borrowed connect
     f.close();
   }
 });
+
+test("retry uses the captured disconnected handle, leaves siblings and selection alone, and consumes its token", async () => {
+  const f = await fixture(2);
+  try {
+    const id = f.profiles[0]!.id;
+    const sibling = f.manager.getMachine(f.profiles[1]!.id)!;
+    const siblingEpoch = sibling.endpoint().epoch;
+    const selected = f.manager.snapshot().selectedMachineId;
+    f.manager.disconnect(id);
+    const token = f.fleet.publication().groups.find((g) => g.id === id)!.retry;
+    assert.ok(token);
+    assert.equal(f.fleet.publication().groups.find((g) => g.id === "local")!.retry, null);
+    let unsubscribe = () => {};
+    const recovered = new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        unsubscribe();
+        reject(new Error("Retry did not recover"));
+      }, 2000);
+      unsubscribe = f.manager.subscribe(() => {
+        if (f.manager.getMachine(id)!.endpoint().state !== "ready") return;
+        clearTimeout(timer);
+        unsubscribe();
+        resolve();
+      });
+    });
+    f.fleet.retry(token);
+    assert.throws(() => f.fleet.retry(token), /changed/);
+    await recovered;
+    assert.equal(f.manager.getMachine(f.profiles[1]!.id), sibling);
+    assert.equal(sibling.endpoint().epoch, siblingEpoch);
+    assert.equal(f.manager.snapshot().selectedMachineId, selected);
+    assert.equal(f.manager.getMachine(id)!.endpoint().state, "ready");
+  } finally {
+    f.close();
+  }
+});
+
+test("retry token cannot reconnect a removed or replaced saved machine", async () => {
+  const f = await fixture();
+  try {
+    const profile = f.profiles[0]!;
+    f.manager.disconnect(profile.id);
+    const token = f.fleet.publication().groups.find((g) => g.id === profile.id)!.retry!;
+    assert.ok(token);
+    f.manager.reconcile([{ ...profile, sshTarget: "replacement" }]);
+    assert.throws(() => f.fleet.retry(token), /changed/);
+    await f.manager.getMachine(profile.id)!.ready;
+    f.manager.disconnect(profile.id);
+    const replacement = f.fleet.publication().groups.find((g) => g.id === profile.id)!.retry!;
+    assert.ok(replacement);
+    assert.notEqual(replacement, token);
+    f.manager.reconcile([]);
+    assert.throws(() => f.fleet.retry(replacement), /changed/);
+    f.fleet.dispose();
+    assert.throws(() => f.fleet.retry(replacement), /changed/);
+  } finally {
+    f.close();
+  }
+});

@@ -40,6 +40,7 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
   return {
     start: () => fleet.start(),
     publication: fleet.publication,
+    retry: fleet.retry,
     reconcile: (profiles: readonly SavedMachine[]) => manager.reconcile(profiles),
     clearSelection: clear,
     async select(token: string) {

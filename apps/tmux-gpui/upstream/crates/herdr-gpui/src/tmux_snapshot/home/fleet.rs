@@ -61,6 +61,23 @@ impl SnapshotView {
                             group.state.label()
                         })),
                 );
+            if let Some(token) = group.retry.clone() {
+                card = card.child(
+                    div()
+                        .id(("fleet-retry", index))
+                        .mt_2()
+                        .px_3()
+                        .py_1()
+                        .rounded(px(4.))
+                        .bg(rgb(theme.active))
+                        .cursor_pointer()
+                        .child("Retry connection")
+                        .on_click(cx.listener(move |view, _, window, cx| {
+                            cx.stop_propagation();
+                            view.retry_fleet_machine(request, &token, window, cx);
+                        })),
+                );
+            }
             if group.sessions.is_empty() {
                 card = card.child(
                     div()

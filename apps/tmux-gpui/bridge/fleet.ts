@@ -15,6 +15,7 @@ export interface NativeFleetPublication {
     label: string;
     state: "ready" | "connecting" | "disconnected";
     conflict: boolean;
+    retry: string | null;
     omittedSessions: number;
     sessions: {
       id: string;
@@ -59,6 +60,13 @@ export function createNativeFleet(
   let selectionRevision = 0;
   let stop = () => {};
   let routes = new Map<string, Route>();
+  let retries = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
+  const canRetry = (entry: { handle: MachineConnectionHandle; epoch: number }) =>
+    !stopped &&
+    manager.getMachine(entry.handle.id) === entry.handle &&
+    entry.handle.kind === "ssh" &&
+    entry.handle.endpoint().state === "disconnected" &&
+    entry.handle.endpoint().epoch === entry.epoch;
   let publication: NativeFleetPublication = { groups: [], omittedGroups: 0 };
   const current = (route: Route) => {
     const info = route.handle.read();
@@ -76,14 +84,27 @@ export function createNativeFleet(
     const snapshot = catalog.getSnapshot();
     const previous = new Map([...routes].map(([token, route]) => [route.key, { token, route }]));
     const next = new Map<string, Route>();
+    const nextRetries = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
     let remaining = 512;
     publication = {
       omittedGroups: Math.max(0, snapshot.groups.length - 64),
       groups: snapshot.groups.slice(0, 64).map((group) => {
         const visible = group.sessions.slice(0, Math.min(128, remaining));
         remaining -= visible.length;
+        const handle = manager.getMachine(group.id);
+        let retry: string | null = null;
+        if (handle && group.state === "disconnected" && !group.identityConflict) {
+          const entry = { handle, epoch: handle.endpoint().epoch };
+          if (canRetry(entry)) {
+            retry =
+              [...retries].find(([, old]) => old.handle === handle && canRetry(old))?.[0] ??
+              randomUUID();
+            nextRetries.set(retry, entry);
+          }
+        }
         return {
           id: group.id,
+          retry,
           label: group.label.slice(0, 256),
           state: group.state,
           conflict: !!group.identityConflict,
@@ -131,6 +152,7 @@ export function createNativeFleet(
       }),
     };
     routes = next;
+    retries = nextRetries;
     changed();
   };
   return {
@@ -160,10 +182,13 @@ export function createNativeFleet(
       assertCurrent();
       return { handle: route.handle, session: structuredClone(route.session), assertCurrent };
     },
-    retry: (id: string) => {
-      if (stopped) return;
-      manager.retry(id);
-      catalog.retry(id);
+    retry: (token: string) => {
+      const entry = retries.get(token);
+      if (!entry || !canRetry(entry)) throw new FleetSelectionError();
+      retries.delete(token);
+      manager.retry(entry.handle.id);
+      catalog.retry(entry.handle.id);
+      update();
     },
     dispose() {
       if (stopped) return;
@@ -171,6 +196,7 @@ export function createNativeFleet(
       stop();
       catalog.dispose();
       routes.clear();
+      retries.clear();
       publication = { groups: [], omittedGroups: 0 };
     },
   };
