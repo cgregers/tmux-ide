@@ -1,3 +1,4 @@
+import { createNewWindowExecutor } from "./new-window.ts";
 import { createSplitGestureOwner, splitGestureSchema } from "./split-gesture.ts";
 import { createSplitLayoutReader } from "./split-layout.ts";
 import type { WindowLinkTopology } from "../../../packages/contracts/src/window-links.ts";
@@ -51,6 +52,11 @@ const resizeFence = createPaneResizeFence();
 let currentResizeToken: string | null = null;
 const actionFence = createPaneActionFence();
 const executePaneAction = createPaneActionExecutor();
+const executeNewWindow = createNewWindowExecutor();
+let newWindowReceipt: {
+  token: string;
+  result: import("../../../packages/contracts/src/workspace-pane-creation.ts").WorkspacePaneCreateMutationResult;
+} | null = null;
 let actionBusy = false;
 let actionFailed = false;
 let paneSplitReceipt: {
@@ -60,6 +66,7 @@ let paneSplitReceipt: {
 let selectedActionPane: string | null = null;
 let foreground = false;
 let presenceRevision = 0;
+let admittedPresenceRevision = 0;
 const connection = randomUUID();
 const interactive = process.argv[3] === "--interactive";
 const catalogOnly = process.argv[3] === "--catalog";
@@ -117,6 +124,7 @@ function output(snapshot: typeof latest.snapshot) {
                   )
                 : null,
             paneSplitReceipt,
+            newWindowReceipt,
             paneActionError: actionFailed
               ? "Pane action unavailable — reselect pane to retry"
               : null,
@@ -457,6 +465,7 @@ try {
         const value: unknown = JSON.parse(line);
         const presence = presenceSchema.safeParse(value);
         if (presence.success) {
+          admittedPresenceRevision = presence.data.revision;
           actionFence.invalidate();
           foreground = presence.data.active;
           if (!foreground) splitGesture.retire();
@@ -489,6 +498,7 @@ try {
         if (!foreground) continue;
         const paneAction = paneActionSchema.safeParse(value);
         if (paneAction.success) {
+          if (actionBusy) continue;
           resizeGesture.retire();
           splitGesture.retire();
           const target = () => {
@@ -519,6 +529,31 @@ try {
               : null;
           };
           if (target()?.token !== paneAction.data.token) continue;
+          if (paneAction.data.action === "new-window") {
+            const revision = admittedPresenceRevision;
+            actionBusy = true;
+            newWindowReceipt = null;
+            output(latest.snapshot);
+            void executeNewWindow(client, runtime, () => {
+              const value = target();
+              return value && admittedPresenceRevision === revision
+                ? { ...value, session: config.liveSessionId, presenceRevision: revision }
+                : null;
+            })
+              .then((result) => {
+                actionFailed = !result;
+                if (result) newWindowReceipt = { token: paneAction.data.token, result };
+              })
+              .catch(() => {
+                actionFailed = true;
+              })
+              .finally(() => {
+                actionBusy = false;
+                actionFence.invalidate();
+                if (!stopped) output(latest.snapshot);
+              });
+            continue;
+          }
           actionBusy = true;
           paneSplitReceipt = null;
           output(latest.snapshot);

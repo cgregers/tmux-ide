@@ -541,3 +541,21 @@ now runs those canonical HTTP/private-registry journeys automatically; explicit
 invalid packages fail before fixture allocation. This supersedes source-only
 Edit/Remove bridge qualification, but does not claim physical native form or real
 SSH acceptance. Evidence: `evidence/packaged-machine-edit-2026-10-11/`.
+
+## New terminal window checkpoint — 11 October
+
+F5 New terminal window and the fixed window-strip + button use the existing
+scoped daemon creation API. Captured identity, presence and authority checks
+prevent stale or duplicate creation; selection follows only a verified receipt
+and fresh canonical topology. New-window navigation exposed a daemon controller
+cleanup defect, fixed separately in `09f2d651` without weakening input admission.
+
+Native focused/workspace/all-feature tests, both Clippy configurations and build
+passed. The bridge passed 372 tests (five explicit skips). Source and exact
+packaged real-tmux journeys both prove one new window, input delivered to its
+exact pane, preserved source identities and duplicate/stale refusal. The fresh
+development app passed all seven packaging checks. CI now runs the creation
+journey on Linux source and macOS packaged bridges. Evidence:
+`evidence/new-window-2026-10-11/` and `evidence/controller-release-2026-10-11/`.
+Physical pointer/F5/narrow-window acceptance remains open; the user's active
+demo is unchanged. Pane close confirmation and harness creation remain gaps.

@@ -3,6 +3,7 @@ use super::{Row, Target, browser};
 use crate::tmux_snapshot::pane_actions;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::tmux_snapshot) enum Action {
+    NewWindow,
     Zoom(bool),
     SplitRight,
     SplitDown,
@@ -10,6 +11,7 @@ pub(in crate::tmux_snapshot) enum Action {
 impl Action {
     pub(super) fn wire(self) -> pane_actions::Action {
         match self {
+            Self::NewWindow => pane_actions::Action::NewWindow,
             Self::Zoom(true) => pane_actions::Action::Zoom {
                 desired: pane_actions::Zoom::Zoomed,
             },
@@ -35,6 +37,7 @@ pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
         .as_ref()
         .is_some_and(|actions| actions.zoomed);
     [
+        (Action::NewWindow, "New terminal window"),
         (
             Action::Zoom(!zoomed),
             if zoomed { "Unzoom pane" } else { "Zoom pane" },

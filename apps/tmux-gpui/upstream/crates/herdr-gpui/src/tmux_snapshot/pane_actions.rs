@@ -7,9 +7,17 @@ use serde::Serialize;
 #[derive(Serialize)]
 #[serde(tag = "action", rename_all = "lowercase")]
 pub(super) enum Action {
-    Rename { name: String },
-    Zoom { desired: Zoom },
-    Split { direction: SplitDirection },
+    #[serde(rename = "new-window")]
+    NewWindow,
+    Rename {
+        name: String,
+    },
+    Zoom {
+        desired: Zoom,
+    },
+    Split {
+        direction: SplitDirection,
+    },
 }
 #[derive(Serialize)]
 #[serde(rename_all = "lowercase")]

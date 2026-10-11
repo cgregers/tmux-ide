@@ -45,6 +45,7 @@ jobs:
           export TMUX_GPUI_TEST_CLI="$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
           node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/server.log"
           node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/home.log"
+          node --import tsx apps/tmux-gpui/bridge/new-window-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/new-window.log"
       - name: Preserve Home and fleet source evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -148,6 +149,7 @@ jobs:
           export TMUX_GPUI_TEST_APP="$RUNNER_TEMP/gpui-package-check/Tmux IDE CI.app"
           node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/fleet-server.log"
           node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/home-machine-filter.log"
+          node --import tsx apps/tmux-gpui/bridge/new-window-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/new-window.log"
       - name: Preserve packaging evidence
         if: always()
         uses: actions/upload-artifact@v4

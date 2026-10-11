@@ -1,3 +1,4 @@
+import { confirmsNewWindow, newWindowReceiptSchema } from "./new-window.ts";
 import { completeFleetServerSelection } from "./fleet-server-selection.ts";
 import { createOnFleetRoute } from "./fleet-server-create.ts";
 import { applyHomeAgentFilter, homeAgentFilterSchema } from "./home-agent-filter.ts";
@@ -268,6 +269,7 @@ let pendingPaneSplit:
       presenceRevision: number;
     })
   | null = null;
+let pendingNewWindow: { token: string; window: string; presenceRevision: number } | null = null;
 let paneActions: z.infer<typeof paneActionsSchema> | null = null;
 let editorPending = false;
 let editorConsumed: string | null = null;
@@ -610,6 +612,7 @@ async function retire() {
   const old = active;
   active = undefined;
   pendingPaneSplit = null;
+  pendingNewWindow = null;
   splitLayout = null;
   splitGesture = null;
   activeSplitGesture = null;
@@ -689,7 +692,12 @@ async function openPane(
   config: z.infer<typeof connectionSchema>,
   token: number,
   catalogOnly = false,
-  splitConfirmation?: { window: string; createdPane: string; current: () => boolean },
+  splitConfirmation?: {
+    window: string;
+    createdPane: string;
+    current: () => boolean;
+    originalPane?: string;
+  },
   requiredCurrent?: () => boolean,
 ) {
   const owningCatalog = catalog;
@@ -788,9 +796,16 @@ async function openPane(
                 (layout) => layout.semanticWindowId === splitConfirmation.window,
               );
               if (
-                matching.length !== 1 ||
-                !matching[0].panes.some((pane) => pane.pane === config.semanticPaneId) ||
-                !matching[0].panes.some((pane) => pane.pane === splitConfirmation.createdPane)
+                splitConfirmation.originalPane
+                  ? !confirmsNewWindow(
+                      layouts,
+                      splitConfirmation.originalPane,
+                      splitConfirmation.window,
+                      splitConfirmation.createdPane,
+                    )
+                  : matching.length !== 1 ||
+                    !matching[0].panes.some((pane) => pane.pane === config.semanticPaneId) ||
+                    !matching[0].panes.some((pane) => pane.pane === splitConfirmation.createdPane)
               )
                 throw new Error("Split layout did not confirm both panes");
               void retire()
@@ -818,6 +833,86 @@ async function openPane(
             status = "Choose a pane or window";
             publish();
             void retire();
+            return;
+          }
+          if (
+            event.newWindowReceipt &&
+            pendingNewWindow &&
+            event.newWindowReceipt.token === pendingNewWindow.token
+          ) {
+            const captured = pendingNewWindow;
+            const receipt = z
+              .object({ token: z.string().uuid(), result: newWindowReceiptSchema })
+              .strict()
+              .parse(event.newWindowReceipt);
+            if (
+              receipt.result.daemonInstanceId !== config.scope.generation ||
+              receipt.result.resource.workspaceName !== config.workspaceName ||
+              receipt.result.resource.kind !== "terminal" ||
+              receipt.result.outcome !== "created" ||
+              receipt.result.resource.semanticPaneId === config.semanticPaneId
+            )
+              throw new Error("Invalid new window receipt");
+            if (
+              !catalog ||
+              !selectedSession ||
+              !foreground ||
+              presenceRevision !== captured.presenceRevision
+            )
+              throw new Error("New window target retired");
+            const host = catalog,
+              session = selectedSession;
+            pendingNewWindow = null;
+            snapshot = null;
+            inputReady = false;
+            paneActions = null;
+            status = "Loading new terminal window";
+            publish();
+            const current = splitRefreshGuard(() => ({
+              request,
+              session: selectedSession,
+              catalog,
+              presenceRevision,
+              foreground,
+              stopped,
+            }));
+            void refreshSplitInventory({
+              current,
+              originalPane: config.semanticPaneId,
+              createdPane: receipt.result.resource.semanticPaneId,
+              retire,
+              read: () => host.workspacePanes(session, config.workspaceName),
+              selectedSession: session,
+              readSessions: async () => (await host.sessions()).map(sessionChoice),
+              attach: async (_original, choices, freshSessions) => {
+                const created = choices.find(
+                  (p) => p.semanticPaneId === receipt.result.resource.semanticPaneId,
+                );
+                if (!created) throw new Error("Created window unavailable");
+                sessions = freshSessions;
+                panes = choices;
+                selectedPane = created.semanticPaneId;
+                await openPane(
+                  created,
+                  token,
+                  true,
+                  {
+                    window: captured.window,
+                    createdPane: created.semanticPaneId,
+                    originalPane: config.semanticPaneId,
+                    current,
+                  },
+                  current,
+                );
+              },
+            }).catch(() => {
+              if (current()) {
+                snapshot = null;
+                inputReady = false;
+                status = "New window created; pane unavailable — refresh";
+                publish();
+              }
+            });
             return;
           }
           if (
@@ -851,6 +946,7 @@ async function openPane(
             const host = catalog,
               session = selectedSession;
             pendingPaneSplit = null;
+            pendingNewWindow = null;
             snapshot = null;
             inputReady = false;
             paneActions = null;
@@ -1126,6 +1222,7 @@ async function command(value: unknown) {
       attention.cancel();
       initialPane = null;
       pendingPaneSplit = null;
+      pendingNewWindow = null;
     }
     if (foreground) startAgents();
     else retireAgents();
@@ -1211,12 +1308,13 @@ async function command(value: unknown) {
     )
       throw new Error("Pane action queue full");
     paneActions = null;
-    if (cmd.action === "split") {
+    if (cmd.action === "split" || cmd.action === "new-window") {
       const window = layouts.find((layout) =>
         layout.panes.some((pane) => pane.pane === cmd.id),
       )?.semanticWindowId;
       if (!window) throw new Error("Split window unavailable");
-      pendingPaneSplit = { ...cmd, window, presenceRevision };
+      if (cmd.action === "split") pendingPaneSplit = { ...cmd, window, presenceRevision };
+      else pendingNewWindow = { token: cmd.token, window, presenceRevision };
     }
     publish();
     active.child.stdin.write(line);

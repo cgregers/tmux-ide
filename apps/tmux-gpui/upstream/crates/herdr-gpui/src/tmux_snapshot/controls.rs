@@ -13,6 +13,7 @@ mod tests;
 
 #[derive(Clone, Copy)]
 pub(super) enum Icon {
+    Plus,
     Home,
     Terminal,
     Sessions,
@@ -22,6 +23,7 @@ pub(super) enum Icon {
 impl Icon {
     fn path(self) -> &'static str {
         match self {
+            Self::Plus => "icons/plus.svg",
             Self::Home => "icons/tmux-home.svg",
             Self::Terminal => "icons/terminal.svg",
             Self::Sessions => "icons/sessions.svg",

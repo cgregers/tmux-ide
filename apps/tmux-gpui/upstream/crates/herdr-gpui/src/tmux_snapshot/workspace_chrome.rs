@@ -135,6 +135,32 @@ impl SnapshotView {
         tabs.into_any_element()
     }
 
+    pub(super) fn create_window_from_strip(
+        &mut self,
+        target: &super::pane_actions::Target,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.picker.is_some()
+            || self.new_session.is_some()
+            || self.pane_actions.is_some()
+            || !self.presence.ready()
+            || self.browser_state.request != self.browser_request
+            || !target.current(&self.browser_state)
+        {
+            return;
+        }
+        if !self.dispatch_captured_pane_action(
+            target,
+            super::pane_actions::Action::NewWindow,
+            window,
+            cx,
+        ) {
+            // Reuse the existing visible queue-error owner without claiming creation.
+            self.show_pane_action_queue_error(window, cx);
+        }
+    }
+
     pub(super) fn workspace_window_strip(
         &mut self,
         window: &mut Window,
@@ -186,7 +212,8 @@ impl SnapshotView {
         let mut strip = div()
             .id("window-strip")
             .debug_selector(|| "workspace-window-strip".into())
-            .w_full()
+            .flex_1()
+            .min_w_0()
             .flex()
             .flex_shrink_0()
             .overflow_x_scroll()
@@ -218,7 +245,34 @@ impl SnapshotView {
                 })),
             );
         }
-        strip.into_any_element()
+        let captured = super::pane_actions::Target::capture(&self.browser_state);
+        let enabled = captured.is_some()
+            && self.presence.ready()
+            && self.browser_state.request == self.browser_request;
+        let mut add = controls::button(
+            "workspace-new-window",
+            None,
+            "New terminal window",
+            controls::Icon::Plus,
+            &theme,
+        );
+        if enabled {
+            if let Some(target) = captured {
+                add = add.on_click(cx.listener(move |view, _, window, cx| {
+                    view.create_window_from_strip(&target, window, cx);
+                }));
+            }
+        } else {
+            add = add.opacity(0.5).cursor_default();
+        }
+        div()
+            .w_full()
+            .flex()
+            .flex_shrink_0()
+            .bg(rgb(theme.surface))
+            .child(strip)
+            .child(add)
+            .into_any_element()
     }
 }
 
