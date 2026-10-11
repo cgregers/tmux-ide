@@ -93,8 +93,7 @@ export function createNativeFleet(
               handle &&
               info &&
               session.server &&
-              session.liveSessionId &&
-              session.workspaceName
+              session.liveSessionId
             ) {
               const route: Route = {
                 handle,

@@ -159,6 +159,30 @@ test("unavailable catalog revokes a displayed token and reconnect never replays 
   }
 });
 
+test("ordinary tmux sessions remain selectable before daemon workspace promotion", async () => {
+  const f = await fixture();
+  try {
+    const session = { ...f.snapshot.sessions[0]! };
+    delete session.workspaceName;
+    f.emitters.get("local")!({ ...f.snapshot, sessions: [session] });
+    const token = f.fleet.publication().groups.find((g) => g.id === "local")!.sessions[0]!
+      .selection;
+    assert.ok(token);
+    const selected = f.fleet.select(token);
+    assert.equal(selected.session.workspaceName, undefined);
+    assert.equal(selected.session.liveSessionId, session.liveSessionId);
+    selected.assertCurrent();
+    f.emitters.get("local")!({
+      ...f.snapshot,
+      sessions: [{ ...session, server: { ...session.server!, generation: randomUUID() } }],
+    });
+    assert.throws(selected.assertCurrent, /changed/);
+    assert.throws(() => f.fleet.select(token), /changed/);
+  } finally {
+    f.close();
+  }
+});
+
 test("profile replacement retires borrowed selections; label edits preserve them", async () => {
   const f = await fixture();
   try {

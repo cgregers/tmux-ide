@@ -8,6 +8,8 @@ import {
   DaemonIdentitySchema,
   DAEMON_WIRE_PROTOCOL_VERSION,
   isDaemonWireProtocolCompatible,
+  TmuxServerScopeSchemaZ,
+  type TmuxServerScope,
 } from "../../../packages/contracts/src/index.ts";
 import { listTmuxServers } from "../../../packages/daemon-client/src/tmux-server-client.ts";
 import { hostSchema, type PreviewHost } from "./config.ts";
@@ -34,6 +36,8 @@ const discoveryMessages = Object.freeze({
   "identity-changed":
     "Local daemon identity changed. Refresh sessions to discover the current daemon.",
   "record-changed": "Local daemon record changed. Refresh sessions to discover the current daemon.",
+  "server-changed":
+    "The selected tmux server is no longer available. Refresh and select the session again.",
 });
 /** Fixed guidance only: never interpolate private records, URLs or caught errors. */
 export class DaemonDiscoveryError extends Error {
@@ -59,7 +63,12 @@ export class DaemonCompatibilityError extends Error {
 export async function discoverPreviewHost(
   path = getCanonicalDaemonInfoPath(),
   request: typeof fetch = fetch,
+  selectedScope?: TmuxServerScope,
 ): Promise<PreviewHost> {
+  const parsedScope =
+    selectedScope === undefined ? null : TmuxServerScopeSchemaZ.safeParse(selectedScope);
+  if (parsedScope && !parsedScope.success) throw new DaemonDiscoveryError("server-changed");
+  const scope = parsedScope?.data;
   const state = inspectCanonicalDaemonInfoPath(path);
   if (state.status !== "valid" || !state.info.authToken)
     throw new DaemonDiscoveryError("no-daemon");
@@ -98,15 +107,21 @@ export async function discoverPreviewHost(
     timeoutMs: 2500,
   });
   const online = servers.filter((server) => server.state === "online");
-  if (online.length === 0) throw new DaemonDiscoveryError("no-server");
-  if (online.length > 1) throw new DaemonDiscoveryError("multiple-servers");
+  const matches = scope
+    ? online.filter(
+        (server) => server.serverId === scope.serverId && server.generation === scope.generation,
+      )
+    : online;
+  if (scope && matches.length !== 1) throw new DaemonDiscoveryError("server-changed");
+  if (!scope && online.length === 0) throw new DaemonDiscoveryError("no-server");
+  if (!scope && online.length > 1) throw new DaemonDiscoveryError("multiple-servers");
   const current = inspectCanonicalDaemonInfoPath(path);
   if (current.status !== "valid" || JSON.stringify(current.info) !== JSON.stringify(info))
     throw new DaemonDiscoveryError("record-changed");
   const host = hostSchema.parse({
     baseUrl,
     ownerToken: info.authToken,
-    scope: { serverId: online[0]!.serverId, generation: online[0]!.generation },
+    scope: { serverId: matches[0]!.serverId, generation: matches[0]!.generation },
   });
   const captured = JSON.stringify(info);
   const assertCurrent = () => {

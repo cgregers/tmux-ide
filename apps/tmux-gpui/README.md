@@ -207,9 +207,14 @@ apps/tmux-gpui/scripts/browse-preview.sh /absolute/path/private-host.json
 
 The native browser also accepts a private `0600` machine file containing
 `{"sshTarget":"my-ssh-alias"}` and an optional `expectedEnvironmentId` UUID.
+For a machine with several tmux servers, also provide `scope` with the selected
+`serverId` and `generation` from its daemon inventory. The preview requires that
+exact server generation to be online; it never falls back to another server.
+Changing only the scope reuses the machine connection.
 This development path reuses the TUI's SSH connection owner, key authentication,
 host verification and guarded loopback relay. The remote machine must already run
-a compatible tmux-ide daemon and have exactly one online tmux server. Home refresh
+a compatible tmux-ide daemon. Without an explicit scope, exactly one tmux server
+must be online. Home refresh
 reuses the connection; connection retirement clears selection and terminal input.
 Closing the preview disposes its transport, not the remote daemon or tmux sessions.
 Press F5 and choose **Connect to machine…** to enter an SSH alias in the native

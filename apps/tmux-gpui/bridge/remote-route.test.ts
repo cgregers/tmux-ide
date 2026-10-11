@@ -277,3 +277,64 @@ test("invalid endpoints fail before network access", async () => {
     assert.equal(f.generations.size, 0);
   }
 });
+
+test("explicit remote server scope selects its exact generation without first-server fallback", async () => {
+  for (const mode of ["match", "restarted", "offline", "missing", "duplicate"] as const) {
+    const f = fixture();
+    const other = { ...f.server, serverId: `tmux-server.${randomUUID().replaceAll("-", "")}` };
+    const scope = { serverId: f.server.serverId, generation: f.server.generation };
+    const selected =
+      mode === "restarted"
+        ? { ...f.server, generation: randomUUID() }
+        : mode === "offline"
+          ? { ...f.server, state: "offline", generation: null }
+          : f.server;
+    const request: typeof fetch = async (url, init) =>
+      String(url).endsWith("/identity") || String(url).endsWith("/capabilities")
+        ? f.request(url, init)
+        : Response.json({
+            version: 1,
+            servers: [
+              other,
+              ...(mode === "missing" ? [] : [selected]),
+              ...(mode === "duplicate" ? [selected] : []),
+            ],
+          });
+    if (mode === "match") {
+      const route = await createRemotePreviewRoute(f.owner, { request, scope });
+      assert.deepEqual(route.host.scope, scope);
+      route.dispose();
+    } else {
+      await assert.rejects(createRemotePreviewRoute(f.owner, { request, scope }), (error) =>
+        mode === "duplicate"
+          ? error instanceof Error
+          : error instanceof RemoteRouteError && error.category === "server-changed",
+      );
+    }
+    assert.equal(f.listeners.size, 0);
+    assert.equal(f.generations.size, 0);
+  }
+});
+
+test("remote scope is captured before awaits and malformed scope does not access the network", async () => {
+  const f = fixture();
+  const scope = { serverId: f.server.serverId, generation: f.server.generation };
+  const expected = { ...scope };
+  const pending = createRemotePreviewRoute(f.owner, { request: f.request, scope });
+  scope.generation = randomUUID();
+  const route = await pending;
+  assert.deepEqual(route.host.scope, expected);
+  route.dispose();
+  const before = f.calls.length;
+  await assert.rejects(
+    createRemotePreviewRoute(f.owner, {
+      request: f.request,
+      scope: { ...scope, serverId: "invalid-secret" },
+    }),
+    (error) =>
+      error instanceof RemoteRouteError &&
+      error.category === "server-changed" &&
+      !error.message.includes("secret"),
+  );
+  assert.equal(f.calls.length, before);
+});

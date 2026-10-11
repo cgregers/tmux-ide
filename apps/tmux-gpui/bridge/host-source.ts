@@ -13,6 +13,7 @@ export const remoteHostConfigSchema = z
   .object({
     sshTarget: SavedMachineSchema.shape.sshTarget,
     expectedEnvironmentId: SavedMachineSchema.shape.expectedEnvironmentId,
+    scope: hostSchema.shape.scope.optional(),
   })
   .strict();
 const defaults = {
@@ -73,7 +74,10 @@ export function createPreviewHostSource(
         clearRemote();
         return hostSchema.parse(config);
       }
-      const key = JSON.stringify(target.data);
+      const key = JSON.stringify({
+        sshTarget: target.data.sshTarget,
+        expectedEnvironmentId: target.data.expectedEnvironmentId,
+      });
       if (remote?.key !== key || remote.owner.endpoint().state !== "ready") {
         clearRemote();
         const owner = dependencies.createOwner();
@@ -90,7 +94,10 @@ export function createPreviewHostSource(
       }
       if (!current()) throw new RemoteRouteError("retired");
       const selected = remote!;
-      const next = await dependencies.route(selected.owner, { signal: lifetime.signal });
+      const next = await dependencies.route(selected.owner, {
+        signal: lifetime.signal,
+        scope: target.data.scope,
+      });
       if (!current() || remote !== selected) {
         next.dispose();
         throw new RemoteRouteError("retired");

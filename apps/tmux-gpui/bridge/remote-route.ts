@@ -5,7 +5,11 @@ import {
   RemoteDaemonHandshakeSchema,
 } from "../../../packages/daemon/src/lib/ssh-daemon-transport.ts";
 import { listTmuxServers } from "../../../packages/daemon-client/src/tmux-server-client.ts";
-import { isDaemonWireProtocolCompatible } from "../../../packages/contracts/src/index.ts";
+import {
+  isDaemonWireProtocolCompatible,
+  TmuxServerScopeSchemaZ,
+  type TmuxServerScope,
+} from "../../../packages/contracts/src/index.ts";
 import { hostSchema, type PreviewHost } from "./config.ts";
 
 type Owner = Pick<
@@ -19,6 +23,8 @@ const messages = {
   incompatible: "Machine daemon is incompatible with this preview. Update the remote daemon.",
   "no-server": "The machine has no online tmux server. Open a tmux session and refresh.",
   "multiple-servers": "The machine has multiple online tmux servers. Select a server explicitly.",
+  "server-changed":
+    "The selected tmux server is no longer available. Refresh and select the session again.",
 } as const;
 
 /** Only fixed guidance crosses the native bridge; transport/parser errors may contain secrets. */
@@ -44,8 +50,12 @@ export interface RemotePreviewRoute {
  */
 export async function createRemotePreviewRoute(
   owner: Owner,
-  options: { request?: typeof fetch; signal?: AbortSignal } = {},
+  options: { request?: typeof fetch; signal?: AbortSignal; scope?: TmuxServerScope } = {},
 ): Promise<RemotePreviewRoute> {
+  const parsedScope =
+    options.scope === undefined ? null : TmuxServerScopeSchemaZ.safeParse(options.scope);
+  if (parsedScope && !parsedScope.success) throw new RemoteRouteError("server-changed");
+  const scope = parsedScope?.data;
   const parentSignal = options.signal;
   const fetchRequest = options.request ?? fetch;
   const captured = owner.endpoint();
@@ -134,12 +144,18 @@ export async function createRemotePreviewRoute(
     });
     assertCurrent();
     const online = servers.filter((server) => server.state === "online");
-    if (online.length !== 1)
+    const matches = scope
+      ? online.filter(
+          (server) => server.serverId === scope.serverId && server.generation === scope.generation,
+        )
+      : online;
+    if (scope && matches.length !== 1) throw new RemoteRouteError("server-changed");
+    if (!scope && online.length !== 1)
       throw new RemoteRouteError(online.length ? "multiple-servers" : "no-server");
     const host = hostSchema.parse({
       baseUrl,
       ownerToken: daemon.authToken,
-      scope: { serverId: online[0]!.serverId, generation: online[0]!.generation },
+      scope: { serverId: matches[0]!.serverId, generation: matches[0]!.generation },
     });
     Object.freeze(host.scope);
     Object.freeze(host);

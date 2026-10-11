@@ -88,6 +88,9 @@ Node-only `@tmux-ide/daemon/machine-catalog` subpath, retaining disabled stale r
 and per-machine identity scopes. The native `bridge/fleet.ts` adapter now projects
 bounded, credential-free groups and issues exact-route selection tokens. Returned
 selections retire on navigation, catalog failure or connection replacement.
+Ordinary sessions without a workspace remain selectable for daemon promotion.
+Local/remote discovery can resolve an explicitly selected server ID and generation;
+private SSH host files now support that scope without reconnecting the transport.
 Browser wire integration and grouped Home/F5 rendering remain pending; the adapter
 is currently covered by headless controlled-transport tests only.
 

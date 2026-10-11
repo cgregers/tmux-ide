@@ -223,3 +223,20 @@ test("saved selection carries its environment pin into the shared SSH owner", as
     source.dispose();
   }
 });
+
+test("private SSH host scope reaches verified routing and rejects a replaced server", async () => {
+  const f = fixture();
+  f.setConfig({ sshTarget: "test-machine", scope: f.host.scope });
+  const source = f.source();
+  try {
+    assert.deepEqual(await source.read(), f.host);
+    f.setConfig({
+      sshTarget: "test-machine",
+      scope: { ...f.host.scope, generation: randomUUID() },
+    });
+    await assert.rejects(source.read(), /selected tmux server is no longer available/);
+    assert.equal(f.counts().dials, 1, "server selection must borrow the existing SSH transport");
+  } finally {
+    source.dispose();
+  }
+});

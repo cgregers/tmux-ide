@@ -242,3 +242,66 @@ test("local editor provenance cannot be minted from a copied host and is revoked
     assert.throws(() => proof.assertCurrent(), /record changed/);
   });
 });
+
+test("explicit local server scope never falls back to another or restarted server", async () => {
+  for (const mode of ["match", "restarted", "offline", "missing", "duplicate"] as const) {
+    await fixture(async (path, info) => {
+      const scope = {
+        serverId: `tmux-server.${randomUUID().replaceAll("-", "")}`,
+        generation: randomUUID(),
+      };
+      const server = { ...scope, label: "selected", state: "online" };
+      const other = { ...server, serverId: `tmux-server.${randomUUID().replaceAll("-", "")}` };
+      const selected =
+        mode === "restarted"
+          ? { ...server, generation: randomUUID() }
+          : mode === "offline"
+            ? { ...server, state: "offline", generation: null }
+            : server;
+      const request: typeof fetch = async (url) =>
+        String(url).endsWith("/identity")
+          ? reply({ ...info, ok: true })
+          : reply({
+              version: 1,
+              servers: [
+                other,
+                ...(mode === "missing" ? [] : [selected]),
+                ...(mode === "duplicate" ? [selected] : []),
+              ],
+            });
+      if (mode === "match") {
+        const host = await discoverPreviewHost(path, request, scope);
+        assert.deepEqual(host.scope, scope);
+        assert.ok(localPreviewHostProof(host));
+      } else {
+        await assert.rejects(discoverPreviewHost(path, request, scope), (error) =>
+          mode === "duplicate"
+            ? error instanceof Error
+            : error instanceof DaemonDiscoveryError && error.category === "server-changed",
+        );
+      }
+    });
+  }
+});
+
+test("local selected scope is captured before identity request", async () => {
+  await fixture(async (path, info) => {
+    const scope = {
+      serverId: `tmux-server.${randomUUID().replaceAll("-", "")}`,
+      generation: randomUUID(),
+    };
+    const expected = { ...scope };
+    const host = await discoverPreviewHost(
+      path,
+      async (url) => {
+        if (String(url).endsWith("/identity")) {
+          scope.generation = randomUUID();
+          return reply({ ...info, ok: true });
+        }
+        return reply({ version: 1, servers: [{ ...expected, label: "local", state: "online" }] });
+      },
+      scope,
+    );
+    assert.deepEqual(host.scope, expected);
+  });
+});
