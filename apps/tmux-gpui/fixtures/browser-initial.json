@@ -177,5 +177,6 @@
     ],
     "error": null
   },
-  "machines": null
+  "machines": null,
+  "fleet": null
 }

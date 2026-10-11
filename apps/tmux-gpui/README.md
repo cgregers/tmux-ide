@@ -205,6 +205,12 @@ apps/tmux-gpui/scripts/browse-preview.sh
 apps/tmux-gpui/scripts/browse-preview.sh /absolute/path/private-host.json
 ```
 
+With `--local`, Home observes the local daemon and enabled saved machines through
+the shared fleet owner. Session search includes the machine label; disconnected
+rows remain visible but cannot be opened. Selecting a session uses its exact
+machine, server generation and live session identity. Private host files retain
+the isolated single-host workflow.
+
 The native browser also accepts a private `0600` machine file containing
 `{"sshTarget":"my-ssh-alias"}` and an optional `expectedEnvironmentId` UUID.
 For a machine with several tmux servers, also provide `scope` with the selected
@@ -217,6 +223,12 @@ a compatible tmux-ide daemon. Without an explicit scope, exactly one tmux server
 must be online. Home refresh
 reuses the connection; connection retirement clears selection and terminal input.
 Closing the preview disposes its transport, not the remote daemon or tmux sessions.
+F5 **Manage saved machines…** lists explicit Enable/Disable actions for saved
+profiles. Changes go through the canonical local registry using the captured UUID
+and registry revision; they do not stop remote tmux sessions. Pending, stale or
+unavailable records cannot be changed. This native workflow has headless keyboard
+coverage; physical persistence and narrow-window verification remain pending.
+
 Press F5 and choose **Connect to machine…** to enter an SSH alias in the native
 dialog. **Use local machine / cancel connection** returns to local discovery and
 cancels a pending remote dial. Home and Refresh remain responsive during discovery.

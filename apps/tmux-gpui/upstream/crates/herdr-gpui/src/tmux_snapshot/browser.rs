@@ -1,5 +1,7 @@
 //! Bounded browser state and commands. All pipe I/O runs off the UI thread.
 use super::{Error, decode};
+#[path = "browser_fleet.rs"]
+pub(super) mod fleet;
 #[path = "home_agents.rs"]
 pub(super) mod home_agents;
 #[path = "browser_machines.rs"]
@@ -70,6 +72,7 @@ pub(super) struct CreateSession {
 #[derive(Clone, Default)]
 pub(super) struct State {
     pub machines: Option<machines::Registry>,
+    pub fleet: Option<fleet::Fleet>,
     pub split_layout: Option<super::divider::canonical::Layout>,
     pub split_gesture: Option<super::divider::canonical::Ack>,
     pub resize_gesture_supported: bool,
@@ -99,6 +102,7 @@ pub(super) struct State {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 struct Publication {
+    fleet: Option<fleet::Fleet>,
     machines: Option<machines::Registry>,
     split_layout: Option<super::divider::canonical::Layout>,
     split_gesture: Option<super::divider::canonical::Ack>,
@@ -138,6 +142,11 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "fleet-session")]
+    FleetSession {
+        request: u64,
+        selection: String,
+    },
     #[serde(rename = "machines")]
     Machines {
         request: u64,
@@ -299,6 +308,7 @@ impl Reader {
             .as_ref()
             .is_some_and(|token| token.len() != 36 || uuid::Uuid::parse_str(token).is_err())
             || p.machines.as_ref().is_some_and(|m| !m.valid())
+            || p.fleet.as_ref().is_some_and(|f| !f.valid())
             || p.appearance.as_ref().is_some_and(|a| !a.valid())
             || p.home_agents.as_ref().is_some_and(|r| !r.valid())
             || p.workspace_agents.as_ref().is_some_and(|r| {
@@ -376,6 +386,7 @@ impl Reader {
         self.request = p.request;
         Ok(State {
             machines: p.machines,
+            fleet: p.fleet,
             split_layout: p.split_layout,
             split_gesture: p.split_gesture,
             resize_gesture_supported: p.resize_gesture_supported,
@@ -484,3 +495,7 @@ mod session_tests;
 #[cfg(test)]
 #[path = "browser_machine_tests.rs"]
 mod machine_tests;
+
+#[cfg(test)]
+#[path = "browser_fleet_tests.rs"]
+mod fleet_tests;

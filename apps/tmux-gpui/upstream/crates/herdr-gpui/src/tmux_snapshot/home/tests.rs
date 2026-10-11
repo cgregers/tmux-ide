@@ -148,3 +148,6 @@ mod render;
 
 #[path = "tests/filters.rs"]
 mod filters;
+
+#[path = "tests/fleet.rs"]
+mod fleet;

@@ -2,6 +2,7 @@
 use super::{SnapshotView, browser, browser_ui::Selection};
 use gpui::{prelude::*, *};
 pub(super) mod filters;
+mod fleet;
 
 /// Before the first browser publication, absence of a catalog is not an empty catalog.
 pub(super) fn initial_state() -> browser::State {
@@ -16,6 +17,18 @@ fn live(state: &browser::State, connected: bool) -> bool {
     connected && state.home_phase == browser::HomePhase::Live
 }
 fn summary(state: &browser::State, connected: bool) -> String {
+    if connected && let Some(fleet) = &state.fleet {
+        let sessions = fleet
+            .groups
+            .iter()
+            .flat_map(|g| &g.sessions)
+            .filter(|s| s.selection.is_some())
+            .count();
+        return format!(
+            "{} machines · {sessions} available sessions",
+            fleet.groups.len()
+        );
+    }
     if !connected || state.home_phase == browser::HomePhase::Unavailable {
         return "Session catalog unavailable".into();
     }
@@ -65,7 +78,13 @@ impl SnapshotView {
         let theme = self.theme();
         let request = self.browser_request;
         let connected = self.browser_commands.is_some();
-        let is_live = live(&self.browser_state, connected);
+        let is_live = live(&self.browser_state, connected)
+            || (connected
+                && self.browser_state.fleet.as_ref().is_some_and(|f| {
+                    f.groups
+                        .iter()
+                        .any(|g| g.state == browser::fleet::Phase::Ready)
+                }));
         // Reuse Herdr window/reconnecting.rs's bounded, rounded surface card
         // and sidebar/row.rs's label renderer; only the actions/data differ.
         let mut body = div()
@@ -88,12 +107,13 @@ impl SnapshotView {
                     .text_color(rgb(theme.muted))
                     .child(summary(&self.browser_state, connected)),
             );
-        body = body.child(
-            div()
-                .mt_2()
-                .text_color(rgb(theme.muted))
-                .child("Your sessions on this machine"),
-        );
+        body = body.child(div().mt_2().text_color(rgb(theme.muted)).child(
+            if self.browser_state.fleet.is_some() {
+                "Your fleet"
+            } else {
+                "Your sessions on this machine"
+            },
+        ));
         if !self.browser_state.status.is_empty() && !is_live {
             body = body.child(div().mt_2().text_color(rgb(theme.muted)).child(
                 crate::notifications::safe_text(&self.browser_state.status, 240),
@@ -159,7 +179,9 @@ impl SnapshotView {
                     ),
             );
         }
-        if is_live && !self.browser_state.sessions.is_empty() {
+        if let Some(cards) = self.fleet_cards(cx) {
+            body = body.child(cards);
+        } else if is_live && !self.browser_state.sessions.is_empty() {
             let cards = self
                 .browser_state
                 .sessions

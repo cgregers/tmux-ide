@@ -16,7 +16,13 @@ export interface NativeFleetPublication {
     state: "ready" | "connecting" | "disconnected";
     conflict: boolean;
     omittedSessions: number;
-    sessions: { id: string; name: string; paneCount: number; selection: string | null }[];
+    sessions: {
+      id: string;
+      name: string;
+      paneCount: number;
+      sessionId: string | null;
+      selection: string | null;
+    }[];
   }[];
   omittedGroups: number;
 }
@@ -105,7 +111,6 @@ export function createNativeFleet(
                   session.sourceId,
                   session.server,
                   session.liveSessionId,
-                  session.workspaceName,
                 ]),
               };
               if (current(route)) {
@@ -118,6 +123,7 @@ export function createNativeFleet(
               id: session.id,
               name: session.name.slice(0, 512),
               paneCount: session.paneCount,
+              sessionId: session.liveSessionId ?? null,
               selection,
             };
           }),

@@ -24,6 +24,10 @@ pub(super) enum Selection {
     },
     Refresh,
     Session(String),
+    FleetSession {
+        selection: String,
+        session_id: String,
+    },
     Pane(String),
 }
 impl SnapshotView {
@@ -406,6 +410,7 @@ impl SnapshotView {
         self.pending_session_open = None;
         let opening_session = match &selection {
             Selection::Session(id) => Some(id.clone()),
+            Selection::FleetSession { session_id, .. } => Some(session_id.clone()),
             _ => None,
         };
         self.new_session_queued = None;
@@ -418,7 +423,9 @@ impl SnapshotView {
         };
         let changing_machine = matches!(
             selection,
-            Selection::Machine(_) | Selection::MachineProfile { .. }
+            Selection::Machine(_)
+                | Selection::MachineProfile { .. }
+                | Selection::FleetSession { .. }
         );
         let going_home = matches!(
             selection,
@@ -452,6 +459,9 @@ impl SnapshotView {
                 key,
             },
             Selection::Session(id) => browser::Command::Session { request, id },
+            Selection::FleetSession { selection, .. } => {
+                browser::Command::FleetSession { request, selection }
+            }
             Selection::Pane(id) => browser::Command::Pane { request, id },
             Selection::Machine(ssh_target) => browser::Command::Machine {
                 request,

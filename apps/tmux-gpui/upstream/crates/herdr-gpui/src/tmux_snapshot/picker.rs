@@ -13,8 +13,20 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
-    Machine { id: String, revision: u64 },
+    Machine {
+        id: String,
+        revision: u64,
+    },
+    MachineToggle {
+        id: String,
+        revision: u64,
+        enabled: bool,
+    },
     Session(String),
+    FleetSession {
+        selection: String,
+        session_id: String,
+    },
     Pane(String),
     Theme(String),
     Command(Action),
@@ -31,6 +43,7 @@ enum Mode {
     Commands,
     Machine,
     SavedMachines,
+    ManageMachines,
 }
 pub(super) struct Picker {
     mode: Mode,
@@ -48,6 +61,9 @@ fn rows(state: &browser::State, query: &str) -> Vec<Row> {
     let mut matcher = Matcher::new(Config::DEFAULT);
     let mut matches = Vec::new();
     for (pane, choices) in [(false, &state.sessions), (true, &state.panes)] {
+        if !pane && state.fleet.is_some() {
+            continue;
+        }
         for choice in choices.iter().take(512) {
             let label = format!(
                 "{} · {}",
@@ -67,6 +83,30 @@ fn rows(state: &browser::State, query: &str) -> Vec<Row> {
                         label,
                     },
                 ));
+            }
+        }
+    }
+    if let Some(fleet) = &state.fleet {
+        for group in &fleet.groups {
+            for session in &group.sessions {
+                let (Some(selection), Some(session_id)) = (&session.selection, &session.session_id)
+                else {
+                    continue;
+                };
+                let label = format!("{} · {}", group.label, session.name);
+                let text: Utf32String = label.as_str().into();
+                if let Some(score) = pattern.score(text.slice(..), &mut matcher) {
+                    matches.push((
+                        score,
+                        Row {
+                            target: Target::FleetSession {
+                                selection: selection.clone(),
+                                session_id: session_id.clone(),
+                            },
+                            label,
+                        },
+                    ));
+                }
             }
         }
     }
@@ -92,6 +132,19 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
 }
 fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::MachineToggle {
+            id,
+            revision,
+            enabled,
+        } => state.machines.as_ref().is_some_and(|registry| {
+            registry.available
+                && !registry.pending
+                && registry.revision == *revision
+                && registry
+                    .machines
+                    .iter()
+                    .any(|profile| profile.id == *id && profile.enabled != *enabled)
+        }),
         Target::Machine { id, revision } => state.machines.as_ref().is_some_and(|registry| {
             registry.available
                 && registry.revision == *revision
@@ -100,6 +153,14 @@ fn current(state: &browser::State, target: &Target) -> bool {
                     .iter()
                     .any(|profile| profile.id == *id && profile.enabled)
         }),
+        Target::FleetSession {
+            selection,
+            session_id,
+        } => state
+            .fleet
+            .as_ref()
+            .and_then(|f| f.session(selection))
+            .is_some_and(|s| s.session_id.as_ref() == Some(session_id)),
         Target::Command(action) => action.available(state),
         Target::Session(id) => state.sessions.iter().any(|c| &c.id == id),
         Target::Pane(id) => state.panes.iter().any(|c| &c.id == id),
@@ -136,6 +197,7 @@ impl SnapshotView {
             input.set_placeholder(
                 match mode {
                     Mode::SavedMachines => "Search saved machines…",
+                    Mode::ManageMachines => "Search machines to enable or disable…",
                     Mode::Machine => "SSH alias or user@host",
                     Mode::Theme => "Search themes…",
                     Mode::Commands => "Search commands…",
@@ -156,7 +218,9 @@ impl SnapshotView {
             error: None,
             search,
             _changed: changed,
-            rows: if mode == Mode::SavedMachines {
+            rows: if mode == Mode::ManageMachines {
+                saved_machines::management_rows(&self.browser_state, "")
+            } else if mode == Mode::SavedMachines {
                 saved_machines::rows(&self.browser_state, "")
             } else if mode == Mode::Machine {
                 Vec::new()
@@ -185,13 +249,14 @@ impl SnapshotView {
             || (picker.mode != Mode::Theme
                 && (picker.request != self.browser_request
                     || (picker.mode == Mode::Navigation
-                        && self.browser_state.sessions.is_empty()
-                        && self.browser_state.panes.is_empty())))
+                        && rows(&self.browser_state, "").is_empty())))
         {
             self.picker = None;
             return;
         }
-        picker.rows = if picker.mode == Mode::SavedMachines {
+        picker.rows = if picker.mode == Mode::ManageMachines {
+            saved_machines::management_rows(&self.browser_state, picker.search.read(cx).text())
+        } else if picker.mode == Mode::SavedMachines {
             saved_machines::rows(&self.browser_state, picker.search.read(cx).text())
         } else if picker.mode == Mode::Machine {
             Vec::new()
@@ -223,6 +288,7 @@ impl SnapshotView {
             self.close_picker(window, cx);
             match action {
                 Action::SavedMachines => self.open_saved_machines(window, cx),
+                Action::ManageMachines => self.open_machine_management(window, cx),
                 Action::AddMachine => self.open_picker_mode(Mode::Machine, window, cx),
                 Action::LocalMachine => self.select(Selection::Machine(None), window, cx),
                 Action::Home => self.select(Selection::Home, window, cx),
@@ -235,6 +301,32 @@ impl SnapshotView {
                 Action::Sessions => self.open_picker(window, cx),
                 Action::Appearance => self.open_theme_picker(window, cx),
                 Action::Refresh => self.select(Selection::Refresh, window, cx),
+            }
+            return;
+        }
+        if let Target::MachineToggle {
+            id,
+            revision,
+            enabled,
+        } = target
+        {
+            let change = if enabled {
+                browser::machines::Toggle::Enable { id }
+            } else {
+                browser::machines::Toggle::Disable { id }
+            };
+            if let Some(sender) = &self.browser_commands {
+                let error = sender
+                    .try_send(browser::Command::Machines {
+                        request: self.browser_request,
+                        operation: browser::machines::Operation::Mutate { revision, change },
+                    })
+                    .err()
+                    .map(|_| "Machine change queue unavailable — try again");
+                if let Some(picker) = &mut self.picker {
+                    picker.error = error;
+                }
+                cx.notify();
             }
             return;
         }
@@ -257,8 +349,15 @@ impl SnapshotView {
             match target {
                 Target::Machine { id, revision } => Selection::MachineProfile { id, revision },
                 Target::Session(id) => Selection::Session(id),
+                Target::FleetSession {
+                    selection,
+                    session_id,
+                } => Selection::FleetSession {
+                    selection,
+                    session_id,
+                },
                 Target::Pane(id) => Selection::Pane(id),
-                Target::Theme(_) | Target::Command(_) => return,
+                Target::Theme(_) | Target::Command(_) | Target::MachineToggle { .. } => return,
             },
             window,
             cx,

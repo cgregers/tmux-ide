@@ -6,6 +6,7 @@ pub(in crate::tmux_snapshot) enum Action {
     Terminals,
     AddMachine,
     SavedMachines,
+    ManageMachines,
     LocalMachine,
     Sessions,
     Appearance,
@@ -23,6 +24,7 @@ pub(super) fn command_rows(state: &browser::State, query: &str) -> Vec<Row> {
         (Action::Terminals, "Terminals · F2"),
         (Action::AddMachine, "Connect to machine…"),
         (Action::SavedMachines, "Switch saved machine…"),
+        (Action::ManageMachines, "Manage saved machines…"),
         (
             Action::LocalMachine,
             "Use local machine / cancel connection",

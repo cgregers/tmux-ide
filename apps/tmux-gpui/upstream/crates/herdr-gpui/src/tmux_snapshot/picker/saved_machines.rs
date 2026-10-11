@@ -41,9 +41,43 @@ pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
     rows
 }
 
+pub(super) fn management_rows(state: &browser::State, query: &str) -> Vec<Row> {
+    let query = query.chars().take(256).collect::<String>().to_lowercase();
+    state.machines.as_ref().map_or_else(Vec::new, |registry| {
+        registry
+            .machines
+            .iter()
+            .map(|profile| Row {
+                target: Target::MachineToggle {
+                    id: profile.id.clone(),
+                    revision: registry.revision,
+                    enabled: !profile.enabled,
+                },
+                label: format!(
+                    "{} {} · {}",
+                    if profile.enabled { "Disable" } else { "Enable" },
+                    profile.label,
+                    profile.ssh_target
+                ),
+            })
+            .filter(|row| {
+                query
+                    .split_whitespace()
+                    .all(|term| row.label.to_lowercase().contains(term))
+            })
+            .collect()
+    })
+}
+
 impl SnapshotView {
+    pub(super) fn open_machine_management(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_machine_list(Mode::ManageMachines, window, cx);
+    }
     pub(super) fn open_saved_machines(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.open_picker_mode(Mode::SavedMachines, window, cx);
+        self.open_machine_list(Mode::SavedMachines, window, cx);
+    }
+    fn open_machine_list(&mut self, mode: Mode, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_picker_mode(mode, window, cx);
         if let Some(sender) = &self.browser_commands
             && sender
                 .try_send(browser::Command::Machines {
@@ -60,6 +94,10 @@ impl SnapshotView {
 
     pub(super) fn saved_machines_dialog(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.theme();
+        let managing = self
+            .picker
+            .as_ref()
+            .is_some_and(|p| p.mode == Mode::ManageMachines);
         let message = match &self.browser_state.machines {
             None => "Loading saved machines…".to_owned(),
             Some(registry) => registry
@@ -68,6 +106,8 @@ impl SnapshotView {
                 .or(registry.error.as_ref())
                 .cloned()
                 .unwrap_or_else(|| {
+                    if registry.pending { return "Saving machine change…".into(); }
+                    if managing && !registry.machines.is_empty() { return "Enable or disable a saved connection. Remote sessions keep running.".into(); }
                     if registry.machines.is_empty() {
                         "No saved machines yet. Connect to an SSH machine to get started.".into()
                     } else {
@@ -105,7 +145,11 @@ impl SnapshotView {
                         div()
                             .text_lg()
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Machines"),
+                            .child(if managing {
+                                "Manage machines"
+                            } else {
+                                "Machines"
+                            }),
                     )
                     .child(div().text_color(rgb(theme.muted)).child(message))
                     .child(self.picker_render(cx))

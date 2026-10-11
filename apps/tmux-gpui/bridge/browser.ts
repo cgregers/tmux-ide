@@ -1,3 +1,5 @@
+import { createNativeFleetRuntime } from "./fleet-runtime.ts";
+import { FleetSelectionError } from "./fleet.ts";
 import { prepareMachineConnection } from "./add-machine.ts";
 import {
   createNativeMachineRegistry,
@@ -89,6 +91,13 @@ const commandSchema = z.union([
   machineRegistryCommand,
   z
     .object({
+      type: z.literal("fleet-session"),
+      request: z.number().int().positive().safe(),
+      selection: z.string().uuid(),
+    })
+    .strict(),
+  z
+    .object({
       type: z.literal("machine-profile"),
       request: z.number().int().positive().safe(),
       id: SavedMachineSchema.shape.id,
@@ -148,10 +157,16 @@ const MAX_FRAME = 8 * 1024 * 1024;
 const appearance = createAppearanceOwner();
 const sessionCreate = createSessionOwner();
 let machines: ReturnType<typeof createNativeMachineRegistry> | undefined;
+let fleet: ReturnType<typeof createNativeFleetRuntime> | undefined;
+let selectedFleet = false;
 let machineMessage: string | null = null;
 let selectedMachineProfile: SavedMachine | null = null;
 let savedMachineRetired = false;
 function machinesChanged() {
+  if (fleet && machines) {
+    const registry = machines.publication();
+    fleet.reconcile(registry.available ? registry.machines : []);
+  }
   if (
     selectedMachineProfile &&
     machines &&
@@ -170,6 +185,7 @@ let hostSource: ReturnType<typeof createPreviewHostSource> | undefined;
 let machineRouteRevision = 0;
 async function readHost() {
   try {
+    if (selectedFleet && fleet) return await fleet.read();
     if (savedMachineRetired) throw new MachineRegistryError("inactive");
     if (process.argv.length !== 3) throw new Error("Invalid browser arguments");
     hostSource ??= createPreviewHostSource(process.argv[2]!, retireMachineRoute);
@@ -378,6 +394,7 @@ function publish() {
       paneActions: inputReady && snapshot ? paneActions : null,
       presenceRevision: appliedPresenceRevision,
       appearance: appearance.publication(),
+      fleet: fleet?.publication() ?? null,
       machines: machines ? { ...machines.publication(), message: machineMessage } : null,
     }) + "\n";
   if (Buffer.byteLength(line) > MAX_FRAME) throw new Error("Browser publication too large");
@@ -437,6 +454,7 @@ async function stop() {
   stopped = true;
   hostSource?.dispose();
   machines?.dispose();
+  fleet?.dispose();
   retireAgents();
   catalog?.dispose();
   await retire();
@@ -1193,6 +1211,59 @@ async function command(value: unknown) {
   publish();
   await retire();
   if (stopped || token !== request) return;
+  if (cmd.type === "fleet-session") {
+    if (!fleet) throw new FleetSelectionError();
+    selectedFleet = true;
+    selectedMachineProfile = null;
+    savedMachineRetired = false;
+    machineRouteRevision++;
+    hostSource?.dispose();
+    hostSource = undefined;
+    catalog?.dispose();
+    catalog = undefined;
+    const owner = fleet;
+    const routeRevision = machineRouteRevision;
+    // SSH identity/inventory work must not block Home or another selection.
+    void owner
+      .select(cmd.selection)
+      .then(async ({ host, sessionId }) => {
+        if (
+          stopped ||
+          request !== token ||
+          fleet !== owner ||
+          routeRevision !== machineRouteRevision
+        )
+          return;
+        const fresh = createPreviewCatalog(host);
+        catalog = fresh;
+        const list = await fresh.sessions();
+        if (stopped || request !== token || catalog !== fresh) return;
+        if (list.length > 512) throw new Error("Too many sessions for preview");
+        sessions = list.map(sessionChoice);
+        if (!sessions.some((session) => session.id === sessionId)) throw new FleetSelectionError();
+        const choices = await fresh.panes(sessionId);
+        if (stopped || request !== token || catalog !== fresh) return;
+        if (choices.length > 512) throw new Error("Too many panes for preview");
+        panes = choices;
+        selectedSession = sessionId;
+        sessionCatalogComplete = panes.length === 0;
+        status = panes.length ? "Loading windows" : "No available panes";
+        publish();
+        if (panes[0]) await openPane(panes[0], token, true);
+        if (!stopped && request === token) startAgents();
+      })
+      .catch(() => {
+        if (stopped || request !== token || routeRevision !== machineRouteRevision) return;
+        inputReady = false;
+        status = "Fleet session unavailable — return Home and select it again";
+        publish();
+      });
+    return;
+  }
+  if (cmd.type === "home" || cmd.type === "machine" || cmd.type === "machine-profile") {
+    selectedFleet = false;
+    fleet?.clearSelection();
+  }
   if (cmd.type === "machine" && cmd.sshTarget !== null) {
     selectedMachineProfile = null;
     savedMachineRetired = true;
@@ -1297,6 +1368,12 @@ function launchRefresh(token: number) {
 }
 // One bounded command at a time; discovery results are fenced by request and route.
 try {
+  if (process.argv[2] === "--local") {
+    fleet = createNativeFleetRuntime(publish, retireMachineRoute);
+    machines = createNativeMachineRegistry(machinesChanged);
+    machines.start();
+    fleet.start();
+  }
   launchRefresh(0);
   let buffer = Buffer.alloc(0);
   for await (const chunk of process.stdin) {

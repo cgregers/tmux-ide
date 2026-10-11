@@ -174,6 +174,15 @@ test("ordinary tmux sessions remain selectable before daemon workspace promotion
     selected.assertCurrent();
     f.emitters.get("local")!({
       ...f.snapshot,
+      sessions: [{ ...session, workspaceName: "promoted" }],
+    });
+    selected.assertCurrent();
+    assert.equal(
+      f.fleet.publication().groups.find((g) => g.id === "local")!.sessions[0]!.selection,
+      token,
+    );
+    f.emitters.get("local")!({
+      ...f.snapshot,
       sessions: [{ ...session, server: { ...session.server!, generation: randomUUID() } }],
     });
     assert.throws(selected.assertCurrent, /changed/);

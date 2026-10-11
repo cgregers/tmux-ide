@@ -7,8 +7,7 @@ use std::collections::HashSet;
 pub(in crate::tmux_snapshot) struct Registry {
     pub(in crate::tmux_snapshot) revision: u64,
     pub(in crate::tmux_snapshot) available: bool,
-    #[serde(rename = "pending")]
-    _pending: bool,
+    pub(in crate::tmux_snapshot) pending: bool,
     pub(in crate::tmux_snapshot) error: Option<String>,
     pub(in crate::tmux_snapshot) message: Option<String>,
     pub(in crate::tmux_snapshot) machines: Vec<Profile>,
@@ -55,4 +54,12 @@ impl Registry {
 #[serde(tag = "operation", rename_all = "lowercase")]
 pub(in crate::tmux_snapshot) enum Operation {
     Read,
+    Mutate { revision: u64, change: Toggle },
+}
+
+#[derive(Serialize)]
+#[serde(tag = "operation", rename_all = "lowercase")]
+pub(in crate::tmux_snapshot) enum Toggle {
+    Enable { id: String },
+    Disable { id: String },
 }

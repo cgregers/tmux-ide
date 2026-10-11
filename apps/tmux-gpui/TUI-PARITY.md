@@ -91,8 +91,11 @@ selections retire on navigation, catalog failure or connection replacement.
 Ordinary sessions without a workspace remain selectable for daemon promotion.
 Local/remote discovery can resolve an explicitly selected server ID and generation;
 private SSH host files now support that scope without reconnecting the transport.
-Browser wire integration and grouped Home/F5 rendering remain pending; the adapter
-is currently covered by headless controlled-transport tests only.
+The default local browser now owns the shared fleet manager and publishes groups
+to native Home and the F5/F6 session picker. Selection uses the captured token and
+the existing daemon promotion, pane catalog and input path. Private host-file
+previews remain single-host and isolated. Fleet-wide agent aggregation, attention
+navigation, real multi-machine SSH and release qualification remain open.
 
 The bridge now has a tested `remote-route.ts` adapter that borrows one verified
 SSH epoch, rejects stale inventory, and cancels on retirement. The browser now
@@ -111,8 +114,12 @@ Dedicated headless checks cover selection fencing, command serialization, Escape
 input isolation and a failed read queue. The native Connect form now attempts a local save before dialing, preserves
 existing saved UUID/pins, and reports an explicitly temporary connection when
 persistence cannot be confirmed and no conflicting profile exists. Late save
-results cannot reconnect after navigation cancellation. Native edit/enable/disable/
-remove controls and physical saved-picker/Add acceptance remain pending.
+results cannot reconnect after navigation cancellation. Native F5 **Manage saved machines** now exposes revision-fenced enable/disable
+actions through the existing canonical registry mutation path. The dialog uses
+authoritative pending/results rather than optimistic saved-state changes. Keyboard
+dispatch and stale/pending/unavailable guards have headless coverage; physical
+persistence remains unqualified. Native edit/remove controls and physical
+saved-picker/Add acceptance remain pending.
 Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
 Cancellation, child cleanup, sanitized failures, generation mismatches and late

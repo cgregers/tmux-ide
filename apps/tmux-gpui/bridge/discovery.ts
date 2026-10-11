@@ -59,16 +59,11 @@ export class DaemonCompatibilityError extends Error {
   }
 }
 
-/** Read-only discovery. Never bootstrap, repair, or replace a user's daemon. */
-export async function discoverPreviewHost(
+/** Verify the daemon without requiring a particular tmux server to exist. */
+export async function discoverPreviewDaemon(
   path = getCanonicalDaemonInfoPath(),
   request: typeof fetch = fetch,
-  selectedScope?: TmuxServerScope,
-): Promise<PreviewHost> {
-  const parsedScope =
-    selectedScope === undefined ? null : TmuxServerScopeSchemaZ.safeParse(selectedScope);
-  if (parsedScope && !parsedScope.success) throw new DaemonDiscoveryError("server-changed");
-  const scope = parsedScope?.data;
+) {
   const state = inspectCanonicalDaemonInfoPath(path);
   if (state.status !== "valid" || !state.info.authToken)
     throw new DaemonDiscoveryError("no-daemon");
@@ -98,6 +93,26 @@ export async function discoverPreviewHost(
     throw new DaemonDiscoveryError("identity-changed");
   if (!isDaemonWireProtocolCompatible(identity.protocolVersion))
     throw new DaemonCompatibilityError(identity.protocolVersion);
+  const current = inspectCanonicalDaemonInfoPath(path);
+  if (current.status !== "valid" || JSON.stringify(current.info) !== JSON.stringify(info))
+    throw new DaemonDiscoveryError("record-changed");
+  return info;
+}
+
+/** Read-only discovery. Never bootstrap, repair, or replace a user's daemon. */
+export async function discoverPreviewHost(
+  path = getCanonicalDaemonInfoPath(),
+  request: typeof fetch = fetch,
+  selectedScope?: TmuxServerScope,
+): Promise<PreviewHost> {
+  const parsedScope =
+    selectedScope === undefined ? null : TmuxServerScopeSchemaZ.safeParse(selectedScope);
+  if (parsedScope && !parsedScope.success) throw new DaemonDiscoveryError("server-changed");
+  const scope = parsedScope?.data;
+  const info = await discoverPreviewDaemon(path, request);
+  const baseUrl = hostSchema.shape.baseUrl.parse(
+    canonicalDaemonUrl("http", info.bindHostname, info.port, "/"),
+  );
   const { servers } = await listTmuxServers({
     baseUrl,
     ownerToken: info.authToken!,

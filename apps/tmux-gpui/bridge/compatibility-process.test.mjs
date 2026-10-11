@@ -1,3 +1,5 @@
+import process from "node:process";
+import { setTimeout, clearTimeout } from "node:timers";
 // Boundary peer test: a real browser helper, private record, and loopback HTTP peer.
 // This is not a historical daemon executable qualification.
 import { test } from "node:test";
@@ -125,7 +127,7 @@ for (const packaged of [false, true])
             fatal ??= error;
           }
         });
-        await wait(() => publications.length > 0);
+        await wait(() => publications.some((p) => /incompatible/i.test(p.status)));
         assert.match(publications.at(-1).status, /incompatible/i);
         assert.equal(publications.at(-1).inputReady, false);
         assert.equal(publications.at(-1).snapshot, null);

@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
 mod commands;
+mod fleet;
 mod machine;
 mod navigation_keys;
 mod saved_machines;
@@ -380,3 +381,5 @@ fn system_notifications_are_change_only_and_do_not_select(cx: &mut TestAppContex
     ));
     assert!(receiver.try_recv().is_err());
 }
+
+mod machine_management;
