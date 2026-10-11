@@ -1,0 +1,274 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import type {
+  MachineAgentGroup,
+  createMachineAgents,
+} from "../../../packages/daemon/src/lib/machine-agents.ts";
+import type {
+  HomeAgentRow,
+  HomeAgentSnapshot,
+} from "../../../packages/presentation/src/home-agent-roster.ts";
+import { createFleetAgentRoster, sameAgentTarget, verifyFleetAgentTarget } from "./fleet-agents.ts";
+import { homeAgentPublication } from "./home-agent-publication.ts";
+
+const row: HomeAgentRow = {
+  key: "session\0agent",
+  sessionKey: "session",
+  sessionName: "Workspace",
+  liveSessionId: "live-session.aaaaaaaaaaaaaaaaaaaa",
+  daemonInstanceId: "generation",
+  server: { serverId: "server", generation: "generation" },
+  agentId: "agent",
+  paneId: "pane.agent",
+  name: "Agent",
+  harness: "codex",
+  activity: "running",
+  attention: false,
+  projectName: "Project",
+  nativeIdentity: null,
+  interactionEndpoint: null,
+};
+function fixture(count = 1) {
+  let groups: MachineAgentGroup[] = ["local", "remote"].map((machineId) => ({
+    machineId,
+    available: true,
+    observation: {
+      phase: "live",
+      rows: [],
+      observedSessions: 1,
+      totalSessions: 1,
+      loadingSessions: 0,
+      unavailableSessions: 0,
+      truncatedSessions: 0,
+      refreshingSessionKeys: [],
+      unavailableSessionKeys: [],
+      note: null,
+    },
+    agents: Array.from({ length: count }, (_, i) => ({
+      ...row,
+      key: `${row.key}${i}`,
+      id: `${machineId}:${i}`,
+      machineId,
+      disabled: false,
+    })),
+  }));
+  let listener: (() => void) | undefined;
+  let live = true;
+  let stopped = false;
+  let route = "route-1";
+  let snapshot: HomeAgentSnapshot;
+  const source: ReturnType<typeof createMachineAgents> = {
+    getSnapshot: () => groups,
+    subscribe(fn) {
+      listener = () => fn(groups);
+      listener();
+      return () => {
+        listener = undefined;
+      };
+    },
+    isCurrentTarget: () => live && !stopped,
+    start() {},
+    retry() {},
+    loadMore() {},
+    dispose() {
+      stopped = true;
+    },
+  };
+  const owner = createFleetAgentRoster(
+    source,
+    (id) => `${id}/${route}`,
+    (id) => (id === "local" ? "Local" : "Spark"),
+    (value) => {
+      snapshot = value;
+    },
+    () => "ready",
+  );
+  owner.start();
+  return {
+    owner,
+    snapshot: () => snapshot!,
+    emit: () => listener?.(),
+    replace: () => {
+      route = "replacement";
+    },
+    unavailable: () => {
+      live = false;
+    },
+    setRows(next: MachineAgentGroup[]) {
+      groups = next;
+      listener?.();
+    },
+    stopped: () => stopped,
+  };
+}
+
+test("duplicate host identities resolve through distinct opaque machine routes and stable keys", () => {
+  const f = fixture();
+  const [local, remote] = f.snapshot().rows;
+  assert.notEqual(local!.key, remote!.key);
+  assert.equal(f.owner.resolve(local!.key)?.selection, "local/route-1");
+  assert.equal(f.owner.resolve(remote!.key)?.selection, "remote/route-1");
+  assert.equal(remote!.sessionName, "Spark · Workspace");
+  f.emit();
+  assert.deepEqual(
+    f.snapshot().rows.map((r) => r.key),
+    [local!.key, remote!.key],
+  );
+  const detached = f.owner.resolve(remote!.key)!;
+  (detached.row as { paneId: string }).paneId = "forged";
+  assert.equal(f.owner.resolve(remote!.key)?.row.paneId, row.paneId);
+  const wire = JSON.stringify(homeAgentPublication(f.snapshot(), 1));
+  assert.equal(wire.includes("route-1"), false);
+  assert.equal(wire.includes("server"), false);
+  f.owner.dispose();
+});
+
+test("replacement and unavailable authority reject old keys even before next publication", () => {
+  const f = fixture();
+  const key = f.snapshot().rows[0]!.key;
+  f.replace();
+  assert.equal(f.owner.resolve(key), null);
+  f.emit();
+  assert.notEqual(f.snapshot().rows[0]!.key, key);
+  const current = f.snapshot().rows[0]!.key;
+  f.unavailable();
+  assert.equal(f.owner.resolve(current), null);
+  f.emit();
+  assert.ok(f.snapshot().rows.every((row) => row.disabled));
+  f.owner.dispose();
+  assert.equal(f.stopped(), true);
+  assert.equal(f.owner.resolve(current), null);
+});
+
+test("global roster cap also caps selectable targets and removed rows are revoked", () => {
+  const f = fixture(200);
+  const snapshot = f.snapshot();
+  const wire = homeAgentPublication(snapshot, 1);
+  assert.equal(wire.rows.length, 256);
+  assert.equal(wire.truncatedRows, 144);
+  assert.ok(wire.rows.every((row) => f.owner.resolve(row.key)));
+  assert.ok(snapshot.rows.slice(256).every((row) => f.owner.resolve(row.key) === null));
+  const key = wire.rows[0]!.key;
+  f.setRows([]);
+  assert.equal(f.owner.resolve(key), null);
+  f.owner.dispose();
+});
+
+test("fresh agent identity comparison rejects changed session, pane, agent or server", () => {
+  assert.equal(sameAgentTarget(row, structuredClone(row)), true);
+  for (const changed of [
+    { ...row, paneId: "other" },
+    { ...row, agentId: "replacement" },
+    { ...row, liveSessionId: "replacement" },
+    { ...row, daemonInstanceId: "replacement" },
+    { ...row, server: { ...row.server!, generation: "replacement" } },
+  ])
+    assert.equal(sameAgentTarget(row, changed), false);
+});
+
+test("empty initial, settled unavailable and mixed empty fleets preserve observation state", () => {
+  const f = fixture(0);
+  assert.equal(f.snapshot().phase, "live");
+  f.setRows([]);
+  assert.equal(f.snapshot().phase, "loading");
+  const unavailable: MachineAgentGroup = {
+    machineId: "remote",
+    available: false,
+    agents: [],
+    observation: {
+      phase: "unavailable",
+      rows: [],
+      observedSessions: 0,
+      totalSessions: 1,
+      loadingSessions: 0,
+      unavailableSessions: 1,
+      truncatedSessions: 0,
+      refreshingSessionKeys: [],
+      unavailableSessionKeys: [],
+      note: null,
+    },
+  };
+  f.setRows([unavailable]);
+  assert.equal(f.snapshot().phase, "unavailable");
+  f.setRows([
+    unavailable,
+    {
+      machineId: "local",
+      available: true,
+      agents: [],
+      observation: {
+        ...unavailable.observation!,
+        phase: "live",
+        observedSessions: 1,
+        unavailableSessions: 0,
+      },
+    },
+  ]);
+  assert.equal(f.snapshot().phase, "partial");
+  f.owner.dispose();
+});
+
+test("fresh inventory rejects removed or replaced agents and never opens another pane", async () => {
+  let verified = 0;
+  const verify = async () => {
+    verified++;
+  };
+  assert.equal(
+    await verifyFleetAgentTarget(
+      row,
+      async () => [row],
+      verify,
+      () => true,
+    ),
+    row.paneId,
+  );
+  assert.equal(verified, 1);
+  for (const rows of [[], [{ ...row, agentId: "replacement" }]]) {
+    await assert.rejects(
+      verifyFleetAgentTarget(
+        row,
+        async () => rows,
+        verify,
+        () => true,
+      ),
+      /no longer available/,
+    );
+  }
+  assert.equal(verified, 1);
+});
+
+test("navigation/presence and route replacement fence delayed inventory and route verification", async () => {
+  for (const boundary of ["inventory", "route"]) {
+    let current = true;
+    let release!: () => void;
+    const delay = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pending = verifyFleetAgentTarget(
+      row,
+      async () => {
+        if (boundary === "inventory") await delay;
+        return [row];
+      },
+      async () => {
+        if (boundary === "route") await delay;
+      },
+      () => current,
+    );
+    await new Promise((resolve) => setImmediate(resolve));
+    current = false;
+    release();
+    await assert.rejects(pending, /selection changed/);
+  }
+  await assert.rejects(
+    verifyFleetAgentTarget(
+      row,
+      async () => [row],
+      async () => {
+        throw new Error("route replaced");
+      },
+      () => true,
+    ),
+    /route replaced/,
+  );
+});

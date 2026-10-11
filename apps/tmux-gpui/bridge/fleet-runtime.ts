@@ -40,6 +40,8 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
   return {
     start: () => fleet.start(),
     publication: fleet.publication,
+    observeAgents: fleet.observeAgents,
+    resolveAgent: fleet.resolveAgent,
     retry: fleet.retry,
     disconnect: fleet.disconnect,
     reconcile: (profiles: readonly SavedMachine[]) => manager.reconcile(profiles),
@@ -78,7 +80,7 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
         }
         check();
         host = discovered;
-        return { host, sessionId: selection.session.liveSessionId! };
+        return { host, sessionId: selection.session.liveSessionId!, session: selection.session };
       } catch (error) {
         if (selected === selection) clear();
         throw error;

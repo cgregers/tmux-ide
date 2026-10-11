@@ -96,16 +96,19 @@ Ordinary sessions without a workspace remain selectable for daemon promotion.
 The agent observer, authenticated event transport and multi-machine aggregation
 owner are now renderer-neutral under the daemon's Node-only `machine-agents`
 subpath. TUI adapters retain selected-machine discovery and singleton defaults;
-native callers must supply their manager. This extraction does not yet replace
-the GPUI browser's single-host agent publication. Fleet-wide native projection,
-bounded coverage and exact agent-selection tokens remain the next integration.
+native callers must supply their manager. The default local GPUI browser now uses
+that owner for foreground Home, with a globally bounded native roster and opaque
+machine/session/agent keys. Opening validates fresh semantic/native ownership and
+the captured route across asynchronous work. Private-host and Workspace rosters
+retain their previous paths. See `evidence/native-fleet-agents-2026-10-11/`;
+real cross-machine agent clicks and native physical acceptance remain open.
 Local/remote discovery can resolve an explicitly selected server ID and generation;
 private SSH host files now support that scope without reconnecting the transport.
 The default local browser now owns the shared fleet manager and publishes groups
 to native Home and the F5/F6 session picker. Selection uses the captured token and
 the existing daemon promotion, pane catalog and input path. Private host-file
-previews remain single-host and isolated. Fleet-wide agent aggregation, attention
-navigation, real multi-machine SSH and release qualification remain open.
+previews remain single-host and isolated. Machine filters, attention navigation,
+real multi-machine SSH and release qualification remain open.
 
 The bridge now has a tested `remote-route.ts` adapter that borrows one verified
 SSH epoch, rejects stale inventory, and cancels on retirement. The browser now
@@ -271,3 +274,31 @@ replacement/removal retires it. A catalog failure does not necessarily close the
 SSH transport, so Disconnect can remain available beside an unavailable catalog.
 Selected route retirement reuses the existing input/child retirement path. Real
 remote SSH/PTY acceptance remains a separate gate.
+
+
+## Design direction — 11 October comparison
+
+Keep TUI information architecture and daemon authority. Adopt consistent native
+components rather than translating each TUI action into a separately styled row.
+Zed's `crates/ui/src/components/button` and `tab.rs` show reusable control families,
+explicit selected states and reserved icon/action slots. Herdr's existing
+`sidebar/row.rs`, `tokens.rs` and `wash.rs` provide measured label budgets,
+primary/secondary/muted typography and restrained machine-group color.
+
+Next visual acceptance should prioritize:
+
+- One compact titlebar/navigation band, aligned with native traffic lights.
+- Machine/session sidebar hierarchy with aligned status/icon slots, measured long
+  labels and quiet contextual actions; selection and keyboard focus stay distinct.
+- Consistent window tabs and compact pane headers; terminal content gets priority.
+- Home as a fleet overview with aligned agent/session rows and useful empty/error
+  states, replacing oversized disconnected sections.
+- A centered F5 command palette with search, groups, shortcut hints, keyboard
+  selection and explicit disabled actions; coherent machine dialogs.
+- Shared spacing, typography, icon sizes, control heights and semantic colors
+  across all existing tmux-ide themes. Apply macOS material to surrounding chrome
+  only after hierarchy/contrast is sound; keep terminal backgrounds legible.
+
+Sources inspected: https://github.com/zed-industries/zed/tree/main/crates/ui/src/components,
+https://zed.dev/docs/appearance, https://github.com/penso/herdr-gpui and the vendored
+Herdr modules above. These are design targets, not completed visual parity claims.

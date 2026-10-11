@@ -1,3 +1,8 @@
+import { verifyFleetAgentTarget } from "./fleet-agents.ts";
+import {
+  projectHomeAgentRows,
+  type HomeAgentRow,
+} from "../../../packages/presentation/src/home-agent-roster.ts";
 import { createNativeFleetRuntime } from "./fleet-runtime.ts";
 import { FleetSelectionError } from "./fleet.ts";
 import { prepareMachineConnection } from "./add-machine.ts";
@@ -272,9 +277,12 @@ let active:
 
 let agentOwner: ReturnType<typeof createHomeAgentObserver> | undefined;
 let agentPublication: ReturnType<typeof homeAgentPublication> | null = null;
+let stopFleetAgents: (() => void) | undefined;
 let agentRevision = 0;
 let agentTimer: ReturnType<typeof setTimeout> | undefined;
 function retireAgents() {
+  stopFleetAgents?.();
+  stopFleetAgents = undefined;
   clearTimeout(agentTimer);
   agentTimer = undefined;
   agentOwner?.dispose();
@@ -283,6 +291,15 @@ function retireAgents() {
 }
 function startAgents() {
   retireAgents();
+  if (fleet && surface === "home" && foreground && !stopped) {
+    const token = request;
+    stopFleetAgents = fleet.observeAgents((value) => {
+      if (stopped || !foreground || surface !== "home" || request !== token) return;
+      agentPublication = homeAgentPublication(value, ++agentRevision);
+      publish();
+    });
+    return;
+  }
   const host = catalog,
     token = request,
     observedSurface = surface,
@@ -359,6 +376,84 @@ function startAgents() {
     }
   }
   void refreshAgents();
+}
+
+function launchFleetSelection(selection: string, token: number, agent?: HomeAgentRow) {
+  if (!fleet) throw new FleetSelectionError();
+  selectedFleet = true;
+  selectedMachineProfile = null;
+  savedMachineRetired = false;
+  machineRouteRevision++;
+  hostSource?.dispose();
+  hostSource = undefined;
+  catalog?.dispose();
+  catalog = undefined;
+  const owner = fleet;
+  const routeRevision = machineRouteRevision;
+  const capturedPresence = presenceRevision;
+  const current = () =>
+    !stopped &&
+    request === token &&
+    fleet === owner &&
+    routeRevision === machineRouteRevision &&
+    (!agent || (foreground && capturedPresence === presenceRevision));
+  // SSH identity/inventory work must not block Home or another selection.
+  void owner
+    .select(selection)
+    .then(async ({ host, sessionId, session }) => {
+      if (!current()) return;
+      const fresh = createPreviewCatalog(host);
+      catalog = fresh;
+      const list = await fresh.sessions();
+      if (!current() || catalog !== fresh) return;
+      if (list.length > 512) throw new Error("Too many sessions for preview");
+      sessions = list.map(sessionChoice);
+      if (!sessions.some((session) => session.id === sessionId)) throw new FleetSelectionError();
+      const choices = await fresh.panes(sessionId);
+      if (!current() || catalog !== fresh) return;
+      if (choices.length > 512) throw new Error("Too many panes for preview");
+      let target: (typeof choices)[number] | undefined = choices[0];
+      if (agent) {
+        if (!session.workspaceName) throw new FleetSelectionError();
+        const identity = {
+          id: session.sourceId,
+          name: session.name,
+          liveSessionId: sessionId,
+          workspaceName: session.workspaceName,
+          server: session.server,
+        };
+        const paneId = await verifyFleetAgentTarget(
+          agent,
+          async () => {
+            const shell = await fresh.readHomeShell(identity, new AbortController().signal);
+            return projectHomeAgentRows(identity, {
+              resource: shell.resource,
+              daemon: { instanceId: shell.server.generation },
+            });
+          },
+          owner.read,
+          () => current() && catalog === fresh,
+        );
+        target = choices.find((pane) => pane.semanticPaneId === paneId);
+        if (!target) throw new FleetSelectionError();
+      }
+      panes = choices;
+      selectedSession = sessionId;
+      sessionCatalogComplete = panes.length === 0;
+      status = panes.length ? "Loading windows" : "No available panes";
+      publish();
+      if (target) {
+        if (agent) selectedPane = target.semanticPaneId;
+        await openPane(target, token, !agent, undefined, agent ? current : undefined);
+      }
+      if (current()) startAgents();
+    })
+    .catch(() => {
+      if (!current()) return;
+      inputReady = false;
+      status = "Fleet session unavailable — return Home and select it again";
+      publish();
+    });
 }
 
 function publish() {
@@ -1161,6 +1256,39 @@ async function command(value: unknown) {
     if (!stopped && request === token) startAgents();
     return;
   }
+  if (cmd.type === "open-agent" && fleet) {
+    const target = fleet.resolveAgent(cmd.key);
+    if (cmd.request <= request) throw new Error("Stale agent command");
+    const valid =
+      cmd.fromRequest === request &&
+      surface === "home" &&
+      foreground &&
+      agentPublication?.revision === cmd.rosterRevision &&
+      agentPublication.rows.some((row) => row.key === cmd.key && row.available) &&
+      target;
+    request = cmd.request;
+    const token = request;
+    const capturedPresence = presenceRevision;
+    retireAgents();
+    sessionCatalogComplete = false;
+    initialPane = null;
+    snapshot = null;
+    inputReady = false;
+    selectedPane = null;
+    paneActions = null;
+    await retire();
+    if (!valid || !target) throw new Error("Fleet agent selection is stale");
+    if (stopped || token !== request || !foreground || capturedPresence !== presenceRevision)
+      return;
+    surface = "workspace";
+    selectedSession = null;
+    panes = [];
+    layouts = [];
+    status = "Loading agent";
+    publish();
+    launchFleetSelection(target.selection, token, target.row);
+    return;
+  }
   if (cmd.type === "open-agent") {
     const owner = agentOwner,
       host = catalog;
@@ -1238,51 +1366,7 @@ async function command(value: unknown) {
   if (stopped || token !== request) return;
   if (cmd.type === "fleet-session") {
     if (!fleet) throw new FleetSelectionError();
-    selectedFleet = true;
-    selectedMachineProfile = null;
-    savedMachineRetired = false;
-    machineRouteRevision++;
-    hostSource?.dispose();
-    hostSource = undefined;
-    catalog?.dispose();
-    catalog = undefined;
-    const owner = fleet;
-    const routeRevision = machineRouteRevision;
-    // SSH identity/inventory work must not block Home or another selection.
-    void owner
-      .select(cmd.selection)
-      .then(async ({ host, sessionId }) => {
-        if (
-          stopped ||
-          request !== token ||
-          fleet !== owner ||
-          routeRevision !== machineRouteRevision
-        )
-          return;
-        const fresh = createPreviewCatalog(host);
-        catalog = fresh;
-        const list = await fresh.sessions();
-        if (stopped || request !== token || catalog !== fresh) return;
-        if (list.length > 512) throw new Error("Too many sessions for preview");
-        sessions = list.map(sessionChoice);
-        if (!sessions.some((session) => session.id === sessionId)) throw new FleetSelectionError();
-        const choices = await fresh.panes(sessionId);
-        if (stopped || request !== token || catalog !== fresh) return;
-        if (choices.length > 512) throw new Error("Too many panes for preview");
-        panes = choices;
-        selectedSession = sessionId;
-        sessionCatalogComplete = panes.length === 0;
-        status = panes.length ? "Loading windows" : "No available panes";
-        publish();
-        if (panes[0]) await openPane(panes[0], token, true);
-        if (!stopped && request === token) startAgents();
-      })
-      .catch(() => {
-        if (stopped || request !== token || routeRevision !== machineRouteRevision) return;
-        inputReady = false;
-        status = "Fleet session unavailable — return Home and select it again";
-        publish();
-      });
+    launchFleetSelection(cmd.selection, token);
     return;
   }
   if (cmd.type === "home" || cmd.type === "machine" || cmd.type === "machine-profile") {
@@ -1377,9 +1461,11 @@ async function command(value: unknown) {
 }
 // Discovery stays off the command loop so Local can always cancel a slow SSH dial.
 function launchRefresh(token: number) {
+  if (fleet && surface === "home" && foreground) startAgents();
   void refresh(token).catch((error) => {
     if (stopped || request !== token) return;
     homePhase = "unavailable";
+    if (fleet && surface === "home") startAgents();
     status =
       error instanceof DaemonCompatibilityError ||
       error instanceof DaemonDiscoveryError ||
