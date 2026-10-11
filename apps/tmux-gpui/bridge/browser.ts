@@ -1,3 +1,4 @@
+import { prepareMachineConnection } from "./add-machine.ts";
 import {
   createNativeMachineRegistry,
   MachineRegistryError,
@@ -359,7 +360,9 @@ function publish() {
       status:
         inputReady && editorMessage?.request === request && editorMessage.id === selectedPane
           ? editorMessage.text
-          : status,
+          : surface === "home" && machineMessage
+            ? `${status} · ${machineMessage}`
+            : status,
       snapshot,
       copyRegion: snapshot ? copyRegion : null,
       regions: snapshot ? regions : [],
@@ -1185,7 +1188,46 @@ async function command(value: unknown) {
   publish();
   await retire();
   if (stopped || token !== request) return;
+  if (cmd.type === "machine" && cmd.sshTarget !== null) {
+    selectedMachineProfile = null;
+    savedMachineRetired = true;
+    machineMessage = null;
+    machineRouteRevision++;
+    hostSource?.dispose();
+    hostSource = undefined;
+    catalog?.dispose();
+    catalog = undefined;
+    if (!machines) {
+      machines = createNativeMachineRegistry(machinesChanged);
+      machines.start();
+    }
+    const owner = machines;
+    const current = () => !stopped && request === token && machines === owner;
+    void prepareMachineConnection(owner, cmd.sshTarget, current)
+      .then((result) => {
+        if (!current() || !result) return;
+        selectedMachineProfile = result.persisted ? result.profile : null;
+        savedMachineRetired = false;
+        machineMessage = result.persisted
+          ? null
+          : "Machine not saved locally — this connection attempt is temporary.";
+        hostSource = createPreviewHostSource(process.argv[2]!, retireMachineRoute);
+        hostSource.select(result.profile.sshTarget, result.profile.expectedEnvironmentId);
+        launchRefresh(token);
+      })
+      .catch((error) => {
+        if (!current()) return;
+        homePhase = "unavailable";
+        status =
+          error instanceof MachineRegistryError
+            ? error.message
+            : "Could not add machine — refresh saved machines";
+        publish();
+      });
+    return;
+  }
   if (cmd.type === "machine" || cmd.type === "machine-profile") {
+    machineMessage = null;
     // A refused selection must acknowledge the new request too, or the native
     // client (which already advanced its request) stays stuck on Loading.
     const savedProfile =

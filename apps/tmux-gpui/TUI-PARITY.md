@@ -94,8 +94,11 @@ UUID-based bridge routing landed in `50dd355c`. The native F5 saved-machine
 picker now reads the shared registry, searches labels/SSH targets and submits the
 captured UUID/revision; stale, disabled and unavailable rows cannot connect.
 Dedicated headless checks cover selection fencing, command serialization, Escape,
-input isolation and a failed read queue. Native save/edit/enable/disable/remove
-controls and physical saved-picker acceptance remain pending.
+input isolation and a failed read queue. The native Connect form now attempts a local save before dialing, preserves
+existing saved UUID/pins, and reports an explicitly temporary connection when
+persistence cannot be confirmed and no conflicting profile exists. Late save
+results cannot reconnect after navigation cancellation. Native edit/enable/disable/
+remove controls and physical saved-picker/Add acceptance remain pending.
 Reuse SavedMachineSchema and scoped clients;
 never import the Solid navigation singleton or implement a second SSH stack.
 Cancellation, child cleanup, sanitized failures, generation mismatches and late

@@ -388,6 +388,23 @@ test(
         await readFile(join(directory, "transport.log"), "utf8"),
         transportBeforeRefusal,
       );
+      // Connect by alias uses the existing saved UUID/pin; it never creates an unpinned duplicate.
+      await saveFixture(profile);
+      send({ type: "machine", request: 12, sshTarget: "fixture-only" });
+      const added = await until((event) => event.request === 12 && event.home.phase === "live");
+      assert.equal(added.machines.machines[0].id, profile.id);
+      assert.equal(added.machines.machines[0].expectedEnvironmentId, daemon.environmentId);
+      assert.equal(added.machines.message, null);
+      // Missing local persistence must stay explicit even when remote discovery succeeds.
+      await writeFile(
+        join(directory, "machines.json"),
+        JSON.stringify({ version: 1, machines: [] }),
+      );
+      await until((event) => event.request === 12 && /Saved machine changed/.test(event.status));
+      send({ type: "machine", request: 13, sshTarget: "fixture-only" });
+      const temporary = await until((event) => event.request === 13 && event.home.phase === "live");
+      assert.match(temporary.status, /not saved locally/);
+      assert.equal(temporary.machines.machines.length, 0);
       child.stdin.end();
       const timer = setTimeout(() => child.kill("SIGKILL"), 5000);
       try {
