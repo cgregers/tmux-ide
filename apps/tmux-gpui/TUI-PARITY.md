@@ -310,8 +310,8 @@ Herdr modules above. These are design targets, not completed visual parity claim
 Independent source comparison identified these concrete gaps. None is complete
 merely because an equivalent-looking button exists:
 
-1. F6 session switching now uses the F5 popover family. F7 attention still needs
-   the scoped observation and action lifetime described below.
+1. F6/F7 now use the shared popover and scoped observation lifetime below.
+   Remaining physical acceptance includes narrow/dark/IME and remote destinations.
 2. F5 needs scoped machine/session/agent destinations and useful previews, beyond
    static commands and retry/disconnect (`application-shell-overlays.tsx`).
 3. Home agent rows now have selected-row arrows, Page Up/Down, Home/End and
@@ -364,6 +364,21 @@ and correlated rejection for invalid scope/revision/key. Native workspace gates 
 Clippy configurations, formatting, size and debug build). Physical light-theme
 Home and Workspace agent activation, paste isolation, outside dismissal and
 unchanged pane dimensions passed. F7 narrow/dark/OS-IME and remote acceptance
-remain open; this is not released parity. Unpromoted-session rows remain disabled
-until ordinary session opening establishes native identity. Evidence:
+remain open; this is not released parity. Discovered fleet agent admission was
+subsequently added in c8c1efca and physically qualified for Home/F7 with exact
+keyboard/paste delivery to duplicate-label second panes; see
+`evidence/native-agent-admission-2026-10-11/`. Original F7 evidence:
 `evidence/native-f7-attention-2026-10-11/`.
+
+
+### Next observer recovery slice
+
+TUI Home observation Retry / Load more delegates to resident `machine-agents`
+`retry()` / `loadMore()`; the latter expands each observer by 32 sessions. Native
+Retry connection already exists and is a distinct operation. Add captured
+Home request/revision recovery commands through the shared fleet-agent owner,
+with truthful availability and unchanged F7 subscription, search and selection.
+Qualify observation failure recovery without reconnecting healthy machines,
+more than 32 sessions, and stale/background rejection. This does not resolve the
+separate 256-row publication cap. Machine filtering must use exact machine identity
+before truncation, recompute Home coverage, and leave global F7 scope unchanged.
