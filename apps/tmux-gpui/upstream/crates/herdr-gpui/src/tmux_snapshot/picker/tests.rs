@@ -8,6 +8,7 @@ mod machine;
 mod navigation_keys;
 mod popover;
 mod saved_machines;
+mod session_popover;
 use crate::tmux_snapshot::{decode, presence::Presence};
 use core::prelude::v1::test;
 use std::{

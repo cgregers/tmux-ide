@@ -814,7 +814,7 @@ impl SnapshotView {
             .child(application_tabs)
             .child(main)
             .children(
-                self.commands_popover(window, cx)
+                self.picker_popover(window, cx)
                     .map(|popover| deferred(popover).with_priority(2)),
             )
             .children(

@@ -3,6 +3,7 @@ use super::{SnapshotView, browser, browser_ui::Selection};
 use gpui::{prelude::*, *};
 pub(super) mod filters;
 mod fleet;
+mod selection;
 
 /// Before the first browser publication, absence of a catalog is not an empty catalog.
 pub(super) fn initial_state() -> browser::State {
@@ -75,6 +76,11 @@ impl SnapshotView {
     ) -> AnyElement {
         self.refresh_new_session(cx);
         self.prepare_home_filter(cx);
+        self.reconcile_home_selection(cx);
+        if let Some(controls) = &mut self.home_filter {
+            controls.rendered_revision =
+                self.browser_state.home_agents.as_ref().map(|r| r.revision);
+        }
         let theme = self.theme();
         let request = self.browser_request;
         let connected = self.browser_commands.is_some();
@@ -267,6 +273,9 @@ impl SnapshotView {
             .min_w_0()
             .h_full()
             .overflow_y_scroll()
+            .when_some(self.home_filter.as_ref(), |element, controls| {
+                element.track_scroll(&controls.page_scroll)
+            })
             .flex()
             .flex_col()
             .items_center()

@@ -93,6 +93,18 @@ impl SnapshotView {
                     .child("No matching loaded agents"),
             );
         }
+        let mut rows = div()
+            .id("home-agent-list")
+            .w_full()
+            .min_w_0()
+            .max_h(px(240.))
+            .overflow_y_scroll()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .when_some(self.home_filter.as_ref(), |element, controls| {
+                element.track_scroll(&controls.scroll)
+            });
         for (index, row) in roster
             .rows
             .iter()
@@ -104,6 +116,7 @@ impl SnapshotView {
             let mut item = div()
                 .id(("tmux-home-agent", index))
                 .debug_selector(move || format!("tmux-home-agent-{index}"))
+                .flex_none()
                 .min_w_0()
                 .w_full()
                 .overflow_hidden()
@@ -112,7 +125,17 @@ impl SnapshotView {
                 .gap_3()
                 .p_3()
                 .rounded(px(crate::config::corners::PANEL))
-                .bg(rgb(theme.surface))
+                .bg(rgb(
+                    if self
+                        .home_filter
+                        .as_ref()
+                        .is_some_and(|c| c.selected.as_deref() == Some(row.key.as_str()))
+                    {
+                        theme.active
+                    } else {
+                        theme.surface
+                    },
+                ))
                 .child(
                     div()
                         .flex_1()
@@ -153,8 +176,8 @@ impl SnapshotView {
                         this.home_agent_select(request, revision, &key, window, cx);
                     }));
             }
-            body = body.child(item);
+            rows = rows.child(item);
         }
-        Some(body.into_any_element())
+        Some(body.child(rows).into_any_element())
     }
 }

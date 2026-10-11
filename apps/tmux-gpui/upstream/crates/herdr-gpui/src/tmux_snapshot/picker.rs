@@ -566,17 +566,19 @@ impl SnapshotView {
     pub(super) fn picker_in_sidebar(&self) -> bool {
         self.picker
             .as_ref()
-            .is_some_and(|picker| matches!(picker.mode, Mode::Navigation | Mode::Theme))
+            .is_some_and(|picker| picker.mode == Mode::Theme)
     }
 
     /// Herdr menu chrome supplies occlusion, themed borders and shadow; like the
     /// TUI palette this floats above the unchanged workspace near its top sixth.
-    pub(super) fn commands_popover(
+    pub(super) fn picker_popover(
         &self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        self.picker.as_ref().filter(|p| p.mode == Mode::Commands)?;
+        self.picker
+            .as_ref()
+            .filter(|p| matches!(p.mode, Mode::Commands | Mode::Navigation))?;
         let theme = self.theme();
         let viewport = window.viewport_size();
         Some(
@@ -638,6 +640,9 @@ impl SnapshotView {
             .gap_1()
             .when(picker.mode == Mode::Commands, |panel| {
                 panel.child(div().px_2().py_1().child("Commands · F5"))
+            })
+            .when(picker.mode == Mode::Navigation, |panel| {
+                panel.child(div().px_2().py_1().child("Sessions and panes · F6"))
             })
             .child(picker.search.clone());
         if picker.mode == Mode::Theme

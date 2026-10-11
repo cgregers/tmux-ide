@@ -38,6 +38,11 @@ impl Filter {
 pub(in crate::tmux_snapshot) struct Controls {
     pub(super) search: Entity<SearchInput>,
     pub(super) filter: Filter,
+    pub(super) selected: Option<String>,
+    pub(super) rendered_revision: Option<u64>,
+    pub(super) visible: Vec<(String, bool)>,
+    pub(super) scroll: ScrollHandle,
+    pub(super) page_scroll: ScrollHandle,
     _changed: Subscription,
     theme: crate::config::Theme,
 }
@@ -55,6 +60,11 @@ impl SnapshotView {
             self.home_filter = Some(Controls {
                 search,
                 filter: Filter::All,
+                selected: None,
+                rendered_revision: None,
+                visible: Vec::new(),
+                scroll: ScrollHandle::new(),
+                page_scroll: ScrollHandle::new(),
                 _changed: changed,
                 theme: theme.clone(),
             });
@@ -99,6 +109,9 @@ impl SnapshotView {
             return false;
         }
         self.prepare_home_filter(cx);
+        if self.home_agent_key(event, window, cx) {
+            return true;
+        }
         let Some(controls) = &mut self.home_filter else {
             return false;
         };
@@ -175,7 +188,7 @@ impl SnapshotView {
                 div()
                     .text_sm()
                     .text_color(rgb(theme.muted))
-                    .child("/ Search · 0 All · W Working · A Attention · Esc Clear search"),
+                    .child("↑↓ Select · Enter Open · / Search · 0 All · W Working · A Attention · Esc Clear search"),
             )
             .into_any_element()
     }

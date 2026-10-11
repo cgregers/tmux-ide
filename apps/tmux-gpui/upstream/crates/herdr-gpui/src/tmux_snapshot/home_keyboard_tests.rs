@@ -136,3 +136,6 @@ fn home_without_terminal_surface_owns_shortcuts_and_picker_text(cx: &mut TestApp
         assert!(!view.browser_state.input_ready);
     });
 }
+
+#[path = "home_keyboard_tests/selection.rs"]
+mod selection;

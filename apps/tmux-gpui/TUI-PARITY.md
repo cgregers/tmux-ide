@@ -28,8 +28,8 @@ commands using the existing picker. It has keyboard/input-isolation tests and
 physical light/dark verification. F1 Home, F2 Terminals and F6 session search now reuse the native tab/picker
 owners, and the F5 list exposes Terminals and shortcut labels. Modified function
 keys remain available to the terminal. F5 now floats in a centered popover over the unchanged view; shared control sizing
-and theme treatments are consistent. Full TUI action vocabulary and F6/F7
-convergence remain unfinished. See `evidence/native-f5-popover-2026-10-11/`. Shared icon tabs and sidebar buttons landed in
+and theme treatments are consistent. F6 now shares this popover; full TUI action vocabulary and fleet-wide F7
+attention remain unfinished. See `evidence/native-f5-popover-2026-10-11/`. Shared icon tabs and sidebar buttons landed in
 `2b83924c`; see `evidence/native-controls-2026-10-11/` and `evidence/native-f5-2026-10-11/`.
 
 - [ ] Match TUI information hierarchy: machine, session, window, pane and agent status.
@@ -310,12 +310,14 @@ Herdr modules above. These are design targets, not completed visual parity claim
 Independent source comparison identified these concrete gaps. None is complete
 merely because an equivalent-looking button exists:
 
-1. F6 session switching and F7 attention should use the same popover family as
-   TUI F5 (`application-fleet-switcher.tsx`), rather than a sidebar replacement.
+1. F6 session switching now uses the F5 popover family. F7 attention still needs
+   the scoped observation and action lifetime described below.
 2. F5 needs scoped machine/session/agent destinations and useful previews, beyond
    static commands and retry/disconnect (`application-shell-overlays.tsx`).
-3. Home agent rows need selected-row arrows, Page Up/Down, Home/End and Enter,
-   preserving captured roster/route authority (`application-home-agent-roster.tsx`).
+3. Home agent rows now have selected-row arrows, Page Up/Down, Home/End and
+   Enter. Selection uses opaque keys and displayed roster revision; replaced rows
+   cannot be opened before redraw. Physical nested-scroll/IME qualification
+   remains distinct from headless controls.
 4. Home needs machine filtering, observation Retry and Load more; connection retry
    is distinct. Reuse the shared observation owner rather than duplicating it.
 5. Preserve machine/server/session hierarchy and qualify favorites/collapse, so
@@ -326,3 +328,22 @@ Popover physical acceptance: normal/narrow Home and Workspace geometry; outside
 click dismissal without underlying action/input; wheel isolation; marked IME and
 paste ownership; Escape focus restoration without clearing interrupted-input
 state; disabled/stale commands; light/dark contrast and resize while open.
+
+
+### Fleet-wide F7 dependency
+
+TUI F7 preserves the current view and filters enabled agent destinations by exact
+`attention: true`. Native `homeAgents` is published only on foreground Home;
+`workspaceAgents` covers the selected session. Neither is a global attention feed
+for a popover over Workspace. Do not substitute a Home redirect, cached roster or
+selected-session list for fleet-wide attention.
+
+Add a bounded observation lifetime for the open F7 popover using the existing
+fleet-agent owner. Admission must bind request, roster revision and opaque route
+key, preserving fresh identity checks without weakening Home-only activation.
+Retire on dismiss, background, navigation, connection retirement and shutdown.
+Distinguish loading/unavailable/truncated from an empty attention result. Qualify
+Home and Workspace, duplicate labels across machines, replaced routes, stale
+revisions, dismissal/reopen, background during activation and no underlying
+terminal input/resize. Existing Home Attention filtering also includes blocked
+and failed states; F7 must use the TUI's exact attention predicate.
