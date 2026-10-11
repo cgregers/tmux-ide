@@ -1,3 +1,4 @@
+import { shellEscape } from "./shell.ts";
 import {
   createNativeSplitCapabilityProbe,
   createNativeSplitReadiness,
@@ -101,10 +102,19 @@ export function createNativeTmuxServerCatalog(
     assertOpen();
     const raw = await run(
       [
-        "list-panes",
-        "-a",
+        "-N",
+        "if-shell",
         "-F",
-        "#{pid}\t#{session_id}\t#{session_created}\t#{session_name}\t#{pane_id}\t#{session_path}",
+        "#{==:#{server_sessions},0}",
+        "display-message -p 'tmux-ide-empty-catalog-v1'",
+        [
+          "list-panes",
+          "-a",
+          "-F",
+          "#{pid}\t#{session_id}\t#{session_created}\t#{session_name}\t#{pane_id}\t#{session_path}",
+        ]
+          .map(shellEscape)
+          .join(" "),
       ],
       AbortSignal.timeout(2_000),
     );
@@ -113,7 +123,10 @@ export function createNativeTmuxServerCatalog(
       string,
       { summary: LiveSessionSummary; panes: Set<string>; dir: string }
     >();
-    for (const line of raw.trim().split("\n")) {
+    // Only the successful server-side zero-session branch proves emptiness.
+    // Command errors, unsupported formats and unwitnessed blank output stay failures.
+    const lines = raw.trim() === "tmux-ide-empty-catalog-v1" ? [] : raw.trim().split("\n");
+    for (const line of lines) {
       const [pid, id, created, name, pane, dir] = line.split("\t");
       if (
         !pid ||
