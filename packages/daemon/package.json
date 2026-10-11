@@ -29,6 +29,10 @@
       "types": "./dist/command-center/actions/errors.d.ts",
       "default": "./dist/command-center/actions/errors.js"
     },
+    "./machine-catalog": {
+      "types": "./dist/lib/machine-catalog.d.ts",
+      "default": "./dist/lib/machine-catalog.js"
+    },
     "./machine-connections": {
       "types": "./dist/lib/machine-connection-manager.d.ts",
       "default": "./dist/lib/machine-connection-manager.js"
