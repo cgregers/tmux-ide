@@ -91,6 +91,14 @@ Present: theme picker. This is not the complete TUI settings surface.
 
 Use the TUI for product structure and Zed/Herdr for native interaction quality.
 
+- [ ] Establish shared native design tokens: semantic colors mapped to all tmux-ide themes,
+  typography, spacing, radii, borders, elevation and focus states.
+- [ ] Build reusable Icon, IconButton, Button, Tab, PaneHeader, SidebarRow, Menu,
+  Tooltip, Dialog and StatusBadge components; migrate existing chrome to them.
+- [ ] Use one attributed SVG icon family with consistent optical size/stroke,
+  accessible labels and tooltips; keep agent/product logos separate from action icons.
+- [ ] Add a component gallery with light/dark, disabled, hover, selected and keyboard-focus specimens.
+
 - [ ] Compact pane headers with title, selected state and discoverable contextual actions.
 - [ ] Coherent tab strip, overflow and tooltips; distinguish app sections from tmux windows.
 - [ ] Consistent spacing, typography, icon sizes and restrained status indicators.
@@ -112,6 +120,20 @@ before any code reuse; Herdr's license does not cover Zed code.
 - [ ] First launch can establish supported daemon connectivity without developer setup.
 - [ ] Signing/notarization and clean-machine install, update, rollback and removal verified.
 - [ ] Publish explicit supported capabilities and remaining limitations.
+
+## 10 Embedded browser and VS Code
+
+Explicit native product scope, beyond the TUI parity baseline. The external VS Code
+launcher does not satisfy this requirement. See [upstream research](HERDR-DESIGN-RESEARCH.md).
+
+- [ ] Adapt Herdr browser tabs and native webview lifecycle to native workspace groups.
+- [ ] Handle webview focus, resizing, overlay occlusion, navigation and close correctly.
+- [ ] Embed VS Code web as a tab or side panel using the selected live workspace context.
+- [ ] Adapt server discovery/supervision, loopback token authentication, readiness,
+  failure/retry and shutdown; preserve explicit user acceptance of server terms.
+- [ ] Keep browser/editor tabs client-owned and distinguish them from tmux windows/panes.
+- [ ] Verify session switches, server exit, app exit and overlays without leaking
+  terminal input or opening a stale/remote path as a local folder.
 
 ## Execution order
 
