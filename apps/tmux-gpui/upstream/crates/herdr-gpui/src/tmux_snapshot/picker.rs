@@ -495,6 +495,9 @@ impl SnapshotView {
         if self.home_search_composing(window, cx) {
             return;
         }
+        if self.home_filter_key(event, window, cx) {
+            return;
+        }
         let key = &event.keystroke;
         if commands::shortcut(key) {
             match key.key.as_str() {

@@ -151,3 +151,6 @@ mod filters;
 
 #[path = "tests/fleet.rs"]
 mod fleet;
+
+#[path = "tests/filter_keys.rs"]
+mod filter_keys;

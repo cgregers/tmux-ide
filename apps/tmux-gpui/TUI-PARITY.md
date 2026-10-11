@@ -37,7 +37,11 @@ vocabulary remain unfinished. Shared icon tabs and sidebar buttons landed in
       attention, preserving coverage, unavailable rows and identity/revision fences.
       Headless tests and physical light/dark checks are recorded in
       `evidence/home-filters-2026-10-11/`. Broader team/project/machine search, machine
-      filters, keyboard shortcuts and remaining physical acceptance stay open.
+      filters and remaining physical acceptance stay open. Home now supports `/`
+      to focus search, `0` All, `w` Working, `a` toggle Attention, and Escape to
+      clear/exit search. Modified keys, dialogs, search typing and marked IME
+      retain their existing ownership; Workspace typing is not intercepted.
+      Native physical qualification of these shortcuts is pending desktop unlock.
 - [ ] Complete sidebar show/hide, grouping, overflow, long labels and keyboard navigation.
 - [ ] Add full command palette with the TUI action vocabulary and contextual availability.
 - [ ] Match help, shortcut reference and relevant user-facing connection diagnostics.

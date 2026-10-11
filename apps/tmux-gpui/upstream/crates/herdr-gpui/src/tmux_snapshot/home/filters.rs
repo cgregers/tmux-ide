@@ -79,6 +79,59 @@ impl SnapshotView {
                 input.focus.is_focused(window) && input.is_composing()
             })
     }
+    pub(in crate::tmux_snapshot) fn home_filter_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let key = &event.keystroke;
+        if self.browser_state.surface != browser::Surface::Home
+            || self.browser_state.home_agents.is_none()
+            || self.picker.is_some()
+            || self.new_session.is_some()
+            || self.pane_actions.is_some()
+            || key.modifiers.platform
+            || key.modifiers.control
+            || key.modifiers.alt
+            || key.modifiers.shift
+        {
+            return false;
+        }
+        self.prepare_home_filter(cx);
+        let Some(controls) = &mut self.home_filter else {
+            return false;
+        };
+        let input = controls.search.read(cx);
+        if input.focus.is_focused(window) {
+            if key.key != "escape" || input.is_composing() {
+                return false;
+            }
+            controls
+                .search
+                .update(cx, |input, cx| input.set_text_selected("", cx));
+            self.terminal_focus.focus(window, cx);
+        } else {
+            match key.key.as_str() {
+                "/" => controls.search.read(cx).focus.clone().focus(window, cx),
+                "0" => controls.filter = Filter::All,
+                "w" => controls.filter = Filter::Working,
+                "a" if !event.is_held => {
+                    controls.filter = if controls.filter == Filter::Attention {
+                        Filter::All
+                    } else {
+                        Filter::Attention
+                    }
+                }
+                "a" => {}
+                _ => return false,
+            }
+        }
+        cx.stop_propagation();
+        window.prevent_default();
+        cx.notify();
+        true
+    }
     pub(super) fn home_filter_controls(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(controls) = &self.home_filter else {
             return div().into_any_element();
@@ -118,6 +171,12 @@ impl SnapshotView {
             .gap_2()
             .child(controls.search.clone())
             .child(tabs)
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(theme.muted))
+                    .child("/ Search · 0 All · W Working · A Attention · Esc Clear search"),
+            )
             .into_any_element()
     }
 }
