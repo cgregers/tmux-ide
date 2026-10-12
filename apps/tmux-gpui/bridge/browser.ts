@@ -1683,6 +1683,7 @@ async function command(value: unknown) {
       publish();
       return;
     }
+    attention.cancel();
     request = cmd.request;
     const token = request;
     const capturedPresence = presenceRevision;
@@ -1704,7 +1705,6 @@ async function command(value: unknown) {
     panes = [];
     layouts = [];
     status = "Loading agent";
-    attention.cancel();
     attentionSelectionRejected = null;
     // Accepted navigation is published before any asynchronous retirement.
     publish();
@@ -1732,6 +1732,7 @@ async function command(value: unknown) {
       host &&
       workspace;
     if (cmd.request <= request) throw new Error("Stale workspace agent command");
+    attention.cancel();
     request = cmd.request;
     sessionCatalogComplete = false;
     initialPane = null;
@@ -1767,6 +1768,7 @@ async function command(value: unknown) {
       agentPublication?.revision === cmd.rosterRevision &&
       agentPublication.rows.some((row) => row.key === cmd.key && row.available) &&
       target;
+    attention.cancel();
     request = cmd.request;
     const token = request;
     const capturedPresence = presenceRevision;
@@ -1807,6 +1809,7 @@ async function command(value: unknown) {
       owner?.isCurrentTarget(row) &&
       host;
     if (cmd.request <= request) throw new Error("Stale agent command");
+    attention.cancel();
     request = cmd.request;
     sessionCatalogComplete = false;
     initialPane = null;
@@ -1836,6 +1839,7 @@ async function command(value: unknown) {
     return;
   }
   if (cmd.request <= request) throw new Error("Stale browser command");
+  attention.cancel();
   retireAgents();
   request = cmd.request;
   sessionCatalogComplete = false;
