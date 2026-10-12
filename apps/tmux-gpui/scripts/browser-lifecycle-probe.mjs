@@ -85,7 +85,10 @@ export function createOracle(options, now = () => performance.now()) {
             groups.length === 1 ? groups[0].sessions.filter((s) => s.id === options.sessionId) : [];
           if (matches.length > 1) throw fail("ambiguous-target");
           if (matches.length !== 1 || typeof matches[0].selection !== "string") return;
-          session = options.sessionId;
+          // Fleet row IDs select routes; selectedSession uses the separate live ID.
+          if (typeof matches[0].sessionId !== "string" || !matches[0].sessionId)
+            throw fail("live-session-unavailable");
+          session = matches[0].sessionId;
           commands.push({ type: "fleet-session", request: 1, selection: matches[0].selection });
         } else {
           if (event.sessions.length !== 1) return;
@@ -184,9 +187,7 @@ export async function observeChild({
         }
         if (buffer.length > LIMIT) throw fail("publication-limit");
       } catch (error) {
-        fatal ??= fail(
-          error.message === "readiness-lost" ? "readiness-lost" : "publication-rejected",
-        );
+        fatal ??= error instanceof ProbeError ? error : fail("publication-rejected");
       }
     });
     send();

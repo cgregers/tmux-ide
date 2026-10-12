@@ -80,7 +80,7 @@ test("real selection uses exact published route and explicit pane, never labels 
     ...options,
     realHost: true,
     machineId: "m2",
-    sessionId: "session",
+    sessionId: "fleet-row",
     paneId: "pane",
   });
   oracle.commands.splice(0);
@@ -88,8 +88,8 @@ test("real selection uses exact published route and explicit pane, never labels 
     ...catalog,
     fleet: {
       groups: [
-        { id: "m1", sessions: [{ id: "session", selection: "wrong" }] },
-        { id: "m2", sessions: [{ id: "session", selection: "exact" }] },
+        { id: "m1", sessions: [{ id: "fleet-row", sessionId: "other-live", selection: "wrong" }] },
+        { id: "m2", sessions: [{ id: "fleet-row", sessionId: "session", selection: "exact" }] },
       ],
     },
   });
@@ -98,10 +98,40 @@ test("real selection uses exact published route and explicit pane, never labels 
   ]);
   oracle.observe({ ...panes, preferredPane: null, panes: [{ id: "other" }, { id: "pane" }] });
   assert.deepEqual(oracle.commands.splice(0), [{ type: "pane", request: 2, id: "pane" }]);
+  oracle.observe(ready);
+  assert.equal(oracle.summary().stage, "stable");
 });
 function fixtureCode(loss = false) {
   return `let buffer='';process.stdin.on('data',chunk=>{buffer+=chunk;let n;while((n=buffer.indexOf('\\n'))>=0){const c=JSON.parse(buffer.slice(0,n));buffer=buffer.slice(n+1);if(c.type==='presence')emit(${JSON.stringify(catalog)});else if(c.type==='session')emit(${JSON.stringify(panes)});else if(c.type==='pane'){emit(${JSON.stringify(ready)});${loss ? `setTimeout(()=>emit(${JSON.stringify({ ...ready, snapshot: null })}),50);` : ""}}else process.exit(9);}});function emit(v){process.stdout.write(JSON.stringify(v)+'\\n')}setInterval(()=>{},1000);`;
 }
+
+test("fleet identity mapping must exist and cannot accept a different live session", () => {
+  for (const sessionId of [null, "live-session"]) {
+    const oracle = createOracle({
+      ...options,
+      realHost: true,
+      machineId: "m",
+      sessionId: "fleet-row",
+      paneId: "pane",
+    });
+    oracle.commands.splice(0);
+    const event = {
+      ...catalog,
+      fleet: {
+        groups: [{ id: "m", sessions: [{ id: "fleet-row", sessionId, selection: "route" }] }],
+      },
+    };
+    if (sessionId === null) {
+      assert.throws(() => oracle.observe(event), /live-session-unavailable/);
+      assert.deepEqual(oracle.commands, []);
+    } else {
+      oracle.observe(event);
+      oracle.commands.splice(0);
+      assert.throws(() => oracle.observe(panes), /session-mismatch/);
+      assert.deepEqual(oracle.commands, []);
+    }
+  }
+});
 test("real child steady observation passes only after interval and retires owned child", async () => {
   const result = await observeChild({
     executable: process.execPath,

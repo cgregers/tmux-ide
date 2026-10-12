@@ -123,3 +123,19 @@ test("each failure category emits once; observation failures never replace lifec
   diagnostic.report("startup");
   assert.equal(writes, 1);
 });
+
+test("source faults preserve a safe specific cause through replica retirement", () => {
+  for (const [reason, code] of [
+    ["state-too-large", "source-state-limit"],
+    ["source-closed", "source-closed"],
+    ["protocol-violation", "source-protocol"],
+    ["PRIVATE_TOKEN", "source-protocol"],
+  ]) {
+    const lines: string[] = [];
+    const diagnostics = createLiveDiagnostics((line) => lines.push(line));
+    diagnostics.sourceFault(reason);
+    diagnostics.report("replica-validation");
+    assert.deepEqual(lines.map(parseDiagnosticLine), [{ code }]);
+    assert.ok(!lines[0].includes("PRIVATE_TOKEN"));
+  }
+});

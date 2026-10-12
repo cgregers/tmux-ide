@@ -1,3 +1,4 @@
+import { createSourceFaultFence } from "./offscreen-source-fault.ts";
 import { createLiveDiagnostics } from "./live-diagnostics.ts";
 import { selectedWindowSurfaces } from "./selected-window-surfaces.ts";
 import { createClosePanePreflight } from "./close-pane.ts";
@@ -207,6 +208,14 @@ try {
   const path = process.argv[2]!;
   const config = connectionSchema.parse(readPrivateConfig(path));
   selectedActionPane = config.semanticPaneId;
+  const sourceFaultFence = createSourceFaultFence(config.semanticPaneId, () => layouts);
+  const stopForVisibleSourceFault = () => {
+    const reason = sourceFaultFence.currentFailure();
+    if (!reason) return false;
+    diagnostics.sourceFault(reason);
+    stop();
+    return true;
+  };
   const visiblePaneIds = config.visiblePaneIds ?? [config.semanticPaneId];
   if (
     !visiblePaneIds.includes(config.semanticPaneId) ||
@@ -398,6 +407,7 @@ try {
         windowLinks = frame.windowLinks;
         layouts = frame.layouts;
         catalogReceived = true;
+        if (stopForVisibleSourceFault()) return;
         semanticWindow =
           frame.layouts.find((layout) =>
             layout.panes.some((pane) => pane.pane === config.semanticPaneId),
@@ -413,6 +423,7 @@ try {
           if (index < 0) layouts.push(frame);
           else layouts[index] = frame;
         }
+        if (stopForVisibleSourceFault()) return;
         semanticWindow = windowForLayout(semanticWindow, config.semanticPaneId, frame);
         if (latest.snapshot) output(latest.snapshot);
       },
@@ -468,6 +479,15 @@ try {
         try {
           const replica = replicas.get(pane);
           if (!replica) throw new Error("Unnegotiated pane");
+          if (message.type === "terminal.delivery.fault") {
+            if (sourceFaultFence.isolate(pane, message.reason)) {
+              replica.retire();
+              return;
+            }
+            diagnostics.sourceFault(message.reason);
+            stop();
+            return;
+          }
           replica.accept(message);
         } catch {
           diagnostics.report("replica-validation");

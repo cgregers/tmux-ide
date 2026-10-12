@@ -3,6 +3,9 @@ const MAX_DIAGNOSTIC_BYTES = 256;
 const STATUSES = {
   "publication-limit": "Terminal display exceeded the safe publication limit",
   "replica-validation": "Terminal state validation failed",
+  "source-state-limit": "Terminal source exceeded its safe state limit",
+  "source-closed": "Terminal source closed",
+  "source-protocol": "Terminal source reported a protocol failure",
   "transport-closed": "Terminal connection closed",
   "transport-error": "Terminal transport failed",
   startup: "Terminal connection could not start",
@@ -70,6 +73,15 @@ export function createLiveDiagnostics(write: (line: string) => void) {
   };
   return {
     report,
+    sourceFault(reason: unknown) {
+      report(
+        reason === "state-too-large"
+          ? "source-state-limit"
+          : reason === "source-closed"
+            ? "source-closed"
+            : "source-protocol",
+      );
+    },
     publication(line: string) {
       if (Buffer.byteLength(line) <= 8 * 1024 * 1024) return;
       report("publication-limit");

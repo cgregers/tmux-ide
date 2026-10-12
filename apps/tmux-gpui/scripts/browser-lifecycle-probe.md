@@ -24,6 +24,10 @@ existing local discovery and saved fleet profiles. Provide exact published machi
 session and semantic pane IDs; labels and first-server/first-pane fallbacks are not
 accepted:
 
+`--session-id` is the exact fleet row `id`. The probe captures that row's separate
+`sessionId` and checks it against subsequent `selectedSession` publications; it
+never reconstructs a live ID from the fleet row ID. A missing mapping is refused.
+
 ```sh
 node apps/tmux-gpui/scripts/browser-lifecycle-probe.mjs \
   --real-host --app '/absolute/path/Tmux IDE CI.app' \
