@@ -89,7 +89,7 @@ try {
     `#!/bin/sh
 set -eu
 unset NODE_OPTIONS NODE_PATH
-app_macos=$(CDPATH= cd -- "$(/usr/bin/dirname -- "$0")" && pwd)
+app_macos=$(CDPATH= cd -P -- "$(/usr/bin/dirname -- "$0")" && pwd -P)
 resources="$app_macos/../Resources"
 if [ "$#" -gt 1 ]; then
   echo 'Usage: tmux-ide-launcher [private-host.json]' >&2
