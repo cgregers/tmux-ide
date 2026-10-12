@@ -58,6 +58,11 @@
   `sidebar::label_text` for labels, and fences row callbacks against the current
   request and catalog. The existing theme and compact row styling are retained;
   this does not import HerdrWindow or its backend actions.
+- `tmux_snapshot/terminal_font.rs` and `picker/fonts.rs` reuse Herdr's
+  `FontConfig`, installed font discovery and symbol fallback resolution for
+  tmux-only family/size preferences. Renderer, selection, IME, wheel and resize
+  geometry consume the same metrics. Preferences are stored separately from
+  Herdr configuration; asynchronous saves invalidate stale native geometry.
 - `tmux_snapshot/appearance.rs` validates optional tmux bridge appearance data;
   shell, browser, search and the existing painter share its applied colors.
   The theme picker reuses SearchInput and theme-aware UI primitives, while
