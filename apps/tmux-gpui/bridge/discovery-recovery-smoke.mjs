@@ -8,6 +8,7 @@ import { spawn, execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { access, readFile, stat } from "node:fs/promises";
 import { constants } from "node:fs";
+import { parseDiagnosticLine, diagnosticStatus } from "./live-diagnostics.ts";
 import { stopFixtureChild } from "./fixture-child.mjs";
 import { resolve, join, isAbsolute } from "node:path";
 import { createScratchFleet } from "../../../scripts/lib/product-fixtures/scratch-fleet.ts";
@@ -50,7 +51,7 @@ async function startFixtureDaemon(fleet) {
       await stopFixtureChild(child);
     } catch (cleanupError) {
       throw new AggregateError([error, cleanupError], "Private daemon startup failed", {
-        cause: error,
+        cause: cleanupError,
       });
     }
     throw error;
@@ -90,7 +91,20 @@ const until = async (predicate) => {
     if (ready) return;
     if (browser && (browser.exitCode !== null || browser.signalCode !== null))
       throw new Error("Home browser exited");
-    assert.ok(Date.now() < deadline, "Home fixture deadline");
+    assert.ok(
+      Date.now() < deadline,
+      "Home fixture deadline " +
+        JSON.stringify({
+          snapshot: !!latest?.snapshot,
+          inputReady: latest?.inputReady,
+          diagnostics: stderr.split("\n").map(parseDiagnosticLine).filter(Boolean),
+          diagnosticStatusVisible: stderr
+            .split("\n")
+            .map(parseDiagnosticLine)
+            .filter(Boolean)
+            .some((d) => latest?.status === diagnosticStatus(d)),
+        }),
+    );
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 };
@@ -213,7 +227,7 @@ try {
       latest?.sequence > baselineSequence &&
       latest.snapshot === null &&
       latest.inputReady === false &&
-      /unavailable/i.test(latest.status),
+      latest.status === diagnosticStatus({ code: "transport-closed", closeCode: 1001 }),
   );
   assert.equal(latest.connection, connection);
   daemon = await startFixtureDaemon(fleet);
@@ -241,7 +255,11 @@ try {
   assert.ok(!capture().includes(staleMarker), "stale request bytes never reached source");
   assert.equal(latest.connection, connection);
   assert.ok(!JSON.stringify(latest).includes(daemon.record.authToken));
-  assert.equal(stderr, "");
+  assert.deepEqual(
+    stderr.trim().split("\n").map(parseDiagnosticLine),
+    [{ code: "transport-closed", closeCode: 1001 }],
+    "Only the controlled daemon-shutdown diagnostic is expected",
+  );
   checkFatal();
 } catch (error) {
   failures.push(error);

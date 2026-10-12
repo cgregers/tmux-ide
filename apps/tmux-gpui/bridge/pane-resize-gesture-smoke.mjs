@@ -1,13 +1,67 @@
+import process from "node:process";
+import console from "node:console";
+import { Buffer } from "node:buffer";
+import { setTimeout, clearTimeout } from "node:timers";
 // Real tmux live-gesture proof, isolated socket/daemon/HOME. No native UI.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { access, readFile, stat, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { stopFixtureChild } from "./fixture-child.mjs";
+import { canonicalDaemonUrl } from "../../../packages/daemon/src/lib/canonical-daemon.ts";
 import { resolve, join, isAbsolute } from "node:path";
 import { createScratchFleet } from "../../../scripts/lib/product-fixtures/scratch-fleet.ts";
 import { startDaemon } from "../../../scripts/lib/product-fixtures/daemon.ts";
 import { listTmuxServers } from "../../../packages/daemon-client/src/tmux-server-client.ts";
+const privateCli = process.env.TMUX_GPUI_TEST_CLI;
+if (privateCli !== undefined) {
+  assert.ok(isAbsolute(privateCli), "TMUX_GPUI_TEST_CLI must be absolute");
+  assert.ok((await stat(privateCli)).isFile(), "Private CLI must be a regular file");
+  await access(privateCli, constants.R_OK);
+}
+async function startFixtureDaemon(fleet) {
+  if (privateCli === undefined) return startDaemon(fleet);
+  const child = spawn(process.execPath, [privateCli, "--headless"], {
+    env: { ...process.env, ...fleet.environment },
+    stdio: "ignore",
+  });
+  let childError;
+  child.on("error", (error) => {
+    childError = error;
+  });
+  try {
+    const deadline = Date.now() + 45000;
+    for (;;) {
+      if (childError) throw childError;
+      assert.ok(child.exitCode === null && child.signalCode === null, "Private daemon exited");
+      assert.ok(Date.now() < deadline, "Private daemon startup deadline");
+      let record;
+      try {
+        record = JSON.parse(await readFile(join(fleet.daemonInfoDir, "daemon.json"), "utf8"));
+      } catch {
+        /* Await the owned atomic discovery record. */
+      }
+      if (record?.pid === child.pid && typeof record.authToken === "string" && record.instanceId)
+        return {
+          record,
+          baseUrl: canonicalDaemonUrl("http", record.bindHostname, record.port),
+          stop: () => stopFixtureChild(child),
+        };
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  } catch (error) {
+    try {
+      await stopFixtureChild(child);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Private daemon startup failed", {
+        cause: cleanupError,
+      });
+    }
+    throw error;
+  }
+}
 const app = process.env.TMUX_GPUI_TEST_APP;
 if (app && !isAbsolute(app)) throw new Error("App path must be absolute");
 for (const key of Object.keys(process.env))
@@ -54,7 +108,7 @@ const send = (v) => browser.stdin.write(JSON.stringify(v) + "\n");
 try {
   const first = tmux("list-panes", "-t", fleet.sessionNames[0], "-F", "#{pane_id}");
   tmux("split-window", "-h", "-t", first, "sh -i");
-  daemon = await startDaemon(fleet);
+  daemon = await startFixtureDaemon(fleet);
   const options = {
     baseUrl: daemon.baseUrl + "/",
     ownerToken: daemon.record.authToken,
