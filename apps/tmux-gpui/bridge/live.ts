@@ -344,7 +344,7 @@ try {
     viewerMode: interactive ? ("interactive" as const) : ("read-only" as const),
     terminalDelivery: {
       protocolVersions: [1],
-      encodings: ["semantic-v1" as const],
+      encodings: ["semantic-compact-v1" as const, "semantic-v1" as const],
       richPlacements: false,
     },
   };

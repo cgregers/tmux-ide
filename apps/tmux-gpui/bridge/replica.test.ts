@@ -128,3 +128,202 @@ test("failed replacement clears the committed lifetime without advertising its i
   assert.throws(() => replacement.chunks.forEach((chunk) => receiver.accept(chunk)));
   assert.deepEqual(lifetimes, [JSON.stringify([generation, `${generation}:0`]), null]);
 });
+
+import type {
+  TerminalDeliveryAck,
+  TerminalDeliveryEnvelope,
+  TerminalReplicaSnapshot,
+  TerminalSemanticDeliveryPayload,
+} from "../../../packages/contracts/src/index.ts";
+import { encodeCompactSemanticTerminalUpdate } from "../../../packages/core/src/terminal-delivery.ts";
+
+function compactFixture(fallback = true) {
+  const published: (TerminalReplicaSnapshot | null)[] = [];
+  const acks: TerminalDeliveryAck[] = [];
+  const receiver = createReplica(
+    {
+      protocolVersion: 1,
+      encoding: "semantic-compact-v1",
+      generation,
+      deliveryNonce,
+      richPlacements: false,
+      ...(fallback ? { fallbackEncoding: "semantic-v1" as const } : {}),
+    },
+    "test",
+    "pane-a",
+    (snapshot) => published.push(snapshot),
+    (ack) => acks.push(ack),
+  );
+  return { receiver, published, acks };
+}
+function encodedDelivery(
+  payload: TerminalSemanticDeliveryPayload,
+  snapshot: TerminalReplicaSnapshot,
+  encoding: "semantic-compact-v1" | "semantic-v1" = "semantic-compact-v1",
+  overrideBytes?: Uint8Array,
+) {
+  const bytes =
+    overrideBytes ??
+    (encoding === "semantic-compact-v1"
+      ? encodeCompactSemanticTerminalUpdate(payload)
+      : encodeSemanticTerminalUpdate(payload));
+  const transactionId = randomUUID();
+  const chunks = splitTerminalDeliveryChunks(transactionId, bytes);
+  const envelope: TerminalDeliveryEnvelope = {
+    ...seed().envelope,
+    transactionId,
+    encoding,
+    frame: payload.frame,
+    baseRevision: payload.frame === "seed" ? null : payload.baseRevision,
+    canonicalRevision: payload.revision,
+    canonicalStateHash: hashTerminalReplicaSnapshot(snapshot),
+    representationHash: hashTerminalDeliveryRepresentation(bytes),
+    representationBytes: bytes.length,
+    chunkCount: chunks.length,
+  };
+  const expectedAck: TerminalDeliveryAck = {
+    type: "terminal.delivery.ack",
+    workspaceName: envelope.workspaceName,
+    semanticPaneId: envelope.semanticPaneId,
+    generation,
+    incarnation: envelope.incarnation,
+    deliveryNonce,
+    transactionId,
+    canonicalRevision: payload.revision,
+    canonicalStateHash: envelope.canonicalStateHash,
+    representationHash: envelope.representationHash,
+  };
+  return { envelope, chunks, expectedAck };
+}
+function unicodeSnapshot() {
+  const base = blankTerminalReplicaSnapshot(80, 24);
+  const row = (index: number) => ({
+    wrapped: index % 2 === 0,
+    cells: base.grid[0].cells.map((cell, column) => ({
+      ...cell,
+      grapheme:
+        column === 0
+          ? "界"
+          : column === 1
+            ? ""
+            : column === 2
+              ? "e\u0301"
+              : String.fromCodePoint(0x2800 + ((index + column) % 256)),
+      width: (column === 0 ? 2 : column === 1 ? 0 : 1) as 0 | 1 | 2,
+    })),
+  });
+  return {
+    ...base,
+    grid: Array.from({ length: 24 }, (_, i) => row(i)),
+    history: Array.from({ length: 300 }, (_, i) => row(i + 24)),
+  };
+}
+
+test("compact multichunk seed and Unicode/history patch publish exact canonical snapshots and ACKs", () => {
+  const fixture = compactFixture();
+  const snapshot = unicodeSnapshot();
+  const initial = encodedDelivery({ frame: "seed", revision: 0, snapshot }, snapshot);
+  assert.ok(initial.chunks.length > 1, "fixture must exercise real chunk assembly");
+  fixture.receiver.accept(initial.envelope);
+  for (const chunk of initial.chunks.slice(0, -1)) fixture.receiver.accept(chunk);
+  assert.deepEqual(fixture.published, []);
+  assert.deepEqual(fixture.acks, []);
+  fixture.receiver.accept(initial.chunks.at(-1)!);
+  assert.deepEqual(fixture.published, [snapshot]);
+  assert.deepEqual(fixture.acks, [initial.expectedAck]);
+  const row = { ...snapshot.grid[0], wrapped: !snapshot.grid[0].wrapped };
+  const next = {
+    ...snapshot,
+    grid: [row, ...snapshot.grid.slice(1)],
+    history: [...snapshot.history.slice(2), row],
+  };
+  const patch = encodedDelivery(
+    {
+      frame: "patch",
+      revision: 1,
+      baseRevision: 0,
+      patch: { rows: [{ index: 0, row }], historyDelta: { trim: 2, append: [row] } },
+    },
+    next,
+  );
+  fixture.receiver.accept(patch.envelope);
+  patch.chunks.forEach((chunk) => fixture.receiver.accept(chunk));
+  assert.deepEqual(fixture.published.at(-1), next);
+  assert.deepEqual(fixture.acks, [initial.expectedAck, patch.expectedAck]);
+});
+
+test("compact negotiation admits semantic fallback only when explicitly negotiated", () => {
+  const snapshot = blankTerminalReplicaSnapshot(4, 2);
+  const next = { ...snapshot, cursor: { ...snapshot.cursor, x: 1 } };
+  const initial = encodedDelivery({ frame: "seed", revision: 0, snapshot }, snapshot);
+  const patch = encodedDelivery(
+    { frame: "patch", revision: 1, baseRevision: 0, patch: { rows: [], cursor: next.cursor } },
+    next,
+    "semantic-v1",
+  );
+  for (const fallback of [true, false]) {
+    const fixture = compactFixture(fallback);
+    fixture.receiver.accept(initial.envelope);
+    initial.chunks.forEach((chunk) => fixture.receiver.accept(chunk));
+    if (fallback) {
+      fixture.receiver.accept(patch.envelope);
+      patch.chunks.forEach((chunk) => fixture.receiver.accept(chunk));
+      assert.deepEqual(fixture.published.at(-1), next);
+      assert.deepEqual(fixture.acks, [initial.expectedAck, patch.expectedAck]);
+    } else {
+      assert.throws(() => fixture.receiver.accept(patch.envelope));
+      patch.chunks.forEach((chunk) => fixture.receiver.accept(chunk));
+      assert.equal(fixture.published.at(-1), null);
+      assert.deepEqual(fixture.acks, [initial.expectedAck]);
+    }
+  }
+});
+
+test("malformed compact payload, canonical hash corruption and baseline gaps retire without ACK", () => {
+  const snapshot = blankTerminalReplicaSnapshot(4, 2);
+  const payload = { frame: "seed" as const, revision: 0, snapshot };
+  const malformed = JSON.parse(
+    new TextDecoder().decode(encodeCompactSemanticTerminalUpdate(payload)),
+  );
+  malformed.v = 99;
+  for (const failure of ["malformed", "hash", "baseline"] as const) {
+    const fixture = compactFixture();
+    const initial = encodedDelivery(payload, snapshot);
+    fixture.receiver.accept(initial.envelope);
+    initial.chunks.forEach((chunk) => fixture.receiver.accept(chunk));
+    const bad =
+      failure === "baseline"
+        ? encodedDelivery(
+            { frame: "patch", revision: 2, baseRevision: 1, patch: { rows: [] } },
+            snapshot,
+          )
+        : encodedDelivery(
+            { ...payload, revision: 1 },
+            snapshot,
+            "semantic-compact-v1",
+            failure === "malformed"
+              ? new TextEncoder().encode(JSON.stringify(malformed))
+              : undefined,
+          );
+    if (failure === "hash")
+      bad.envelope = { ...bad.envelope, canonicalStateHash: "0000000000000000" };
+    assert.throws(
+      () => {
+        fixture.receiver.accept(bad.envelope);
+        bad.chunks.forEach((chunk) => fixture.receiver.accept(chunk));
+      },
+      failure === "malformed"
+        ? /Unsupported compact semantic version/
+        : failure === "hash"
+          ? /Canonical state hash mismatch/
+          : /identity or ordering mismatch/,
+    );
+    assert.equal(fixture.published.at(-1), null);
+    assert.deepEqual(fixture.acks, [initial.expectedAck]);
+    const count = fixture.published.length;
+    fixture.receiver.accept(initial.envelope);
+    initial.chunks.forEach((chunk) => fixture.receiver.accept(chunk));
+    assert.equal(fixture.published.length, count);
+    assert.deepEqual(fixture.acks, [initial.expectedAck]);
+  }
+});
