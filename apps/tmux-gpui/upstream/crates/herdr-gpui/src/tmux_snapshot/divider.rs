@@ -166,6 +166,7 @@ pub(super) struct Drag {
     grid: (u16, u16),
     bounds: Bounds<Pixels>,
     cell_width: f32,
+    cell_height: f32,
     anchor: f32,
     cells: u16,
 }
@@ -174,16 +175,19 @@ impl Drag {
         state: &browser::State,
         bounds: Bounds<Pixels>,
         width: f32,
+        height: f32,
         position: Point<Pixels>,
     ) -> Option<Self> {
-        if !width.is_finite() || width <= 0. || !bounds.contains(&position) {
+        if !height.is_finite()
+            || height <= 0.
+            || !width.is_finite()
+            || width <= 0.
+            || !bounds.contains(&position)
+        {
             return None;
         }
         let offset = position - bounds.origin;
-        let (x, y) = (
-            f32::from(offset.x) / width,
-            f32::from(offset.y) / crate::terminal::CELL_HEIGHT,
-        );
+        let (x, y) = (f32::from(offset.x) / width, f32::from(offset.y) / height);
         let split = at(state, x, y)?;
         let frame = state.frame.as_ref()?;
         let cells = split.cells;
@@ -201,6 +205,7 @@ impl Drag {
             grid: (frame.width, frame.height),
             bounds,
             cell_width: width,
+            cell_height: height,
             cells,
         })
     }
@@ -299,7 +304,7 @@ impl Drag {
         let coordinate = if self.split.axis == Axis::Cols {
             f32::from(offset.x) / self.cell_width
         } else {
-            f32::from(offset.y) / crate::terminal::CELL_HEIGHT
+            f32::from(offset.y) / self.cell_height
         };
         if !coordinate.is_finite() {
             return false;
@@ -351,6 +356,7 @@ impl SnapshotView {
             return canonical::guides(
                 &self.browser_state,
                 width,
+                self.terminal_height(),
                 self.divider.as_ref().map(|d| d.split.id.as_str()),
                 self.accent(),
             );
@@ -394,9 +400,9 @@ impl SnapshotView {
                         .id(("pane-divider", index))
                         .absolute()
                         .left(px(f32::from(left) * width))
-                        .top(px(f32::from(top) * crate::terminal::CELL_HEIGHT))
+                        .top(px(f32::from(top) * self.terminal_height()))
                         .w(px(f32::from(cols) * width))
-                        .h(px(f32::from(rows) * crate::terminal::CELL_HEIGHT))
+                        .h(px(f32::from(rows) * self.terminal_height()))
                         .cursor(if split.axis == Axis::Cols {
                             CursorStyle::ResizeLeftRight
                         } else {
@@ -433,7 +439,13 @@ impl SnapshotView {
         if self.resize_gesture.busy() {
             return false;
         }
-        self.divider = Drag::begin(&self.browser_state, bounds, width, position);
+        self.divider = Drag::begin(
+            &self.browser_state,
+            bounds,
+            width,
+            self.terminal_height(),
+            position,
+        );
         if let Some(drag) = self.divider.as_ref() {
             self.resize_gesture.begin(drag);
         }

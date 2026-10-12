@@ -68,7 +68,7 @@ impl SnapshotView {
             f32::from(point.x),
             f32::from(point.y),
             width,
-            crate::terminal::CELL_HEIGHT,
+            self.terminal_height(),
         )
         .map(str::to_owned);
         if let Some(id) = id {
@@ -80,7 +80,7 @@ impl SnapshotView {
                 self.selection = super::selection::Capture::begin(
                     &self.browser_state,
                     f32::from(point.x) / width,
-                    f32::from(point.y) / crate::terminal::CELL_HEIGHT,
+                    f32::from(point.y) / self.terminal_height(),
                 );
                 cx.notify();
             }
@@ -117,6 +117,7 @@ impl SnapshotView {
         self.update_drag(event.position, cx);
     }
     fn update_drag(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let height = self.terminal_height();
         let (Some(selection), Some((bounds, _)), Some(width)) = (
             &mut self.selection,
             self.input_geometry,
@@ -129,10 +130,7 @@ impl SnapshotView {
         }
         let point = position - bounds.origin;
         if selection
-            .update(
-                f32::from(point.x) / width,
-                f32::from(point.y) / crate::terminal::CELL_HEIGHT,
-            )
+            .update(f32::from(point.x) / width, f32::from(point.y) / height)
             .is_err()
         {
             self.clear_selection(cx);
@@ -190,7 +188,7 @@ impl SnapshotView {
             f32::from(point.x),
             f32::from(point.y),
             width,
-            crate::terminal::CELL_HEIGHT,
+            self.terminal_height(),
         );
         if !bounds.contains(&event.position)
             || target != self.browser_state.selected_pane.as_deref()
@@ -203,7 +201,7 @@ impl SnapshotView {
             self.wheel = Default::default();
         }
         let delta = match event.delta {
-            ScrollDelta::Pixels(p) => f32::from(p.y) / crate::terminal::CELL_HEIGHT,
+            ScrollDelta::Pixels(p) => f32::from(p.y) / self.terminal_height(),
             ScrollDelta::Lines(p) => p.y,
         };
         let lines = self.wheel.add(delta);

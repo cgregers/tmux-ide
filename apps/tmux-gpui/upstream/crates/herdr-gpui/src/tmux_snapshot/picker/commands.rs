@@ -2,6 +2,7 @@
 use super::{Row, Target, browser};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::tmux_snapshot) enum Action {
+    Fonts,
     Shortcuts,
     ToggleSidebar,
     Home,
@@ -38,6 +39,7 @@ pub(super) fn command_rows_with_sidebar(
                 "Hide sidebar · F10"
             },
         ),
+        (Action::Fonts, "Terminal font…"),
         (Action::Shortcuts, "Keyboard shortcuts…"),
         (Action::Home, "Home · F1"),
         (Action::Terminals, "Terminals · F2"),

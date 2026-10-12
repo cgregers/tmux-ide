@@ -2,6 +2,7 @@
 pub(super) mod attention;
 pub(super) mod commands;
 mod fleet_servers;
+mod fonts;
 mod machine;
 mod machine_edit;
 mod machine_remove;
@@ -25,6 +26,7 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
+    Font(super::terminal_font::Choice),
     MachineEdit {
         id: String,
         revision: u64,
@@ -70,6 +72,7 @@ pub(super) struct Row {
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
+    Font,
     Reference,
     Attention,
     Navigation,
@@ -188,6 +191,7 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
 }
 fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::Font(_) => true,
         Target::FleetDisconnect(token) => state.fleet.as_ref().is_some_and(|fleet| {
             fleet
                 .groups
@@ -384,6 +388,7 @@ impl SnapshotView {
             let mut input = SearchInput::new(cx).with_max_bytes(1024);
             input.set_placeholder(
                 match mode {
+                    Mode::Font => "Search installed terminal fonts…",
                     Mode::Reference => "Search keyboard shortcuts…",
                     Mode::Attention => "Search attention agents…",
                     Mode::SavedMachines => "Search saved machines…",
@@ -413,7 +418,9 @@ impl SnapshotView {
             agent: None,
             search,
             _changed: changed,
-            rows: if mode == Mode::Reference {
+            rows: if mode == Mode::Font {
+                fonts::rows(&self.terminal_font, "")
+            } else if mode == Mode::Reference {
                 reference::rows("")
             } else if mode == Mode::Attention {
                 Vec::new()
@@ -461,7 +468,9 @@ impl SnapshotView {
             self.picker = None;
             return;
         }
-        picker.rows = if picker.mode == Mode::Reference {
+        picker.rows = if picker.mode == Mode::Font {
+            fonts::rows(&self.terminal_font, picker.search.read(cx).text())
+        } else if picker.mode == Mode::Reference {
             reference::rows(picker.search.read(cx).text())
         } else if picker.mode == Mode::Attention {
             attention::rows(
@@ -504,6 +513,19 @@ impl SnapshotView {
             .as_ref()
             .is_some_and(|p| p.mode == Mode::Reference)
         {
+            return;
+        }
+        if let Target::Font(choice) = &target {
+            if self
+                .picker
+                .as_ref()
+                .is_some_and(|p| p.mode == Mode::Font && p.request == self.browser_request)
+            {
+                self.choose_terminal_font(choice.clone(), cx);
+            }
+            return;
+        }
+        if self.picker.as_ref().is_some_and(|p| p.mode == Mode::Font) {
             return;
         }
         if let Some(scope) = self
@@ -594,7 +616,7 @@ impl SnapshotView {
         }
         if matches!(
             &target,
-            Target::Command(Action::ToggleSidebar | Action::Shortcuts)
+            Target::Command(Action::ToggleSidebar | Action::Shortcuts | Action::Fonts)
         ) && (!self.marked.is_empty()
             || self.picker.as_ref().is_none_or(|p| {
                 p.mode != Mode::Commands
@@ -609,6 +631,7 @@ impl SnapshotView {
         if let Target::Command(action) = target {
             self.close_picker(window, cx);
             match action {
+                Action::Fonts => self.open_picker_mode(Mode::Font, window, cx),
                 Action::Shortcuts => self.open_picker_mode(Mode::Reference, window, cx),
                 Action::ToggleSidebar => self.toggle_sidebar(cx),
                 Action::SavedMachines => self.open_saved_machines(window, cx),
@@ -689,7 +712,8 @@ impl SnapshotView {
                     session_id,
                 },
                 Target::Pane(id) => Selection::Pane(id),
-                Target::FleetServer(_)
+                Target::Font(_)
+                | Target::FleetServer(_)
                 | Target::PaneAction { .. }
                 | Target::Attention { .. }
                 | Target::Theme(_)

@@ -11,7 +11,7 @@ impl SnapshotView {
         self.picker.as_ref().filter(|p| {
             matches!(
                 p.mode,
-                Mode::Commands | Mode::Navigation | Mode::Attention | Mode::Reference
+                Mode::Commands | Mode::Navigation | Mode::Attention | Mode::Reference | Mode::Font
             )
         })?;
         let theme = self.theme();
@@ -92,6 +92,20 @@ impl SnapshotView {
             .flex()
             .flex_col()
             .gap_1()
+            .when(picker.mode == Mode::Font, |panel| {
+                panel
+                    .child(div().px_2().py_1().child(format!(
+                        "Terminal font · {} · {} pt",
+                        self.terminal_font.config.family, self.terminal_font.config.size
+                    )))
+                    .child(
+                        div().text_color(rgb(theme.muted)).child(
+                            self.terminal_font
+                                .note
+                                .unwrap_or("Automatic installed symbol fallbacks"),
+                        ),
+                    )
+            })
             .when(picker.mode == Mode::Reference, |panel| {
                 panel.child(
                     div()
@@ -144,7 +158,10 @@ impl SnapshotView {
             .track_scroll(&picker.scroll);
         for (index, row) in picker.rows.iter().enumerate() {
             let target = row.target.clone();
-            let enabled = picker.mode != Mode::Reference && current(&self.browser_state, &target);
+            let enabled = picker.mode != Mode::Reference
+                && !(picker.mode == Mode::Font
+                    && (self.terminal_font.saving || !self.terminal_font.ready))
+                && current(&self.browser_state, &target);
             list = list.child(
                 div()
                     .id(("picker-row", index))

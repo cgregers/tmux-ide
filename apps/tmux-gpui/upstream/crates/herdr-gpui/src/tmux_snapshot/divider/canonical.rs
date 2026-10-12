@@ -213,6 +213,7 @@ pub(super) fn safe_cell(state: &browser::State, col: u16, row: u16) -> bool {
 pub(super) fn guides(
     state: &browser::State,
     width: f32,
+    height: f32,
     selected: Option<&str>,
     accent: u32,
 ) -> Vec<AnyElement> {
@@ -257,9 +258,9 @@ pub(super) fn guides(
                         .id(("canonical-divider", index * 4096 + usize::from(start)))
                         .absolute()
                         .left(px(f32::from(left) * width))
-                        .top(px(f32::from(top) * crate::terminal::CELL_HEIGHT))
+                        .top(px(f32::from(top) * height))
                         .w(px(f32::from(cols) * width))
-                        .h(px(f32::from(rows) * crate::terminal::CELL_HEIGHT))
+                        .h(px(f32::from(rows) * height))
                         .cursor(if split.axis == Axis::Cols {
                             CursorStyle::ResizeLeftRight
                         } else {

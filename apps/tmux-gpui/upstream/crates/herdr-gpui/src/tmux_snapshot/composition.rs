@@ -143,7 +143,7 @@ impl EntityInputHandler for SnapshotView {
             range,
             cursor,
             bounds,
-            &font("Menlo"),
+            &self.terminal_font.config.font(),
             window,
         ))
     }

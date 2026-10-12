@@ -80,6 +80,7 @@ fn make_view(
         new_session_queued: None,
         agent_animation: Default::default(),
         sidebar_hidden: false,
+        terminal_font: Default::default(),
         window_reveal: Default::default(),
         resize_gesture: Default::default(),
         last_resize: None,

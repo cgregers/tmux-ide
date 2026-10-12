@@ -76,7 +76,14 @@ fn both_axes_commit_exact_outer_cells_only_after_motion_and_clamp_both_panes() {
         } else {
             (2., 4.5)
         };
-        let mut drag = Drag::begin(&s, bounds(), 10., point_at(start.0, start.1)).unwrap();
+        let mut drag = Drag::begin(
+            &s,
+            bounds(),
+            10.,
+            crate::terminal::CELL_HEIGHT,
+            point_at(start.0, start.1),
+        )
+        .unwrap();
         assert!(drag.command().is_none());
         let end = if axis == Axis::Cols {
             (7.5, 2.)
@@ -100,7 +107,14 @@ fn both_axes_commit_exact_outer_cells_only_after_motion_and_clamp_both_panes() {
 #[test]
 fn content_only_updates_survive_but_topology_lifetime_selection_and_presence_do_not() {
     let original = state(Axis::Cols);
-    let drag = Drag::begin(&original, bounds(), 10., point_at(5.5, 2.)).unwrap();
+    let drag = Drag::begin(
+        &original,
+        bounds(),
+        10.,
+        crate::terminal::CELL_HEIGHT,
+        point_at(5.5, 2.),
+    )
+    .unwrap();
     let mut busy = original.clone();
     Arc::make_mut(busy.frame.as_mut().unwrap()).cells[0].symbol = "busy".into();
     assert!(!Arc::ptr_eq(
@@ -201,7 +215,14 @@ fn origin_t_and_inverse_t_segments_target_leading_pane_and_exclude_junctions() {
         for (x, y, id, axis) in hits {
             let split = at(&s, x, y).unwrap();
             assert_eq!((split.id.as_str(), split.axis), (id, axis));
-            let mut drag = Drag::begin(&s, bounds(), 10., point_at(x, y)).unwrap();
+            let mut drag = Drag::begin(
+                &s,
+                bounds(),
+                10.,
+                crate::terminal::CELL_HEIGHT,
+                point_at(x, y),
+            )
+            .unwrap();
             assert!(drag.command().is_none());
             assert!(drag.update(point_at(x + 1., y + 1.)));
             assert!(
@@ -278,6 +299,7 @@ fn make_view(
         new_session_queued: None,
         agent_animation: Default::default(),
         sidebar_hidden: false,
+        terminal_font: Default::default(),
         window_reveal: Default::default(),
         resize_gesture: Default::default(),
         last_resize: None,
@@ -412,7 +434,14 @@ fn native_lower_header_preserves_horizontal_drag_and_external_row_excludes_resiz
 fn continuous_owner_coalesces_motion_retains_release_and_orders_cancel_under_backpressure() {
     let mut s = state(Axis::Cols);
     s.resize_gesture_supported = true;
-    let drag = Drag::begin(&s, bounds(), 10., point_at(5.5, 2.)).unwrap();
+    let drag = Drag::begin(
+        &s,
+        bounds(),
+        10.,
+        crate::terminal::CELL_HEIGHT,
+        point_at(5.5, 2.),
+    )
+    .unwrap();
     let mut owner = Owner::default();
     owner.begin(&drag);
     let (sender, receiver) = mpsc::sync_channel(1);
@@ -483,7 +512,14 @@ fn continuous_owner_coalesces_motion_retains_release_and_orders_cancel_under_bac
 fn continuous_ack_preserves_pending_but_requires_same_settled_split_and_identity() {
     let mut s = state(Axis::Cols);
     s.resize_gesture_supported = true;
-    let drag = Drag::begin(&s, bounds(), 10., point_at(5.5, 2.)).unwrap();
+    let drag = Drag::begin(
+        &s,
+        bounds(),
+        10.,
+        crate::terminal::CELL_HEIGHT,
+        point_at(5.5, 2.),
+    )
+    .unwrap();
     s.resize_gesture = Some(gesture::Ack {
         gesture: drag.gesture.clone().unwrap(),
         id: "a".into(),
@@ -581,7 +617,14 @@ fn rendered_continuous_drag_sends_during_motion_and_final_cells_on_release(
 fn healthy_idle_gesture_outlives_ten_seconds_but_stalled_transport_is_bounded() {
     let mut s = state(Axis::Cols);
     s.resize_gesture_supported = true;
-    let drag = Drag::begin(&s, bounds(), 10., point_at(5.5, 2.)).unwrap();
+    let drag = Drag::begin(
+        &s,
+        bounds(),
+        10.,
+        crate::terminal::CELL_HEIGHT,
+        point_at(5.5, 2.),
+    )
+    .unwrap();
     let mut owner = Owner::default();
     owner.begin(&drag);
     let (sender, receiver) = mpsc::sync_channel(1);
@@ -622,3 +665,4 @@ fn healthy_idle_gesture_outlives_ten_seconds_but_stalled_transport_is_bounded() 
 }
 
 mod canonical_cases;
+mod font_metrics;

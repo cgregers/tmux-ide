@@ -26,6 +26,7 @@ mod selection;
 mod session_open;
 mod shell;
 mod stream;
+mod terminal_font;
 #[cfg(test)]
 mod tests;
 mod workspace_chrome;
@@ -236,6 +237,7 @@ fn show(
                         new_session_queued: None,
                         agent_animation: Default::default(),
                         sidebar_hidden: false,
+                        terminal_font: Default::default(),
                         window_reveal: Default::default(),
                         resize_gesture: Default::default(),
                         last_resize: None,
@@ -251,6 +253,7 @@ fn show(
                         browser_state: home::initial_state(),
                         browser_commands: browser.map(|b| b.commands),
                     };
+                    view.discover_terminal_fonts(cx);
                     view.follow_system(cx);
                     view
                 })
@@ -291,6 +294,7 @@ struct SnapshotView {
     new_session_queued: Option<(u64, u64)>,
     agent_animation: agent_indicator::Clock,
     sidebar_hidden: bool,
+    terminal_font: terminal_font::Settings,
     window_reveal: workspace_chrome::WindowReveal,
     resize_gesture: divider::Owner,
     last_resize: Option<(u64, u16, u16)>,
@@ -320,12 +324,10 @@ impl Render for SnapshotView {
 impl SnapshotView {
     fn terminal_render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.theme();
-        self.painter.borrow_mut().set_appearance(
-            crate::terminal::FONT_SIZE,
-            crate::terminal::CELL_HEIGHT,
-            theme.clone(),
-        );
-        let font = font("Menlo");
+        self.prepare_terminal_font();
+        let font = self.terminal_font.config.font();
+        let height = self.terminal_height();
+        let font_revision = self.terminal_font.revision;
         let width = self.painter.borrow_mut().cell_width(&font, window, cx);
         let painter = self.painter.clone();
         let accent = self.accent();
@@ -357,6 +359,9 @@ impl SnapshotView {
                 canvas(
                     |_, _, _| (),
                     move |bounds, (), window, cx| {
+                        if entity.read(cx).terminal_font.revision != font_revision {
+                            return;
+                        }
                         entity.update(cx, |view, cx| {
                             if view.browsing
                                 && view.presence.ready()
@@ -377,13 +382,9 @@ impl SnapshotView {
                             let origin = bounds.origin
                                 + point(
                                     px(width * cursor.map_or(0., |c| f32::from(c.x))),
-                                    px(crate::terminal::CELL_HEIGHT
-                                        * cursor.map_or(0., |c| f32::from(c.y))),
+                                    px(height * cursor.map_or(0., |c| f32::from(c.y))),
                                 );
-                            let cursor_bounds = Bounds::new(
-                                origin,
-                                size(px(width), px(crate::terminal::CELL_HEIGHT)),
-                            );
+                            let cursor_bounds = Bounds::new(origin, size(px(width), px(height)));
                             view.input_geometry = Some((bounds, cursor_bounds));
                             view.input_cell_width = Some(width);
                             view.painted_frame = Some(frame.clone());
@@ -391,7 +392,7 @@ impl SnapshotView {
                                 f32::from(bounds.size.width),
                                 f32::from(bounds.size.height),
                                 width,
-                                crate::terminal::CELL_HEIGHT,
+                                height,
                             ) {
                                 let desired = (view.browser_request, cols, rows);
                                 if view.browsing
@@ -451,7 +452,6 @@ impl SnapshotView {
                         );
                         window.with_content_mask(Some(ContentMask { bounds }), |window| {
                             for cell in &rails {
-                                let height = crate::terminal::CELL_HEIGHT;
                                 let (x, y, w, h) = if cell.vertical {
                                     (
                                         (f32::from(cell.col) + 0.5) * width - width.min(2.) / 2.,

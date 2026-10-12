@@ -240,11 +240,11 @@ impl SnapshotView {
                 .left(px(f32::from(header.left + header.width) * width
                     - OVERFLOW_WIDTH
                     - MODE_WIDTH))
-                .top(px(header.row.map_or(0., |row| {
-                    f32::from(row) * crate::terminal::CELL_HEIGHT
-                })))
+                .top(px(header
+                    .row
+                    .map_or(0., |row| f32::from(row) * self.terminal_height())))
                 .w(px(MODE_WIDTH))
-                .h(px(crate::terminal::CELL_HEIGHT))
+                .h(px(self.terminal_height()))
                 .overflow_hidden()
                 .flex()
                 .items_center()
@@ -311,11 +311,11 @@ impl SnapshotView {
                 .left(px(
                     f32::from(header.left + header.width) * width - OVERFLOW_WIDTH
                 ))
-                .top(px(header.row.map_or(0., |row| {
-                    f32::from(row) * crate::terminal::CELL_HEIGHT
-                })))
+                .top(px(header
+                    .row
+                    .map_or(0., |row| f32::from(row) * self.terminal_height())))
                 .w(px(OVERFLOW_WIDTH))
-                .h(px(crate::terminal::CELL_HEIGHT))
+                .h(px(self.terminal_height()))
                 .overflow_hidden()
                 .flex()
                 .items_center()
@@ -368,17 +368,18 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let width = self
-            .painter
-            .borrow_mut()
-            .cell_width(&font("Menlo"), window, cx);
+        self.prepare_terminal_font();
+        let width =
+            self.painter
+                .borrow_mut()
+                .cell_width(&self.terminal_font.config.font(), window, cx);
         let theme = self.theme();
         let mut row = div()
             .id("pane-header-row")
             .debug_selector(|| "pane-header-row".into())
             .relative()
             .w_full()
-            .h(px(crate::terminal::CELL_HEIGHT))
+            .h(px(self.terminal_height()))
             .flex_shrink_0()
             .overflow_hidden()
             .bg(rgb(theme.surface));
@@ -458,9 +459,9 @@ impl SnapshotView {
             .left(px(f32::from(header.left) * width))
             .top(px(header
                 .row
-                .map_or(0., |r| f32::from(r) * crate::terminal::CELL_HEIGHT)))
+                .map_or(0., |r| f32::from(r) * self.terminal_height())))
             .w(px(f32::from(header.width) * width))
-            .h(px(crate::terminal::CELL_HEIGHT))
+            .h(px(self.terminal_height()))
             .min_w_0()
             .overflow_hidden()
             .px(px(width.min(4.)))
@@ -482,7 +483,7 @@ impl SnapshotView {
             } else {
                 theme.muted
             }))
-            .text_size(px((crate::terminal::CELL_HEIGHT - 2.).min(12.)))
+            .text_size(px((self.terminal_height() - 2.).min(12.)))
             .font_weight(if selected {
                 FontWeight::SEMIBOLD
             } else {

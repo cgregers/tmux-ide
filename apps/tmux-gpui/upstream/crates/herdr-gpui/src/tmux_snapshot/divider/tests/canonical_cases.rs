@@ -46,7 +46,14 @@ fn canonical_both_axes_emit_only_absolute_split_commands_and_latest_release() {
         } else {
             (2., 4.5)
         };
-        let mut drag = Drag::begin(&s, bounds(), 10., point_at(x, y)).unwrap();
+        let mut drag = Drag::begin(
+            &s,
+            bounds(),
+            10.,
+            crate::terminal::CELL_HEIGHT,
+            point_at(x, y),
+        )
+        .unwrap();
         assert!(drag.command().is_none());
         let mut owner = Owner::default();
         owner.begin(&drag);
@@ -77,12 +84,28 @@ fn canonical_resource_mismatch_cannot_fall_back_to_inferred_pane_resize() {
     s.resize_token = Some("312b2c16-a13d-4411-82e5-1fdb58adab92".into());
     s.split_layout.as_mut().unwrap().panes[0].width = 4;
     assert!(splits(&s).is_empty());
-    assert!(Drag::begin(&s, bounds(), 10., point_at(5.5, 2.)).is_none());
+    assert!(
+        Drag::begin(
+            &s,
+            bounds(),
+            10.,
+            crate::terminal::CELL_HEIGHT,
+            point_at(5.5, 2.)
+        )
+        .is_none()
+    );
 }
 #[test]
 fn canonical_successor_requires_exact_current_resource_and_holds_pending_without_rebase() {
     let mut s = canonical_state(Axis::Cols);
-    let drag = Drag::begin(&s, bounds(), 10., point_at(5.5, 2.)).unwrap();
+    let drag = Drag::begin(
+        &s,
+        bounds(),
+        10.,
+        crate::terminal::CELL_HEIGHT,
+        point_at(5.5, 2.),
+    )
+    .unwrap();
     let original = drag.split.canonical.clone().unwrap();
     s.split_gesture = Some(canonical::Ack {
         gesture: drag.gesture.clone().unwrap(),
