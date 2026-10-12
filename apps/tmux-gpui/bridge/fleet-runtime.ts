@@ -159,12 +159,29 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     async read() {
       const selection = selected;
       const captured = host;
+      const signal = attempt.signal;
       if (!selection || !captured) throw new FleetSelectionError();
-      selection.assertCurrent();
-      if (remote) await remote.verify();
-      else await localPreviewHostProof(captured)?.verify(attempt.signal);
-      if (selected !== selection) throw new FleetSelectionError();
-      selection.assertCurrent();
+      const check = () => {
+        if (stopped || selected !== selection || signal.aborted) throw new FleetSelectionError();
+        try {
+          selection.assertCurrent();
+        } catch {
+          // Server-route guards expose no public error type or private details.
+          throw new FleetSelectionError();
+        }
+      };
+      check();
+      try {
+        if (remote) await remote.verify();
+        else await localPreviewHostProof(captured)?.verify(signal);
+      } catch (error) {
+        // Retirement can abort verification before its normal post-await fence.
+        // Only our captured route lifetime qualifies this fixed guidance.
+        check();
+        localPreviewHostProof(captured)?.assertCurrent();
+        throw error;
+      }
+      check();
       return captured;
     },
     dispose() {
