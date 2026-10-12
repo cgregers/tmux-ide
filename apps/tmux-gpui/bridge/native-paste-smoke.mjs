@@ -2,7 +2,8 @@
 // Run only with an explicitly selected app. The operator performs the paste.
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdir, writeFile, readFile, stat } from "node:fs/promises";
+import { access, mkdir, writeFile, readFile, stat } from "node:fs/promises";
+import { constants, writeFileSync } from "node:fs";
 import { join, isAbsolute } from "node:path";
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
@@ -17,6 +18,60 @@ const appPath = process.env.TMUX_GPUI_TEST_APP;
 const directory = process.env.TMUX_GPUI_PASTE_DIR;
 assert.ok(appPath && isAbsolute(appPath), "Require absolute TMUX_GPUI_TEST_APP");
 assert.ok(directory && isAbsolute(directory), "Require new absolute TMUX_GPUI_PASTE_DIR");
+const launcher = join(appPath, "Contents/MacOS/tmux-ide-launcher");
+assert.ok((await stat(launcher)).isFile(), "App launcher must be a regular file");
+await access(launcher, constants.X_OK);
+const privateCli = process.env.TMUX_GPUI_TEST_CLI;
+if (privateCli !== undefined) {
+  assert.ok(isAbsolute(privateCli), "TMUX_GPUI_TEST_CLI must be absolute");
+  assert.ok((await stat(privateCli)).isFile(), "Private CLI must be a regular file");
+  await access(privateCli, constants.R_OK);
+}
+let fatal;
+const cancel = () => {
+  fatal ??= new Error("Native paste proof cancelled");
+};
+process.on("SIGINT", cancel);
+process.on("SIGTERM", cancel);
+async function startFixtureDaemon(fleet) {
+  if (fatal) throw fatal;
+  if (privateCli === undefined) return startDaemon(fleet);
+  const child = spawn(process.execPath, [privateCli, "--headless"], {
+    env: { ...process.env, ...fleet.environment },
+    stdio: "ignore",
+  });
+  let childError;
+  child.on("error", (error) => {
+    childError = error;
+  });
+  try {
+    const deadline = Date.now() + 45000;
+    for (;;) {
+      if (fatal) throw fatal;
+      if (childError) throw childError;
+      assert.ok(child.exitCode === null && child.signalCode === null, "Private daemon exited");
+      assert.ok(Date.now() < deadline, "Private daemon startup deadline");
+      let record;
+      try {
+        record = JSON.parse(await readFile(join(fleet.daemonInfoDir, "daemon.json"), "utf8"));
+      } catch {
+        /* Await the owned atomic discovery record. */
+      }
+      if (record?.pid === child.pid && typeof record.authToken === "string" && record.instanceId)
+        return { record, stop: () => stopFixtureChild(child) };
+      await delay(20);
+    }
+  } catch (error) {
+    try {
+      await stopFixtureChild(child);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Private daemon startup failed", {
+        cause: cleanupError,
+      });
+    }
+    throw error;
+  }
+}
 const payload = "PASTE_界_e\u0301_🙂\nSECOND_LINE";
 const expected = Buffer.from("\x1b[200~" + payload + "\x1b[201~", "utf8");
 const actualPath = join(directory, "actual.bin");
@@ -32,7 +87,7 @@ for (const key of Object.keys(process.env)) {
 }
 // Exclusive mkdir: never reuse or remove caller evidence, including on failure.
 await mkdir(directory, { mode: 0o700 });
-let fleet, daemon, app, closed, fatal, result, producerPid;
+let fleet, daemon, app, closedResult, result, producerPid;
 const failures = [];
 const deadline = Date.now() + 180000;
 const producer = `const fs = require('node:fs');
@@ -74,6 +129,7 @@ async function actual() {
   return readFile(actualPath);
 }
 try {
+  if (fatal) throw fatal;
   await writeFile(join(directory, "payload.txt"), payload, { flag: "wx", mode: 0o600 });
   await writeFile(join(directory, "expected.bin"), expected, { flag: "wx", mode: 0o600 });
   await writeFile(producerPath, producer, { flag: "wx", mode: 0o600 });
@@ -82,6 +138,7 @@ try {
     windowsPerSession: 1,
     slug: "gpui-native-paste",
   });
+  if (fatal) throw fatal;
   const pane = fleet.initialPanes[0].paneId;
   run("respawn-pane", "-k", "-t", pane, `exec ${quote(process.execPath)} ${quote(producerPath)}`);
   await wait(
@@ -92,8 +149,9 @@ try {
   producerPid = run("display-message", "-p", "-t", pane, "#{pane_pid}");
   assert.match(producerPid, /^[1-9][0-9]*$/);
   assert.equal((await actual()).length, 0);
-  daemon = await startDaemon(fleet);
-  app = spawn(join(appPath, "Contents/MacOS/tmux-ide-launcher"), [], {
+  daemon = await startFixtureDaemon(fleet);
+  if (fatal) throw fatal;
+  app = spawn(launcher, [], {
     cwd: fleet.root,
     env: { ...process.env, ...fleet.environment, PATH: "/usr/bin:/bin" },
     stdio: ["ignore", "inherit", "inherit"],
@@ -101,7 +159,9 @@ try {
   app.on("error", (error) => {
     fatal ??= error;
   });
-  closed = new Promise((resolve) => app.once("close", (code, signal) => resolve({ code, signal })));
+  app.once("close", (code, signal) => {
+    closedResult = { code, signal };
+  });
   console.log(
     JSON.stringify({
       stage: "paste-ready",
@@ -122,8 +182,8 @@ try {
   }, "exact physical paste");
   assert.equal(run("display-message", "-p", "-t", pane, "#{bracket_paste_flag}"), "1");
   console.log("Exact bracketed Unicode/multiline bytes received. Close this owned app with Cmd-Q.");
-  await wait(() => app.exitCode !== null || app.signalCode !== null, "operator Cmd-Q", true);
-  assert.equal((await closed).code, 0, "Clean native close");
+  await wait(() => closedResult !== undefined, "operator Cmd-Q", true);
+  assert.equal(closedResult.code, 0, "Clean native close");
   assert.equal(run("display-message", "-p", "-t", pane, "#{pane_pid}"), producerPid);
   assert.equal(run("display-message", "-p", "-t", pane, "#{pane_dead}"), "0");
   assert.deepEqual(await actual(), expected, "No delayed input after paste or native close");
@@ -158,7 +218,8 @@ try {
   }
 }
 if (fatal) failures.push(fatal);
-await writeFile(
+// Commit the small receipt in the same turn as the final cancellation check.
+writeFileSync(
   join(directory, "receipt.json"),
   JSON.stringify(
     failures.length
