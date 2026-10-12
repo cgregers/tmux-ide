@@ -71,6 +71,22 @@ sidebar** from **F5**. The terminal expands into the freed space through the
 existing daemon resize path. The current pane stays selected. The preference
 lasts for the app session; Home keeps its normal sidebar-free layout.
 
+## Terminal font preferences
+
+Choose **F5 → Terminal font** to search installed font families or increase and
+decrease terminal text size. The native client reuses Herdr's font configuration
+and installed-symbol fallback resolution. Preferences are saved in
+`$XDG_CONFIG_HOME/tmux-ide/gpui-fonts.json`, or
+`$HOME/.config/tmux-ide/gpui-fonts.json` when no absolute XDG config directory is
+set. A save failure is shown in the picker and retains the previous setting.
+
+These preferences belong to the GPUI client; they do not change tmux, the TUI,
+Herdr, or another terminal application's settings. Ghostty configuration/theme
+import is not implemented. A private native save/restart test verified Menlo 15
+restoration with no terminal input leakage and surviving source processes; see
+`evidence/terminal-font-2026-10-12/`. Broader font/IME and geometry qualification
+remains open.
+
 ## Agent indicators and pane headers
 
 Home, the workspace agent list, and matching pane headers use the TUI's status

@@ -567,3 +567,16 @@ seven passed. Evidence: `evidence/close-pane-2026-10-11/`.
 Physical confirmation/pointer/IME acceptance remains open. Existing user demos
 are unchanged. New agent, Help, Keyboard shortcuts and What's new remain missing
 F5 workflows; real remote acceptance and signed release qualification remain open.
+
+## Native font and shortcuts checkpoint — 12 October
+
+F5 now includes a searchable Keyboard shortcuts reference and Terminal font
+picker. Font family and size persist independently of Herdr settings. Native
+save/restart qualification passed for Menlo 15, with zero terminal input bytes
+and source-process survival; exact-package checks passed. See
+`evidence/terminal-font-2026-10-12/` and `evidence/shortcuts-native-2026-10-12/`.
+This supersedes the earlier statement that Keyboard shortcuts is missing.
+Help, What's new, new-agent workflows, broader remote/native acceptance and
+release qualification remain separate gaps. An intermittent runtime-failure
+observed during an earlier font fixture is still unexplained; a successful fresh
+run is not a fix for that observation.
