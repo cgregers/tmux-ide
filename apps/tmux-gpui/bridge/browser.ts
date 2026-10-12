@@ -1,3 +1,5 @@
+import { createDiagnosticChannel } from "./diagnostic-channel.ts";
+import { diagnosticStatus } from "./live-diagnostics.ts";
 import { closePane, confirmsClosedPane } from "./close-pane.ts";
 import {
   confirmsNewWindow,
@@ -750,7 +752,7 @@ async function openPane(
         path,
         catalogOnly ? "--catalog" : "--interactive",
       ],
-      { stdio: ["pipe", "pipe", "ignore"] },
+      { stdio: ["pipe", "pipe", "pipe"] },
     );
     const done = new Promise<void>((resolve) =>
       child.once("close", () => {
@@ -777,6 +779,11 @@ async function openPane(
       childConnection: string | undefined,
       childSequence = 0;
     let childPresentationEpoch: number | undefined;
+    const diagnostics = createDiagnosticChannel((fault) => {
+      if (stopped || request !== token || active?.child !== child) return;
+      process.stderr.write(`TMUX_GPUI_DIAGNOSTIC ${JSON.stringify(fault)}\n`);
+      unavailable();
+    });
     const unavailable = () => {
       if (stopped || request !== token || active?.child !== child) return;
       if (pendingClose?.submitted) {
@@ -792,15 +799,20 @@ async function openPane(
       inputReady = false;
       initialPane = null;
       if (catalogOnly) sessionCatalogComplete = true;
-      status = catalogOnly
-        ? "Session layout unavailable — refresh, then select the session again"
-        : "Pane unavailable — select again or refresh";
+      status = diagnostics.fault
+        ? diagnosticStatus(diagnostics.fault)
+        : catalogOnly
+          ? "Session layout unavailable — refresh, then select the session again"
+          : "Pane unavailable — select again or refresh";
       publish();
     };
+    child.stderr.on("data", (chunk: Buffer) => diagnostics.push(chunk));
     child.on("error", unavailable);
     child.on("exit", unavailable);
     child.stdout.on("data", (chunk: Buffer) => {
-      if (stopped || request !== token || active?.child !== child) return;
+      // Fatal helper diagnostics retire this presentation lifetime. Buffered
+      // stdout must not restore a frame or input authority after that fault.
+      if (stopped || request !== token || active?.child !== child || diagnostics.fault) return;
       try {
         buffer = Buffer.concat([buffer, chunk]);
         let end;
@@ -1301,7 +1313,9 @@ async function openPane(
                       : !foreground
                         ? "Window inactive — activate tmux-ide to type"
                         : "Waiting for input authority"
-                    : "Pane unavailable — select again or refresh";
+                    : diagnostics.fault
+                      ? diagnosticStatus(diagnostics.fault)
+                      : "Pane unavailable — select again or refresh";
           publish();
         }
         if (buffer.length > MAX_FRAME) throw new Error("Oversized child publication");

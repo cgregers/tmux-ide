@@ -1,3 +1,4 @@
+import { createLiveDiagnostics } from "./live-diagnostics.ts";
 import { selectedWindowSurfaces } from "./selected-window-surfaces.ts";
 import { createClosePanePreflight } from "./close-pane.ts";
 import { createNewWindowExecutor } from "./new-window.ts";
@@ -28,6 +29,8 @@ import {
 } from "../../../packages/daemon-client/src/pane-stream-client.ts";
 import { createReplica } from "./replica.ts";
 
+const diagnostics = createLiveDiagnostics((line) => process.stderr.write(line));
+let ready = false;
 let runtime: PaneStreamRuntimeClient | undefined;
 let disposeClient: (() => void) | undefined;
 let splitGesture: ReturnType<typeof createSplitGestureOwner> | undefined;
@@ -159,7 +162,7 @@ function output(snapshot: typeof latest.snapshot) {
           }
         : {}),
     }) + "\n";
-  if (Buffer.byteLength(line) > 8 * 1024 * 1024) throw new Error("Preview frame too large");
+  diagnostics.publication(line);
   if (blocked) {
     pending = line;
     return;
@@ -372,11 +375,15 @@ try {
           addEventListener(type, listener) {
             const wrapper = (
               event: WebSocket.WebSocketEventMap[keyof WebSocket.WebSocketEventMap],
-            ) =>
+            ) => {
+              if (!stopped && type === "close")
+                diagnostics.report("transport-closed", "code" in event ? event.code : undefined);
+              else if (!stopped && type === "error") diagnostics.report("transport-error");
               listener({
                 ...("data" in event ? { data: event.data } : {}),
                 ...("code" in event ? { code: event.code, reason: event.reason } : {}),
               });
+            };
             listeners.set(listener, wrapper);
             socket.addEventListener(type, wrapper);
           },
@@ -463,17 +470,21 @@ try {
           if (!replica) throw new Error("Unnegotiated pane");
           replica.accept(message);
         } catch {
-          process.stderr.write("Preview stream validation failed\n");
+          diagnostics.report("replica-validation");
           stop();
         }
       },
       onAuthoritySnapshot: () => {
         if (interactive && latest.snapshot) output(latest.snapshot);
       },
-      onFault: () => stop(),
+      onFault: () => {
+        if (!stopped) diagnostics.report("runtime-failure");
+        stop();
+      },
     },
     issued.descriptor,
   );
+  ready = true;
   if (stopped) runtime.close();
   else for (const ack of queuedAcks) runtime.ack(ack);
   if (stopped) disposeClient();
@@ -710,9 +721,7 @@ try {
     stop();
   }
 } catch {
-  process.stderr.write(
-    "Live preview could not connect. Check the private connection file and daemon identity.\n",
-  );
+  if (!stopped) diagnostics.report(ready ? "runtime-failure" : "startup");
   process.exitCode = 1;
   stop();
 }
