@@ -244,6 +244,7 @@ async function readHost() {
       error instanceof DaemonCompatibilityError ||
       error instanceof DaemonDiscoveryError ||
       error instanceof RemoteRouteError ||
+      error instanceof FleetSelectionError ||
       error instanceof MachineRegistryError
     )
       throw error;
@@ -2009,6 +2010,7 @@ function launchRefresh(token: number) {
       error instanceof DaemonDiscoveryError ||
       error instanceof CatalogStageError ||
       error instanceof RemoteRouteError ||
+      error instanceof FleetSelectionError ||
       error instanceof MachineRegistryError
         ? error.message
         : "Connection unavailable — start the daemon and refresh";
