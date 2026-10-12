@@ -32,4 +32,5 @@ app="$output/Tmux IDE CI.app"
 TMUX_GPUI_TEST_APP="$app" "$node_binary" --import tsx --test \
   apps/tmux-gpui/bridge/local-app.test.mjs apps/tmux-gpui/bridge/compatibility-process.test.mjs \
   apps/tmux-gpui/bridge/machine-remove-process.test.mjs \
+  apps/tmux-gpui/bridge/fleet-refresh-diagnostic.test.mjs \
   2>&1 | tee "$output/package-tests.log"

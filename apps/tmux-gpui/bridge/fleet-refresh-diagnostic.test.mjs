@@ -6,11 +6,31 @@ import { createServer } from "node:http";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { access, stat, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { constants } from "node:fs";
+import { isAbsolute, join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { stopFixtureChild } from "./fixture-child.mjs";
 import { DAEMON_WIRE_PROTOCOL_VERSION } from "../../../packages/contracts/src/index.ts";
+
+// Validate explicit package selection before allocating any fixture resources.
+// A supplied package never falls back to source or loads tsx in its child.
+const packagedApp = process.env.TMUX_GPUI_TEST_APP;
+if (packagedApp !== undefined) {
+  assert.ok(isAbsolute(packagedApp), "TMUX_GPUI_TEST_APP must be a nonempty absolute path");
+  assert.ok((await stat(packagedApp)).isDirectory(), "TMUX_GPUI_TEST_APP must be a directory");
+  for (const file of ["node", "bridge/browser.bundle.mjs"]) {
+    const path = join(packagedApp, "Contents/Resources", file);
+    assert.ok((await stat(path)).isFile(), "Packaged helper must be a regular file");
+    await access(path, file === "node" ? constants.X_OK : constants.R_OK);
+  }
+}
+const browserNode =
+  packagedApp === undefined ? process.execPath : join(packagedApp, "Contents/Resources/node");
+const browserArgs =
+  packagedApp === undefined
+    ? ["--import", import.meta.resolve("tsx"), resolve("apps/tmux-gpui/bridge/browser.ts")]
+    : [join(packagedApp, "Contents/Resources/bridge/browser.bundle.mjs")];
 
 // Actual --local browser and fleet owner; private HTTP/discovery files only.
 // No daemon bootstrap, SSH, tmux server, or terminal subscription is needed.
@@ -100,16 +120,12 @@ test("Refresh of a retired selected fleet route reports route guidance without f
       XDG_STATE_HOME: root,
       XDG_CACHE_HOME: root,
     });
-    child = spawn(
-      process.execPath,
-      [
-        "--import",
-        import.meta.resolve("tsx"),
-        resolve("apps/tmux-gpui/bridge/browser.ts"),
-        "--local",
-      ],
-      { cwd: root, env, stdio: ["pipe", "pipe", "pipe"] },
-    );
+    if (packagedApp !== undefined) env.PATH = "/usr/bin:/bin";
+    child = spawn(browserNode, [...browserArgs, "--local"], {
+      cwd: root,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     child.on("error", (error) => {
       fatal ??= error;
     });
