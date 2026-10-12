@@ -410,3 +410,4 @@ mod new_agent;
 mod sidebar_visibility;
 
 mod header_scope;
+mod reference;
