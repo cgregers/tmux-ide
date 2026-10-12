@@ -276,7 +276,6 @@ SSH transport, so Disconnect can remain available beside an unavailable catalog.
 Selected route retirement reuses the existing input/child retirement path. Real
 remote SSH/PTY acceptance remains a separate gate.
 
-
 ## Design direction — 11 October comparison
 
 Keep TUI information architecture and daemon authority. Adopt consistent native
@@ -304,7 +303,6 @@ Sources inspected: https://github.com/zed-industries/zed/tree/main/crates/ui/src
 https://zed.dev/docs/appearance, https://github.com/penso/herdr-gpui and the vendored
 Herdr modules above. These are design targets, not completed visual parity claims.
 
-
 ## Next Home/F5 parity increments after the first popover
 
 Independent source comparison identified these concrete gaps. None is complete
@@ -328,7 +326,6 @@ Popover physical acceptance: normal/narrow Home and Workspace geometry; outside
 click dismissal without underlying action/input; wheel isolation; marked IME and
 paste ownership; Escape focus restoration without clearing interrupted-input
 state; disabled/stale commands; light/dark contrast and resize while open.
-
 
 ### Fleet-wide F7 dependency
 
@@ -369,7 +366,6 @@ subsequently added in c8c1efca and physically qualified for Home/F7 with exact
 keyboard/paste delivery to duplicate-label second panes; see
 `evidence/native-agent-admission-2026-10-11/`. Original F7 evidence:
 `evidence/native-f7-attention-2026-10-11/`.
-
 
 ### Next observer recovery slice
 
@@ -420,7 +416,6 @@ format/size checks and debug build passed. Physical F5 pane-action QA remains op
 See `evidence/native-f5-pane-actions-2026-10-11/`; this does not close the full
 F5 action-vocabulary or release acceptance checklist.
 
-
 ## Exact fleet-server navigation — 11 October checkpoint
 
 Commits `2d889407` and `5ca94577` add retained-empty-server catalog handling and
@@ -440,7 +435,6 @@ Clippy configurations and the debug build. Physical native server selection and
 creation, remote SSH and packaged acceptance remain open. This supersedes the
 implementation gap for server hierarchy, not the broader physical checklist.
 
-
 ## Next Home context/search slice
 
 Current TUI `application-home-fleet.ts` searches agent, team, harness, project,
@@ -451,7 +445,6 @@ fields and show machine/server context without changing opaque navigation keys o
 admission. Verify context-only queries, duplicate labels, absent metadata, stale
 selection and narrow layouts. This is a current Home parity gap; embedded editors
 and legacy project-launch surfaces remain outside v1.
-
 
 ## Saved-machine removal checkpoint — 11 October
 
@@ -470,7 +463,6 @@ manager-level tests verify selected-route retirement and sibling preservation.
 Real remote SSH and physical macOS dialog acceptance remain open. Registry
 revision is local preflight, not daemon-side atomic compare-and-swap. User demos
 and actual saved profiles were left untouched.
-
 
 ## Home agent context/search checkpoint — 11 October
 
@@ -492,7 +484,6 @@ OS input and remote checks remain distinct and open. See
 This supersedes the preceding context/search implementation gap, without claiming
 full Home/fleet parity or release readiness.
 
-
 ## Packaged Home/fleet checkpoint — 11 October
 
 The fresh release-mode development app at source96e1ecc6 passed five artifact/
@@ -504,7 +495,6 @@ both passed with unchanged source sessions. Evidence and exact artifact hashes:
 bridge workflows only; no native UI, real remote SSH, signing or install/update
 acceptance is claimed. Saved-machine removal is still source-process qualified.
 
-
 ## Home/fleet CI wiring — 11 October
 
 Source Linux and exact-package macOS Home/fleet journeys are now wired into the
@@ -513,7 +503,6 @@ builds the pinned patched tmux in a private directory. The exact journey step
 passed locally against existing qualified artifacts; a new hosted run is still
 required. This does not close native UI, remote SSH or release acceptance. See
 `evidence/packaged-fleet-ci-2026-10-11/`.
-
 
 ## Saved-machine editing checkpoint — 11 October
 
@@ -531,7 +520,6 @@ canonical HTTP handler verifies exact private-file editing, sibling/pin retentio
 and duplicate refusal. See `evidence/native-machine-edit-2026-10-11/` for gate
 results and source hashes. Physical pointer/IME, real SSH and exact packaging of
 this newer native binary remain unqualified. The active user demo is unchanged.
-
 
 ## Packaged machine-management checkpoint — 11 October
 

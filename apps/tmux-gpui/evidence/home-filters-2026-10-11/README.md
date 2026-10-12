@@ -6,6 +6,7 @@ status/attention, while opening uses the existing opaque key and revision fences
 Unavailable retained rows never gain activation through filtering.
 
 Validation:
+
 - 134 focused tmux_snapshot tests passed, including search input isolation,
   combined filters, unavailable statuses and existing stale row identity tests.
 - Default workspace test run passed; all-target/all-feature Clippy passed.

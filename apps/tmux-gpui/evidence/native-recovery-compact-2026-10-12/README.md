@@ -5,6 +5,7 @@ Source baseline: f180c5da with the reviewed native-recovery-smoke.mjs change in 
 ## Physical journey
 
 CUA operated the actual macOS native QA window:
+
 1. Opened the disposable session from Home and clicked its terminal.
 2. Typed `echo BEFORE_REPLACEMENT` and Return. The fixture required the standalone output marker from its exact owned pane.
 3. Fixture stopped only its owned daemon. Observed the native terminal clear and show `Terminal connection closed (code 1001)` before creating the recovery signal.

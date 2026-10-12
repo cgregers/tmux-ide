@@ -8,4 +8,4 @@ Physical attempt launched a separate unsigned Paste QA copy with a fresh 1e50059
 
 The exact owned fixture was cancelled with SIGTERM. It exited1, wrote passed:false, and its native/launcher/browser PIDs were confirmed absent. The original Compact Preview remained running. Production sessions were not touched. The failed log and receipt are retained. A fresh unique evidence directory and a usable desktop are required for physical retry.
 
-The expected payload remains PASTE_界_é_🙂 followed by a newline and SECOND_LINE:42bytes including bracketed-paste delimiters. The test retains exact raw bytes, no delayedinput, producerPID/alive and source-survival assertions. These remain unexecuted acceptance requirements here, not successful claims.
+The expected payload remains `PASTE_界_é_🙂` followed by a newline and `SECOND_LINE`: 42 bytes including bracketed-paste delimiters. The test retains exact raw bytes, no delayedinput, producerPID/alive and source-survival assertions. These remain unexecuted acceptance requirements here, not successful claims.

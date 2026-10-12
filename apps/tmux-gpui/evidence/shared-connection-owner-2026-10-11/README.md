@@ -12,6 +12,7 @@ client package untouched. Daemon tsc emits the new .js/.d.ts subpath. Native dia
 profile persistence and native route selection are not wired yet.
 
 Validation:
+
 - 80 lifecycle/SSH transport/relay/machine registry/production graph tests pass.
   Existing owner lifecycle cases now exercise the shared factory directly.
 - 2 boundary tests verify package export and bundled transitive imports: SSH

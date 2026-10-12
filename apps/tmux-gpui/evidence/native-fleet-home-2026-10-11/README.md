@@ -73,7 +73,6 @@ UI is NOT qualified. The prior Loading observation no longer describes the
 currently visible Home, but no cause or code fix is established. This executable
 predates the later machine-toggle source additions; no toggle UI is claimed here.
 
-
 ## Fleet picker closes on typing — reproduced and corrected
 
 The captured fleet-only Home state exposed a deterministic UI defect: F6 opened
@@ -98,6 +97,6 @@ keyboard-routing or persistence qualification is claimed from that observation.
 After the picker fix and machine management additions: workspace default
 **2835 passed / 10 ignored**, all features **2869 passed / 17 ignored**. Both
 Clippy configurations, format, source size and bridge (**315 passed / 5 skipped**)
-passed. See final-*.log. Log trailing blank lines are normalized only. These
+passed. See final-\*.log. Log trailing blank lines are normalized only. These
 checks do not replace physical fleet navigation, SSH, machine-persistence or
 packaged/release verification.

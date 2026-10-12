@@ -32,7 +32,6 @@ Native reduced-motion preference wiring remains pending; a static indicator API
 exists. This source change is not signed/released packaging or a claim of full
 TUI/platform parity. Existing user demos were not replaced by the work.
 
-
 Final qualification on the compact-menu source:
 
 - Default workspace: 2,915 passed, 0 failed, 10 explicitly ignored.
