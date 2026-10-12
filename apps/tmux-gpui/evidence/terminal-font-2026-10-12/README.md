@@ -11,3 +11,7 @@ tests-all: (2958, 0, 17)
 Initial full gate found field_reassign_with_default; corrected without suppression. Physical font rendering/save/restart and exact package verification remain pending. Native font harness syntax/lint and isolated cancellation control passed.
 
 Packaged release build succeeded and all 10 exact-package checks passed (zero skips). Native inspection showed Menlo 14 → 15 and family changes to Courier New and back to Menlo. The first physical run was invalidated by an extra operator Escape reaching the private terminal. The repeat showed a runtime-failure diagnostic and an empty terminal; save/restart verification remains incomplete. This is not a qualified native persistence or rendering result. The repeat harness was sent SIGTERM for its owned cleanup. Production sessions and the installed user Alpha were not changed.
+
+## Native save/restart follow-up
+
+The unchanged packaged app passed a fresh private native run: open the sole session, observe FONT_READY, F5 → Terminal font, increase Menlo 14 to 15, Cmd-Q, harness relaunch, reopen session, inspect Menlo 15 in the font picker, Cmd-Q. Receipt confirms zero terminal input bytes, source process survives both closes, and owned cleanup completes. This establishes native persistence for this path; the previous runtime-failure remains unexplained and is not claimed fixed. The earlier extra Escape run remains invalidated by operator input. No production sessions or installed Alpha were changed.
