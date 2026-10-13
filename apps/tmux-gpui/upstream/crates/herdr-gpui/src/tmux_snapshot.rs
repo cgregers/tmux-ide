@@ -293,7 +293,7 @@ struct SnapshotView {
     last_system: Option<appearance::System>,
     glass: glass::Glass,
     last_workspace_session: Option<String>,
-    pending_session_open: Option<(u64, String)>,
+    pending_session_open: Option<session_open::Intent>,
     header_controls: pane_chrome::Controls,
     terminal_focus: FocusHandle,
     input_interrupted: bool,

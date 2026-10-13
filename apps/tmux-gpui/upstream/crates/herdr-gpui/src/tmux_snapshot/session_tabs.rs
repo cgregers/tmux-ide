@@ -241,8 +241,13 @@ impl SnapshotView {
             self.session_tabs.pending = None;
         } else if state.request == pending.request {
             self.browser_request = pending.request;
+            self.pending_session_open = (!pending.closing
+                && state.surface == browser::Surface::Workspace
+                && state.selected_pane.is_none()
+                && state.frame.is_none()
+                && !state.input_ready)
+                .then(|| super::session_open::Intent::admitted(state.request));
             self.session_tabs.pending = None;
-            self.pending_session_open = None;
             self.header_controls = Default::default();
             self.sidebar_keyboard.active = false;
             self.cancel_attention();

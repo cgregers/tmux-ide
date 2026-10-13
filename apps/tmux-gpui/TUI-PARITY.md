@@ -798,3 +798,17 @@ in Opening. A diagnostic-only rerun confirmed this seam. Alpha1312 is therefore
 not qualified for distribution; alpha1311 does not include retained tabs.
 Evidence: retained-session-tabs-2026-10-13. No full-parity, remote or signed
 clean-Mac acceptance claim is made.
+
+
+### Session admission continuation repair — 13 October
+
+Combined native/daemon evidence exposed a missing native preferred-pane
+continuation after retained-tab admission. History navigation had the same gap.
+The reviewed repair extends the existing one-shot session-open intent to an
+acknowledged request, preserving exact-session navigation and cancellation.
+Closing tabs and directly accepted live frames do not arm a continuation.
+Both regressions fail before the fix; 319 focused tests pass after. Full gates
+pass: 2,999 default / 3,033 all-feature tests (10/17 existing ignored), format,
+size and both strict Clippy configurations. Evidence: session-continuation-2026-10-13.
+Rebuilt native-plus-daemon verification remains required; alpha1312 stays
+unqualified. User is testing the current preview, so UI automation is paused.

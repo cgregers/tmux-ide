@@ -19,7 +19,7 @@ fn fleet_click_uses_current_token_and_retires_terminal_input(cx: &mut TestAppCon
         assert!(matches!(receiver.try_recv().unwrap(), browser::Command::FleetSession { request: 8, selection } if selection == token));
         assert!(!view.browser_state.input_ready);
         assert!(view.frame.is_none());
-        assert_eq!(view.pending_session_open, Some((8, "$1".into())));
+        assert_eq!(view.pending_session_open, Some(crate::tmux_snapshot::session_open::Intent::exact(8, "$1".into())));
         assert!(receiver.try_recv().is_err());
     }));
 }

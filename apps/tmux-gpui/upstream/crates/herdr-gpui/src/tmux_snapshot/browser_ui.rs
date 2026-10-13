@@ -507,7 +507,8 @@ impl SnapshotView {
             .is_some_and(|s| s.try_send(command).is_ok())
         {
             self.browser_request = request;
-            self.pending_session_open = opening_session.map(|id| (request, id));
+            self.pending_session_open =
+                opening_session.map(|id| super::session_open::Intent::exact(request, id));
             self.frame = None;
             self.browser_state.input_ready = false;
             self.browser_state.status = "Loading selection".into();

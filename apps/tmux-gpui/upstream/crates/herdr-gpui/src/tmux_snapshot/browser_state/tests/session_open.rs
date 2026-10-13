@@ -113,7 +113,10 @@ fn session_followup_refuses_background_wrong_session_and_queue_failure(cx: &mut 
                 assert!(view.pending_session_open.is_none());
             }
             // An EOF invalidates even a pending request with no completed catalog.
-            view.pending_session_open = Some((view.browser_request, "session-a".into()));
+            view.pending_session_open = Some(crate::tmux_snapshot::session_open::Intent::exact(
+                view.browser_request,
+                "session-a".into(),
+            ));
             view.apply_browser_state(None, cx);
             assert!(view.pending_session_open.is_none());
             // Failed admission of the initial Session command must never arm a follow-up.

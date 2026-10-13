@@ -11,6 +11,7 @@ mod machine;
 mod navigation_keys;
 mod popover;
 mod saved_machines;
+mod session_continuation;
 mod session_history;
 mod session_popover;
 mod session_tabs;
