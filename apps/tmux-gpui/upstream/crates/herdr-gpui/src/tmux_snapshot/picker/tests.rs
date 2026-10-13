@@ -11,6 +11,7 @@ mod machine;
 mod navigation_keys;
 mod popover;
 mod saved_machines;
+mod session_history;
 mod session_popover;
 use crate::tmux_snapshot::{decode, presence::Presence};
 use core::prelude::v1::test;
@@ -57,6 +58,7 @@ pub(super) fn make_view(
         picker: None,
         attention: Default::default(),
         palette: Default::default(),
+        session_history: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,

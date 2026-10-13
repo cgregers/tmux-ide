@@ -97,6 +97,7 @@ fn browser_fixture(
         picker: None,
         attention: Default::default(),
         palette: Default::default(),
+        session_history: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,

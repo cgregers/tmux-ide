@@ -23,6 +23,7 @@ mod pane_chrome;
 mod picker;
 mod presence;
 mod selection;
+mod session_history;
 mod session_open;
 mod shell;
 mod stream;
@@ -235,6 +236,7 @@ fn show(
                         picker: None,
                         attention: Default::default(),
                         palette: Default::default(),
+                        session_history: Default::default(),
                         home_filter: None,
                         pane_actions: None,
                         new_session: None,
@@ -294,6 +296,7 @@ struct SnapshotView {
     picker: Option<picker::Picker>,
     attention: picker::attention::Owner,
     palette: picker::palette::Owner,
+    session_history: session_history::Owner,
     home_filter: Option<home::filters::Controls>,
     pane_actions: Option<pane_actions::Menu>,
     new_session: Option<new_session::Dialog>,

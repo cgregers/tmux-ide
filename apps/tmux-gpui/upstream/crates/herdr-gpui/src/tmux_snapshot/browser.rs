@@ -82,6 +82,8 @@ pub(super) struct State {
     pub home_agents: Option<home_agents::Roster>,
     pub home_agent_filter: Option<super::home::machine_filter::Capability>,
     pub home_agent_recovery: Option<super::home::recovery::Capability>,
+    pub session_history: Option<super::session_history::Capability>,
+    pub session_history_rejected: Option<super::session_history::Rejected>,
     pub palette_supported: bool,
     pub palette_selection_rejected: Option<super::picker::attention::Rejected>,
     pub palette_agents: Option<super::picker::attention::Publication>,
@@ -124,6 +126,8 @@ struct Publication {
     home_agents: Option<home_agents::Roster>,
     home_agent_filter: Option<super::home::machine_filter::Capability>,
     home_agent_recovery: Option<super::home::recovery::Capability>,
+    session_history: Option<super::session_history::Capability>,
+    session_history_rejected: Option<super::session_history::Rejected>,
     #[serde(default)]
     palette_supported: bool,
     palette_selection_rejected: Option<super::picker::attention::Rejected>,
@@ -165,6 +169,13 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "session-history", rename_all = "camelCase")]
+    SessionHistory {
+        request: u64,
+        from_request: u64,
+        revision: u64,
+        action: String,
+    },
     #[serde(rename = "home-agent-filter", rename_all = "camelCase")]
     HomeAgentFilter {
         request: u64,
@@ -428,6 +439,10 @@ impl Reader {
             || p.fleet.as_ref().is_some_and(|f| !f.valid())
             || p.appearance.as_ref().is_some_and(|a| !a.valid())
             || p.home_agents.as_ref().is_some_and(|r| !r.valid())
+            || p.session_history.as_ref().is_some_and(|h| !h.valid())
+            || p.session_history_rejected
+                .as_ref()
+                .is_some_and(|h| !h.valid() || h.from_request != p.request)
             || p.palette_agents.as_ref().is_some_and(|r| !r.valid())
             || p.palette_selection_rejected
                 .as_ref()
@@ -531,6 +546,8 @@ impl Reader {
             home_agent_filter: p.home_agent_filter,
             home_agent_recovery: p.home_agent_recovery,
             palette_supported: p.palette_supported,
+            session_history: p.session_history,
+            session_history_rejected: p.session_history_rejected,
             palette_selection_rejected: p.palette_selection_rejected,
             palette_agents: p.palette_agents,
             attention_supported: p.attention_supported,
@@ -663,3 +680,7 @@ mod fleet_server_tests;
 #[cfg(test)]
 #[path = "browser_palette_tests.rs"]
 mod palette_tests;
+
+#[cfg(test)]
+#[path = "browser_session_history_tests.rs"]
+mod session_history_tests;

@@ -782,6 +782,9 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.session_history_key(event, window, cx) {
+            return;
+        }
         if self.new_session.is_some() {
             self.new_session_key(event, window, cx);
             return;

@@ -184,14 +184,9 @@ impl SnapshotView {
         {
             return;
         }
-        let request = self
-            .browser_request
-            .max(self.palette.last_request)
-            .max(self.attention.last_request)
-            .saturating_add(1);
-        if request > 9_007_199_254_740_991 {
+        let Some(request) = self.next_navigation_request() else {
             return;
-        }
+        };
         self.palette.last_request = request;
         let pending = Rejected {
             request,

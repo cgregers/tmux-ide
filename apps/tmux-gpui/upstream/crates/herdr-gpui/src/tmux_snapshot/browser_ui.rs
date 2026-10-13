@@ -226,6 +226,7 @@ impl SnapshotView {
         }
         // Let application navigation consume its keys before terminal input forwarding.
         if super::picker::commands::shortcut(&event.keystroke)
+            || super::session_history::shortcut(&event.keystroke)
             || sidebar::focus_shortcut(&event.keystroke)
         {
             return;
@@ -434,17 +435,10 @@ impl SnapshotView {
         self.wheel = Default::default();
         window.blur(cx);
         self.discard_composition(cx);
-        let Some(request) = self
-            .browser_request
-            .max(self.attention.last_request)
-            .max(self.palette.last_request)
-            .checked_add(1)
-        else {
+        let Some(request) = self.next_navigation_request() else {
             return;
         };
-        if request > 9_007_199_254_740_991 {
-            return;
-        }
+        self.session_history.pending = None;
         let changing_machine = matches!(
             selection,
             Selection::Machine(_)
