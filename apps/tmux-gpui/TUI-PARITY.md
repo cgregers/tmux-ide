@@ -752,3 +752,19 @@ acceptance and a new package are pending; alpha1310 does not contain this slice.
 See `evidence/workspace-fleet-agents-2026-10-13/` for the exact evidence and limits.
 Retained session tabs, combined native/remote validation, activation and signed
 clean-machine install/update acceptance remain open.
+
+
+### Local alpha1311 qualified — 13 October
+
+Native sidebar commit `33109b26` now has a qualified optimized build and physical
+synthetic acceptance: duplicate agent context/status/coverage displayed, exact
+Machine B selection reached the intended pane and selection, then owned cleanup.
+The first fixture omitted fleet context and failed; the correction and both
+receipts are retained. Native QA used Ctrl-G activation and does not prove normal
+Finder launch. Long context labels ellipsize; broad narrow-layout QA remains open.
+
+Local unsigned alpha `2026101311` passed ten exact-package checks and the bundled
+bridge's real isolated canonical-daemon switching fixture, without source fallback.
+All 22 regular archived files match the assembled app. Native and daemon checks
+remain separate; combined remote, signed/clean-Mac install/update acceptance and
+retained session tabs remain open. See the Workspace fleet evidence directory.

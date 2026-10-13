@@ -48,3 +48,12 @@ and no-default-feature Clippy, default tests (2,983 passed, 10 ignored), and
 all-feature tests (3017 passed, 17 ignored).
 Final native source hashes were rechecked after the run. Native visual and
 package acceptance remain pending. Logs and command results are preserved here.
+
+## Native and package acceptance
+
+See `native-visual-observations.md` for the synthetic GUI test and its explicit
+limits, including the fixture-context correction. Local alpha1311 passed ten
+exact-package checks and the bundled bridge real-daemon fixture. Archive integrity
+verified every one of 22 regular files. `alpha1311-verification.json` records hashes;
+`alpha1311-README.txt` states requirements and remaining limitations. No public
+release, signing, production daemon mutation or combined remote GUI claim.
