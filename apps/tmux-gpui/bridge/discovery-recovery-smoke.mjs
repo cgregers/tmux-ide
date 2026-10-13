@@ -218,17 +218,31 @@ try {
       .split("\n")
       .some((line) => line === beforeMarker),
   );
+  assert.equal(stderr, "", "No diagnostic is allowed before the controlled daemon stop");
   const firstInstance = daemon.record.instanceId;
   const baselineSequence = latest.sequence;
   await daemon.stop();
   daemon = undefined;
-  await until(
-    () =>
-      latest?.sequence > baselineSequence &&
-      latest.snapshot === null &&
-      latest.inputReady === false &&
-      latest.status === diagnosticStatus({ code: "transport-closed", closeCode: 1001 }),
-  );
+  let shutdownDiagnostic;
+  await until(() => {
+    // Hub retirement can deliver source-closed before the socket closes with 1001.
+    // Accept only those two controlled-stop outcomes, retaining first-fault status.
+    const lines = stderr.trim().split("\n").filter(Boolean);
+    const diagnostic = lines.length === 1 ? parseDiagnosticLine(lines[0]) : null;
+    const expected =
+      diagnostic?.code === "source-closed" ||
+      (diagnostic?.code === "transport-closed" && diagnostic.closeCode === 1001);
+    if (
+      !expected ||
+      !(latest?.sequence > baselineSequence) ||
+      latest.snapshot !== null ||
+      latest.inputReady !== false ||
+      latest.status !== diagnosticStatus(diagnostic)
+    )
+      return false;
+    shutdownDiagnostic = diagnostic;
+    return true;
+  });
   assert.equal(latest.connection, connection);
   daemon = await startFixtureDaemon(fleet);
   assert.notEqual(daemon.record.instanceId, firstInstance);
@@ -257,7 +271,7 @@ try {
   assert.ok(!JSON.stringify(latest).includes(daemon.record.authToken));
   assert.deepEqual(
     stderr.trim().split("\n").map(parseDiagnosticLine),
-    [{ code: "transport-closed", closeCode: 1001 }],
+    [shutdownDiagnostic],
     "Only the controlled daemon-shutdown diagnostic is expected",
   );
   checkFatal();
