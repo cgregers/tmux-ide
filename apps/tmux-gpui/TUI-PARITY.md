@@ -781,6 +781,20 @@ identity checks after fixing capability invalidation during badge refresh.
 Bridge: 511 tests passed, five optional skips, typecheck/lint and review passed.
 
 Native strip, controls and shortcuts are source-reviewed with 311 focused tests
-passing. Full native gates, visual acceptance and packaging are pending; alpha1311
-does not include retained tabs. Evidence: retained-session-tabs-2026-10-13.
-No full-parity or combined native/remote acceptance claim is made.
+passing. Full native gates pass (2,991 default / 3,025 all-feature tests, 10/17
+existing ignored, format, size and both strict Clippy configurations). Native
+synthetic physical QA verified F9 activation, pointer-close of the inactive tab
+with the current frame preserved, and Ctrl-F9 returning Home. The first attempt
+sent a second F9 before observing the first switch; its failure receipt is
+preserved alongside the unchanged passing rerun. Ctrl-G activation was used,
+so normal Finder launch remains unqualified.
+
+Local unsigned alpha1312 is assembled from native commit `f1dd38b0`. Ten exact
+package checks and the packaged bridge real-daemon tab fixture pass, including
+original pane identity preservation and owned cleanup. Combined native GUI and
+real daemon testing found a release blocker: F9 reaches the completed catalog
+but the native client does not send its preferred-pane continuation, remaining
+in Opening. A diagnostic-only rerun confirmed this seam. Alpha1312 is therefore
+not qualified for distribution; alpha1311 does not include retained tabs.
+Evidence: retained-session-tabs-2026-10-13. No full-parity, remote or signed
+clean-Mac acceptance claim is made.
