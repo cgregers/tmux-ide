@@ -31,6 +31,7 @@ const row: HomeAgentRow = {
 function fixture(count = 1) {
   let machine: string | null = null;
   let palette: string | null = null;
+  let workspace = false;
   let starts = 0,
     publications = 0;
   let groups: MachineAgentGroup[] = ["local", "remote"].map((machineId) => ({
@@ -97,10 +98,15 @@ function fixture(count = 1) {
     () => machine,
     undefined,
     () => palette,
+    () => workspace,
   );
   owner.start();
   return {
     owner,
+    workspace(active: boolean) {
+      workspace = active;
+      owner.refresh();
+    },
     palette(query: string | null) {
       palette = query;
       owner.refresh();
@@ -399,16 +405,12 @@ test("connected partial Home coverage does not claim machine disconnection", () 
 test("palette query retains beyond Home/attention caps and releases only its budget", () => {
   const f = fixture(300);
   f.setRows(
-    f
-      .groups()
-      .map((group) => ({
-        ...group,
-        agents: group.agents.map((agent, i) =>
-          group.machineId === "remote" && i === 299
-            ? { ...agent, name: "Zebra late agent" }
-            : agent,
-        ),
-      })),
+    f.groups().map((group) => ({
+      ...group,
+      agents: group.agents.map((agent, i) =>
+        group.machineId === "remote" && i === 299 ? { ...agent, name: "Zebra late agent" } : agent,
+      ),
+    })),
   );
   f.filter("local");
   f.emit();
@@ -423,5 +425,66 @@ test("palette query retains beyond Home/attention caps and releases only its bud
   f.palette(null);
   assert.equal(f.owner.resolve(late.key), null);
   assert.ok(f.owner.resolve(homeKey));
+  f.owner.dispose();
+});
+
+test("Workspace grouped cap retains later team rows independently of Home and F5 retention", () => {
+  const f = fixture(300);
+  const team = { id: "team.abcdefghijklmnop", name: "Same", source: "manual" as const };
+  f.setRows(
+    f
+      .groups()
+      .map((group, index) => ({
+        ...group,
+        agents: group.agents.map((agent, i) =>
+          index === 0 && i === 299 ? { ...agent, team } : agent,
+        ),
+      })),
+  );
+  f.emit();
+  f.filter("remote");
+  f.workspace(true);
+  const workspace = f.owner.workspaceSnapshot()!;
+  const late = workspace.rows.find((r) => r.team)!;
+  assert.equal(workspace.rows[0]!.key, late.key);
+  assert.ok(f.owner.resolve(late.key));
+  f.palette("missing-query");
+  assert.ok(f.owner.resolve(late.key));
+  const stable = f.owner.workspaceSnapshot()!.rows.find((r) => r.team)!.key;
+  assert.equal(stable, late.key);
+  f.palette(null);
+  assert.ok(f.owner.resolve(late.key));
+  f.workspace(false);
+  assert.equal(f.owner.resolve(late.key), null);
+  assert.ok(f.owner.resolve(f.owner.homeSnapshot()!.rows[0]!.key));
+  f.owner.dispose();
+});
+
+test("four independent projections retain at most 1024 exact targets and release Workspace-only routes", () => {
+  const f = fixture(1200);
+  f.setRows(
+    f.groups().map((group) => ({
+      ...group,
+      agents: group.agents.map((agent, i) => ({
+        ...agent,
+        attention: group.machineId === "local" && i >= 256 && i < 512,
+        name: group.machineId === "local" && i >= 512 && i < 768 ? "Palette needle" : "Agent",
+        ...(group.machineId === "local" && i >= 768 && i < 1024
+          ? { team: { id: "team.abcdefghijklmnop", name: "Team", source: "manual" as const } }
+          : {}),
+        server: { serverId: group.machineId + "-server", generation: "generation" },
+      })),
+    })),
+  );
+  f.filter("remote");
+  f.palette("needle");
+  f.workspace(true);
+  const retained = f.snapshot().rows.filter((row) => f.owner.resolve(row.key));
+  assert.equal(retained.length, 1024);
+  const workspaceOnly = f.owner.workspaceSnapshot()!.rows[0]!;
+  assert.equal(f.owner.resolve(workspaceOnly.key)?.row.server?.serverId, "local-server");
+  f.workspace(false);
+  assert.equal(f.owner.resolve(workspaceOnly.key), null);
+  assert.equal(f.snapshot().rows.filter((row) => f.owner.resolve(row.key)).length, 768);
   f.owner.dispose();
 });

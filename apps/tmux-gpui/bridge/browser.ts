@@ -1,4 +1,8 @@
 import {
+  createWorkspaceFleetAgents,
+  openWorkspaceFleetAgentSchema,
+} from "./workspace-fleet-agents.ts";
+import {
   createSessionHistoryController,
   sessionHistoryCommandSchema,
 } from "./session-history-controller.ts";
@@ -120,6 +124,7 @@ const machineRegistryCommand = z.discriminatedUnion("operation", [
 const commandSchema = z.union([
   fleetPreferenceCommand,
   sessionHistoryCommandSchema,
+  openWorkspaceFleetAgentSchema,
   attentionObserveSchema,
   openAttentionAgentSchema,
   paletteObserveSchema,
@@ -334,6 +339,14 @@ let attentionSelectionRejected: { request: number; fromRequest: number; scope: n
 const attention = createAttentionOwner(publish);
 let paletteSelectionRejected: { request: number; fromRequest: number; scope: number } | null = null;
 const palette = createPaletteOwner(publish);
+const workspaceFleetAgents = createWorkspaceFleetAgents(publish);
+let workspaceFleetAgentRejected: {
+  request: number;
+  fromRequest: number;
+  scope: number;
+  rosterRevision: number;
+  key: string;
+} | null = null;
 const sessionHistory = createSessionHistoryController();
 let sessionHistoryRejected: {
   request: number;
@@ -578,6 +591,18 @@ function launchFleetSelection(
 }
 
 function publish() {
+  workspaceFleetAgents.sync(
+    request,
+    catalog ?? null,
+    !stopped && foreground && surface === "workspace" && selectedSession !== null,
+    fleet,
+    (row) => {
+      const pane = panes.find(
+        (pane) => pane.semanticPaneId === selectedPane && pane.liveSessionId === selectedSession,
+      );
+      return !!pane && !!fleet?.isSelectedAgent(row, pane);
+    },
+  );
   const preferenceState = fleet?.preferenceSnapshot();
   if (preferenceState?.phase === "ready" && preferenceState.state)
     sessionHistory.seed(preferenceState.state.recent);
@@ -621,6 +646,8 @@ function publish() {
       attentionSupported: true,
       attentionAgents: attention.publication(),
       attentionSelectionRejected,
+      workspaceFleetAgents: workspaceFleetAgents.publication(),
+      workspaceFleetAgentRejected,
       workspaceAgents:
         surface === "workspace" && selectedSession && agentPublication
           ? { ...agentPublication, sessionId: selectedSession }
@@ -722,6 +749,7 @@ async function stop() {
   sessionHistory.cancel();
   acceptSessionVisit = null;
   stopped = true;
+  workspaceFleetAgents.cancel();
   hostSource?.dispose();
   machines?.dispose();
   fleet?.dispose();
@@ -1533,6 +1561,7 @@ async function command(value: unknown) {
     active?.presentation.update(undefined, [], false);
     foreground = cmd.active;
     if (!foreground) {
+      workspaceFleetAgents.cancel();
       sessionHistory.cancel();
       attention.cancel();
       palette.cancel();
@@ -1760,6 +1789,54 @@ async function command(value: unknown) {
     active.child.stdin.write(line);
     return;
   }
+  if (cmd.type === "open-workspace-fleet-agent") {
+    if (!admitNavigationAttempt(cmd.request) || cmd.fromRequest !== request) return;
+    const target = workspaceFleetAgents.resolve(
+      cmd,
+      request,
+      foreground && !stopped && surface === "workspace",
+      fleet,
+    );
+    if (!target) {
+      workspaceFleetAgentRejected = {
+        request: cmd.request,
+        fromRequest: cmd.fromRequest,
+        scope: cmd.scope,
+        rosterRevision: cmd.rosterRevision,
+        key: cmd.key,
+      };
+      publish();
+      return;
+    }
+    workspaceFleetAgents.cancel();
+    attention.cancel();
+    palette.cancel();
+    retireAgents();
+    request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
+    const token = request,
+      capturedPresence = presenceRevision;
+    const current = () =>
+      !stopped && request === token && foreground && presenceRevision === capturedPresence;
+    sessionCatalogComplete = false;
+    initialPane = null;
+    snapshot = null;
+    inputReady = false;
+    selectedPane = null;
+    paneActions = null;
+    surface = "workspace";
+    selectedSession = null;
+    panes = [];
+    layouts = [];
+    status = "Loading agent";
+    publish();
+    await retire();
+    if (!current()) return;
+    launchFleetSelection(target.selection, token, target.row, current);
+    return;
+  }
   if (cmd.type === "session-history") {
     if (!admitNavigationAttempt(cmd.request) || cmd.fromRequest !== request) return;
     const key = sessionHistory.admit(
@@ -1784,6 +1861,7 @@ async function command(value: unknown) {
     request = cmd.request;
     sessionHistory.navigation(request);
     sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
     const token = request,
       capturedPresence = presenceRevision;
     const current = () =>
@@ -1826,6 +1904,7 @@ async function command(value: unknown) {
     request = cmd.request;
     sessionHistory.navigation(request);
     sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
     const token = request;
     const capturedPresence = presenceRevision;
     const current = () =>
@@ -1876,6 +1955,7 @@ async function command(value: unknown) {
     request = cmd.request;
     sessionHistory.navigation(request);
     sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
     const token = request;
     const capturedPresence = presenceRevision;
     const current = () =>
@@ -1928,6 +2008,7 @@ async function command(value: unknown) {
     request = cmd.request;
     sessionHistory.navigation(request);
     sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
     sessionCatalogComplete = false;
     initialPane = null;
     const token = request;
@@ -1967,6 +2048,7 @@ async function command(value: unknown) {
     request = cmd.request;
     sessionHistory.navigation(request);
     sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
     const token = request;
     const capturedPresence = presenceRevision;
     retireAgents();
@@ -2011,6 +2093,7 @@ async function command(value: unknown) {
     request = cmd.request;
     sessionHistory.navigation(request);
     sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
     sessionCatalogComplete = false;
     initialPane = null;
     retireAgents();
@@ -2058,6 +2141,7 @@ async function command(value: unknown) {
   request = cmd.request;
   sessionHistory.navigation(request, historyContinuation);
   sessionHistoryRejected = null;
+  workspaceFleetAgentRejected = null;
   sessionCatalogComplete = false;
   initialPane = null;
   const token = request;

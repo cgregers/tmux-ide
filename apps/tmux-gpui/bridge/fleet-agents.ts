@@ -1,3 +1,4 @@
+import { workspaceAgentRows } from "./workspace-fleet-agents.ts";
 import { matchesPaletteQuery } from "./palette.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
@@ -25,12 +26,14 @@ export function createFleetAgentRoster(
   homeMachine: () => string | null = () => null,
   machineSessions?: (id: string) => number,
   paletteQuery: () => string | null = () => null,
+  workspaceActive: () => boolean = () => false,
 ) {
   let stopped = false;
   let stop = () => {};
   let targets = new Map<string, Target>();
   let keys = new Map<string, string>();
   let homeSnapshot: HomeAgentSnapshot | null = null;
+  let workspaceSnapshot: HomeAgentSnapshot | null = null;
   const refresh = (notify = true) => {
     if (stopped) return;
     const groups = source.getSnapshot();
@@ -68,11 +71,13 @@ export function createFleetAgentRoster(
     const homeRows = rows.filter((row) => selected === null || row.machineId === selected);
     const query = paletteQuery();
     const paletteRows = query === null ? [] : rows.filter((row) => matchesPaletteQuery(row, query));
+    const workspaceRows = workspaceActive() ? workspaceAgentRows(rows) : [];
     const visible = new Set(
       [
         ...homeRows.slice(0, 256),
         ...rows.filter((row) => row.attention).slice(0, 256),
         ...paletteRows.slice(0, 256),
+        ...workspaceRows.slice(0, 256),
       ].map((row) => row.key),
     );
     targets = new Map([...next].filter(([key]) => visible.has(key)));
@@ -170,6 +175,7 @@ export function createFleetAgentRoster(
       homeRows,
       true,
     );
+    workspaceSnapshot = project(groups, workspaceRows);
     if (notify) changed(project(groups, rows));
   };
   return {
@@ -179,6 +185,7 @@ export function createFleetAgentRoster(
     },
     refresh,
     homeSnapshot: () => homeSnapshot,
+    workspaceSnapshot: () => workspaceSnapshot,
     recover(action: "retry" | "load-more") {
       if (stopped) return;
       if (action === "retry") source.retry();

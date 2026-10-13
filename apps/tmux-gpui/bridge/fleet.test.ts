@@ -703,3 +703,22 @@ test("history route distinguishes duplicate labels and live IDs by machine and f
     f.close();
   }
 });
+
+test("persistent Workspace, F5 and F7 share one scanner through query changes and independent cancellation", async () => {
+  const f = await fixture();
+  try {
+    const workspace = f.fleet.observeWorkspaceAgents(() => {});
+    const attention = f.fleet.observeAgents(() => {});
+    const palette = f.fleet.observePaletteAgents("first", () => {});
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    palette.update("second");
+    palette.dispose();
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    attention();
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    workspace();
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 1 });
+  } finally {
+    f.close();
+  }
+});

@@ -90,6 +90,7 @@ export function createNativeFleet(
       for (const listener of [...homeListeners]) listener({ machineId: homeMachineId, snapshot });
   };
   let paletteQuery: string | null = null;
+  let workspaceObservers = 0;
   let agentRoster: ReturnType<typeof createFleetAgentRoster> | undefined;
   let stopped = false;
   let started = false;
@@ -281,6 +282,7 @@ export function createNativeFleet(
       () => homeMachineId,
       (id) => catalog.getSnapshot().groups.find((group) => group.id === id)?.sessions.length ?? 0,
       () => paletteQuery,
+      () => workspaceObservers > 0,
     );
     agentRoster = roster;
     roster.start();
@@ -305,6 +307,22 @@ export function createNativeFleet(
       catalog.start();
     },
     observeAgents: observation.subscribe,
+    observeWorkspaceAgents(listener: (snapshot: HomeAgentSnapshot) => void) {
+      workspaceObservers++;
+      agentRoster?.refresh();
+      const unsubscribe = observation.subscribe(() => {
+        const snapshot = agentRoster?.workspaceSnapshot();
+        if (snapshot) listener(snapshot);
+      });
+      let disposed = false;
+      return () => {
+        if (disposed) return;
+        disposed = true;
+        workspaceObservers--;
+        unsubscribe();
+        agentRoster?.refresh();
+      };
+    },
     observePaletteAgents(query: string, listener: (value: HomeAgentSnapshot) => void) {
       paletteQuery = query;
       agentRoster?.refresh();

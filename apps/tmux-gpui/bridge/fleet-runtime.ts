@@ -147,6 +147,54 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
       throw error;
     }
   };
+  const attachmentKey = (config: PreviewHost & { liveSessionId: string }) => {
+    if (stopped) return null;
+    if (selected && host && "session" in selected) {
+      try {
+        selected.assertCurrent();
+      } catch {
+        return null;
+      }
+      if (
+        host.baseUrl !== config.baseUrl ||
+        host.ownerToken !== config.ownerToken ||
+        host.scope.serverId !== config.scope.serverId ||
+        host.scope.generation !== config.scope.generation ||
+        selected.session.liveSessionId !== config.liveSessionId
+      )
+        return null;
+      return fleet.canonicalKey(
+        selected.handle.id,
+        config.scope.serverId,
+        config.scope.generation,
+        config.liveSessionId,
+      );
+    }
+    const local = manager.getMachine("local"),
+      info = local?.read();
+    if (
+      !local ||
+      local.kind !== "local" ||
+      local.endpoint().state !== "ready" ||
+      !info ||
+      config.remoteSocketOrigin ||
+      config.ownerToken !== info.authToken
+    )
+      return null;
+    const origin = new URL(config.baseUrl);
+    if (
+      origin.protocol !== "http:" ||
+      !["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname) ||
+      Number(origin.port) !== info.port
+    )
+      return null;
+    return fleet.canonicalKey(
+      local.id,
+      config.scope.serverId,
+      config.scope.generation,
+      config.liveSessionId,
+    );
+  };
   return {
     start: () => {
       if (stopped || started) return;
@@ -159,53 +207,27 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     preferenceSnapshot: preferences.preferences.snapshot,
     recordVisit: preferences.preferences.recordVisit,
     resolveCanonical: fleet.resolveCanonical,
-    attachmentKey(config: PreviewHost & { liveSessionId: string }) {
-      if (stopped) return null;
-      if (selected && host && "session" in selected) {
-        try {
-          selected.assertCurrent();
-        } catch {
-          return null;
-        }
-        if (
-          host.baseUrl !== config.baseUrl ||
-          host.ownerToken !== config.ownerToken ||
-          host.scope.serverId !== config.scope.serverId ||
-          host.scope.generation !== config.scope.generation ||
-          selected.session.liveSessionId !== config.liveSessionId
-        )
-          return null;
-        return fleet.canonicalKey(
-          selected.handle.id,
-          config.scope.serverId,
-          config.scope.generation,
-          config.liveSessionId,
-        );
-      }
-      const local = manager.getMachine("local"),
-        info = local?.read();
+    attachmentKey,
+    isSelectedAgent(
+      row: import("../../../packages/presentation/src/home-agent-roster.ts").HomeAgentRow,
+      config: PreviewHost & { liveSessionId: string; semanticPaneId: string },
+    ) {
       if (
-        !local ||
-        local.kind !== "local" ||
-        local.endpoint().state !== "ready" ||
-        !info ||
-        config.remoteSocketOrigin ||
-        config.ownerToken !== info.authToken
+        !row.machineId ||
+        !row.server ||
+        row.paneId !== config.semanticPaneId ||
+        row.liveSessionId !== config.liveSessionId ||
+        row.server.serverId !== config.scope.serverId ||
+        row.server.generation !== config.scope.generation
       )
-        return null;
-      const origin = new URL(config.baseUrl);
-      if (
-        origin.protocol !== "http:" ||
-        !["localhost", "127.0.0.1", "[::1]"].includes(origin.hostname) ||
-        Number(origin.port) !== info.port
-      )
-        return null;
-      return fleet.canonicalKey(
-        local.id,
-        config.scope.serverId,
-        config.scope.generation,
-        config.liveSessionId,
+        return false;
+      const key = fleet.canonicalKey(
+        row.machineId,
+        row.server.serverId,
+        row.server.generation,
+        row.liveSessionId,
       );
+      return key !== null && key === attachmentKey(config);
     },
     async selectCanonical(key: string) {
       clear();
@@ -219,6 +241,7 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     preferenceCommand: fleet.preferenceCommand,
     publication: fleet.publication,
     observeAgents: fleet.observeAgents,
+    observeWorkspaceAgents: fleet.observeWorkspaceAgents,
     observePaletteAgents: fleet.observePaletteAgents,
     observeHomeAgents: fleet.observeHomeAgents,
     filterHomeAgents: fleet.filterHomeAgents,
