@@ -662,3 +662,27 @@ of unobserved-session discovery or live remote fleet admission.
 Remaining parity includes the full Workspace fleet tree and visited-session
 history. Narrow layout, broader physical IME/remote checks, intermittent
 activation and signed clean-machine installation remain open.
+
+### 13 October: Workspace fleet sidebar and local alpha09
+
+Commit `528c78cd` renders machine/server/session hierarchy with acknowledged
+machine collapse, favorites and exact scoped keyboard navigation. It retains
+active/favorite sessions when collapsed and keeps unknown-scope catalog fallback
+conservative. This does not yet add a full cross-session fleet-agent tree.
+
+Native gates passed: 289 focused, 2,969 default and 3,003 all-feature tests;
+format, size and both strict Clippy modes. Evidence commit `9a61a499` preserves
+a corrected-scope synthetic native journey, selecting the second identically
+named session on a different server. Expand/collapse and accepted pane display
+passed after keyboard activation. An earlier mouse-only activation failure is
+preserved, not resolved or excluded from the record.
+
+Unsigned local alpha build2026101309 includes this slice and F5 observed-fleet
+search. Ten packaged tests passed, and all22 regular archive files match the
+assembled app. It requires an existing local daemon and is not signed, notarized
+or qualified on a clean Mac. Older alpha builds remain available. No publishing
+or production daemon changes occurred. See
+`evidence/workspace-fleet-sidebar-2026-10-13/`.
+
+Remaining: cross-session Workspace agent tree, visited-session history, activation
+diagnosis, narrow/IME/remote qualification and signed install/update acceptance.
