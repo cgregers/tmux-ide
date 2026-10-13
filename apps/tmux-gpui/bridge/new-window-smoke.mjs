@@ -54,9 +54,101 @@ const run = (...args) =>
     timeout: 5000,
   }).trim();
 let daemon, browser, latest, fatal, result;
+let originalPane = null,
+  observedCreatedPane = null;
+let originalNativePaneIds = [];
 let buffer = "",
   stderr = "";
 const failures = [];
+// Failure-only evidence: never emit terminal contents, connection config or raw errors.
+function failureEvidence(error) {
+  const id = (value) =>
+    typeof value === "string" && /^[A-Za-z0-9_.:%@$-]{1,512}$/.test(value) ? value : null;
+  const integer = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+  const statuses = [
+    "Loading new terminal window",
+    "Loading new agent window",
+    "New window created; pane unavailable — refresh",
+  ];
+  let native = null;
+  let nativeReadFailed = false;
+  try {
+    const output = execFileSync(
+      fleet.environment.TMUX_IDE_TMUX_BIN,
+      [
+        "-S",
+        fleet.socketPath,
+        "list-panes",
+        "-a",
+        "-F",
+        "#{session_id}|#{window_id}|#{pane_id}|#{pane_pid}|#{@tmux_ide_pane_id}",
+      ],
+      {
+        env: { ...process.env, ...fixtureEnvironment },
+        encoding: "utf8",
+        timeout: 5000,
+        maxBuffer: 65536,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    const rows = output.trim().split("\n");
+    assert.ok(rows.length <= 512, "Bounded native failure inventory");
+    native = rows.map((row) => {
+      const [session, window, pane, pid, semanticPane, extra] = row.split("|");
+      assert.ok(
+        extra === undefined &&
+          /^\$\d+$/.test(session) &&
+          /^@\d+$/.test(window) &&
+          /^%\d+$/.test(pane) &&
+          /^[1-9]\d*$/.test(pid),
+      );
+      return {
+        session,
+        window,
+        pane,
+        pid,
+        semanticPane: id(semanticPane),
+        existedBeforeAction: originalNativePaneIds.includes(pane),
+      };
+    });
+  } catch {
+    nativeReadFailed = true;
+  }
+  console.error(
+    JSON.stringify({
+      stage: "new-window-failure-evidence",
+      errorClass: ["Error", "AssertionError", "TypeError", "RangeError"].includes(error?.name)
+        ? error.name
+        : "Other",
+      errorCode: ["ERR_ASSERTION", "ETIMEDOUT", "ENOENT", "EPIPE"].includes(error?.code)
+        ? error.code
+        : null,
+      browser: {
+        request: integer(latest?.request),
+        sequence: integer(latest?.sequence),
+        presenceRevision: integer(latest?.presenceRevision),
+        inputReady: latest?.inputReady === true,
+        hasSnapshot: !!latest?.snapshot,
+        selectedSession: id(latest?.selectedSession),
+        selectedPane: id(latest?.selectedPane),
+        originalPane,
+        observedCreatedPane,
+        status: statuses.includes(latest?.status) ? latest.status : "other",
+        retainedPaneIds: Array.isArray(latest?.panes)
+          ? latest.panes.slice(0, 512).map((pane) => id(pane.id))
+          : [],
+      },
+      // The browser's public publication deliberately does not expose the helper receipt.
+      receiptCreatedPaneAvailable: false,
+      observedCreatedPanePresent:
+        observedCreatedPane && native
+          ? native.some((pane) => pane.semanticPane === observedCreatedPane)
+          : null,
+      native,
+      nativeReadFailed,
+    }),
+  );
+}
 async function until(predicate) {
   const deadline = Date.now() + 25000;
   for (;;) {
@@ -182,12 +274,14 @@ try {
   await until(() => latest?.request === 1 && latest.sessionCatalogComplete);
   const original = latest.preferredPane;
   assert.ok(original);
+  originalPane = original;
   send({ type: "pane", request: 2, id: original });
   await until(() => latest?.inputReady && latest.paneActions);
   const originalWindow = latest.panes.find((p) => p.id === original).windowId;
   const before = run("list-panes", "-a", "-F", "#{pane_id}|#{pane_pid}|#{pane_birth_id}").split(
     "\n",
   );
+  originalNativePaneIds = before.map((row) => row.split("|")[0]);
   const command = {
     type: "pane-action",
     request: 2,
@@ -216,6 +310,7 @@ try {
       latest.paneActions,
   );
   const created = latest.selectedPane;
+  observedCreatedPane = created;
   const selectedWindow = latest.panes.find((p) => p.id === created).windowId;
   const nativeRows = run("list-panes", "-a", "-F", "#{pane_id}|#{@tmux_ide_pane_id}").split("\n");
   const createdNative = nativeRows.filter((row) => row.split("|")[1] === created);
@@ -288,6 +383,7 @@ try {
   };
 } catch (error) {
   failures.push(error);
+  failureEvidence(error);
 } finally {
   for (const cleanup of [
     () => stopFixtureChild(browser),
