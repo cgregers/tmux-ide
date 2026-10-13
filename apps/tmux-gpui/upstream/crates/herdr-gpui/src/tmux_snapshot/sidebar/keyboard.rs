@@ -83,6 +83,14 @@ impl SnapshotView {
                 state.selected = None;
             }
         }
+        // Rebind focus only while painting the same observed agent. The old
+        // revision remains ineligible for input until this redraw occurs.
+        if let Some(Target::FleetAgent { scope, key, .. }) = &state.selected {
+            state.selected = state.displayed.iter().flatten().find(|target| {
+                matches!(target, Target::FleetAgent { scope: current_scope, key: current_key, .. }
+                    if current_scope == scope && current_key == key)
+            }).cloned();
+        }
         let next = state.displayed.iter().position(|id| {
             id.as_ref()
                 .is_some_and(|id| Some(id) == state.selected.as_ref())

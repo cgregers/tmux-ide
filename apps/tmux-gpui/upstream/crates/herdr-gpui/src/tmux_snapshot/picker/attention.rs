@@ -134,6 +134,7 @@ impl SnapshotView {
     ) {
         if !self.presence.ready()
             || self.attention.pending.is_some()
+            || self.workspace_fleet_agents.pending.is_some()
             || self.attention.active != Some((self.browser_request, scope))
         {
             return;

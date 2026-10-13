@@ -180,6 +180,7 @@ impl SnapshotView {
     ) {
         if !self.presence.ready()
             || self.palette.pending.is_some()
+            || self.workspace_fleet_agents.pending.is_some()
             || self.palette.active != Some((self.browser_request, scope))
         {
             return;
@@ -245,3 +246,6 @@ impl SnapshotView {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod workspace_pending_tests;

@@ -1,5 +1,5 @@
 #[path = "sidebar.rs"]
-mod sidebar;
+pub(super) mod sidebar;
 pub(super) use sidebar::Keyboard as SidebarKeyboard;
 #[path = "workspace_agents.rs"]
 mod workspace_agents;
@@ -438,6 +438,7 @@ impl SnapshotView {
         let Some(request) = self.next_navigation_request() else {
             return;
         };
+        self.workspace_fleet_agents.pending = None;
         self.session_history.pending = None;
         let changing_machine = matches!(
             selection,
@@ -568,6 +569,15 @@ impl SnapshotView {
         {
             return;
         }
+        if let sidebar::Target::FleetAgent {
+            scope,
+            revision,
+            key,
+        } = target
+        {
+            self.select_workspace_fleet_agent(request, *scope, *revision, key, cx);
+            return;
+        }
         if let sidebar::Target::Collapse {
             revision,
             action,
@@ -580,7 +590,7 @@ impl SnapshotView {
         }
         self.select(
             match target {
-                sidebar::Target::Collapse { .. } => return,
+                sidebar::Target::Collapse { .. } | sidebar::Target::FleetAgent { .. } => return,
                 sidebar::Target::FleetSession {
                     selection, session, ..
                 } => Selection::FleetSession {
@@ -685,7 +695,11 @@ impl SnapshotView {
                     .pt_3()
                     .pb_1()
                     .text_color(rgb(theme.muted))
-                    .child("Sessions"),
+                    .child(if self.browser_state.workspace_fleet_agents.is_some() {
+                        "Fleet"
+                    } else {
+                        "Sessions"
+                    }),
             );
         let request = self.browser_request;
         for (index, row) in sidebar::rows(&self.browser_state).into_iter().enumerate() {
@@ -698,6 +712,13 @@ impl SnapshotView {
                     })),
                 |row| row.border_1().border_color(rgb(self.accent())),
             );
+            if let Some(key) = &row.agent
+                && let Some(publication) = &self.browser_state.workspace_fleet_agents
+                && let Some(agent) = publication.roster.rows.iter().find(|r| &r.key == key)
+            {
+                element =
+                    element.child(self.agent_indicator(agent, !publication.roster.available(key)));
+            }
             if let Some((action, favorite)) = &row.favorite {
                 element = element.child(self.fleet_preference_button(
                     ("sidebar-favorite", index),

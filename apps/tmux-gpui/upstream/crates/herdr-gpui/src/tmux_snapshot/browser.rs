@@ -78,6 +78,8 @@ pub(super) struct State {
     pub split_gesture: Option<super::divider::canonical::Ack>,
     pub resize_gesture_supported: bool,
     pub resize_gesture: Option<super::divider::gesture::Ack>,
+    pub workspace_fleet_agents: Option<super::workspace_fleet_agents::Publication>,
+    pub workspace_fleet_agent_rejected: Option<super::workspace_fleet_agents::Rejected>,
     pub workspace_agents: Option<home_agents::WorkspaceRoster>,
     pub home_agents: Option<home_agents::Roster>,
     pub home_agent_filter: Option<super::home::machine_filter::Capability>,
@@ -122,6 +124,8 @@ struct Publication {
     #[serde(default)]
     resize_gesture_supported: bool,
     resize_gesture: Option<super::divider::gesture::Ack>,
+    workspace_fleet_agents: Option<super::workspace_fleet_agents::Publication>,
+    workspace_fleet_agent_rejected: Option<super::workspace_fleet_agents::Rejected>,
     workspace_agents: Option<home_agents::WorkspaceRoster>,
     home_agents: Option<home_agents::Roster>,
     home_agent_filter: Option<super::home::machine_filter::Capability>,
@@ -169,6 +173,14 @@ struct Publication {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub(super) enum Command {
+    #[serde(rename = "open-workspace-fleet-agent", rename_all = "camelCase")]
+    OpenWorkspaceFleetAgent {
+        request: u64,
+        from_request: u64,
+        scope: u64,
+        roster_revision: u64,
+        key: String,
+    },
     #[serde(rename = "session-history", rename_all = "camelCase")]
     SessionHistory {
         request: u64,
@@ -439,6 +451,12 @@ impl Reader {
             || p.fleet.as_ref().is_some_and(|f| !f.valid())
             || p.appearance.as_ref().is_some_and(|a| !a.valid())
             || p.home_agents.as_ref().is_some_and(|r| !r.valid())
+            || p.workspace_fleet_agents.as_ref().is_some_and(|r| {
+                !r.valid() || r.request != p.request || p.surface != Some(Surface::Workspace)
+            })
+            || p.workspace_fleet_agent_rejected
+                .as_ref()
+                .is_some_and(|r| !r.valid() || r.from_request != p.request)
             || p.session_history.as_ref().is_some_and(|h| !h.valid())
             || p.session_history_rejected
                 .as_ref()
@@ -546,6 +564,8 @@ impl Reader {
             home_agent_filter: p.home_agent_filter,
             home_agent_recovery: p.home_agent_recovery,
             palette_supported: p.palette_supported,
+            workspace_fleet_agents: p.workspace_fleet_agents,
+            workspace_fleet_agent_rejected: p.workspace_fleet_agent_rejected,
             session_history: p.session_history,
             session_history_rejected: p.session_history_rejected,
             palette_selection_rejected: p.palette_selection_rejected,
@@ -684,3 +704,7 @@ mod palette_tests;
 #[cfg(test)]
 #[path = "browser_session_history_tests.rs"]
 mod session_history_tests;
+
+#[cfg(test)]
+#[path = "browser_workspace_fleet_tests.rs"]
+mod workspace_fleet_tests;

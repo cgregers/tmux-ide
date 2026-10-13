@@ -48,6 +48,7 @@ fn make_view(
         attention: Default::default(),
         palette: Default::default(),
         session_history: Default::default(),
+        workspace_fleet_agents: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,
@@ -226,3 +227,6 @@ fn actual_session_click_routes_exact_id_and_long_labels_fit(cx: &mut TestAppCont
 mod fleet_tests;
 #[path = "workspace_agents.rs"]
 mod workspace_agents;
+
+#[path = "fleet_agent_tests.rs"]
+mod fleet_agent_tests;

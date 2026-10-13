@@ -8,6 +8,7 @@ fn row(label: String, detail: Option<String>, depth: u8, target: Option<Target>)
         target,
         depth,
         machine: None,
+        agent: None,
         icon: None,
         favorite: None,
     }
@@ -55,7 +56,7 @@ fn session_row(_state: &browser::State, g: &Group, s: &Session) -> Row {
     r
 }
 pub(super) fn rows(state: &browser::State, fleet: &Fleet) -> Vec<Row> {
-    let mut out = Vec::new();
+    let mut out = super::super::super::workspace_fleet_agents::rows(state);
     for g in &fleet.groups {
         let target = fleet.preferences.as_ref().and_then(|p| {
             g.collapse_action
@@ -204,6 +205,7 @@ pub(super) fn rows(state: &browser::State, fleet: &Fleet) -> Vec<Row> {
             icon: None,
             favorite: None,
             machine: None,
+            agent: None,
         }));
     }
     if fleet.omitted_groups > 0 {

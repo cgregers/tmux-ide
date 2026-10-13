@@ -731,3 +731,24 @@ The base TUI F5 command vocabulary is represented in native source; older blanke
 missing-palette claims above are superseded. The native shortcut reference still
 needs F8/Shift-F8 plus sidebar collapse/favorite guidance. Physical/remote checks
 remain acceptance gaps even where implementation exists.
+
+
+### Workspace fleet-agent implementation — 13 October
+
+Bridge commit `1ec81f6f` adds persistent cross-session Workspace agent publication
+and exact scoped navigation using the existing shared observer and admission.
+It retains a separate bounded projection so F5 query/cancel cannot evict sidebar
+targets, and revalidates native/daemon incarnation before selected-row display.
+The reviewed source bridge passes 503 tests (five optional skips), typecheck,
+lint, and an isolated canonical-daemon two-session switching fixture. That fixture
+preserves source pane identities and sends no terminal input.
+
+The native sidebar implementation is independently reviewed, with 303 focused
+tests passing. Regression evidence covers focus across roster revision updates
+and overlapping F5/F7 submissions. The keyboard reference now documents existing
+F8/Shift-F8 and sidebar collapse/favorite shortcuts. Broad native gates now pass: 2,983 default / 3,017 all-feature tests (10/17
+existing ignored), format, size and both strict Clippy configurations. Rendered
+acceptance and a new package are pending; alpha1310 does not contain this slice.
+See `evidence/workspace-fleet-agents-2026-10-13/` for the exact evidence and limits.
+Retained session tabs, combined native/remote validation, activation and signed
+clean-machine install/update acceptance remain open.

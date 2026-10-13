@@ -9,7 +9,12 @@ pub(in crate::tmux_snapshot) use keyboard::Keyboard;
 pub(super) use keyboard::focus_shortcut;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Target {
+pub(in crate::tmux_snapshot) enum Target {
+    FleetAgent {
+        scope: u64,
+        revision: u64,
+        key: String,
+    },
     Session(String),
     FleetSession {
         machine: String,
@@ -36,13 +41,14 @@ pub(super) enum Target {
     },
 }
 #[derive(Debug)]
-pub(super) struct Row {
+pub(in crate::tmux_snapshot) struct Row {
     pub label: String,
     pub pane_count: Option<String>,
     pub selected: bool,
     pub target: Option<Target>,
     pub depth: u8,
     pub machine: Option<String>,
+    pub agent: Option<String>,
     pub icon: Option<&'static str>,
     pub favorite: Option<(Option<String>, bool)>,
 }
@@ -60,6 +66,7 @@ pub(super) fn rows(state: &browser::State) -> Vec<Row> {
             target: Some(Target::Session(session.id.clone())),
             depth: 0,
             machine: None,
+            agent: None,
             icon: None,
             favorite: None,
         })
@@ -68,11 +75,12 @@ pub(super) fn rows(state: &browser::State) -> Vec<Row> {
 
 pub(super) fn current(state: &browser::State, target: &Target) -> bool {
     match target {
-        Target::FleetSession { .. } | Target::FleetServer { .. } | Target::Collapse { .. } => {
-            rows(state)
-                .iter()
-                .any(|r| r.target.as_ref() == Some(target))
-        }
+        Target::FleetAgent { .. }
+        | Target::FleetSession { .. }
+        | Target::FleetServer { .. }
+        | Target::Collapse { .. } => rows(state)
+            .iter()
+            .any(|r| r.target.as_ref() == Some(target)),
         Target::Session(id) => state.sessions.iter().any(|s| &s.id == id),
         Target::Pane { session, id } => {
             state.selected_session.as_ref() == Some(session)

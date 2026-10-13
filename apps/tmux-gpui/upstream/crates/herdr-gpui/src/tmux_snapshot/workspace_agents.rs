@@ -45,7 +45,9 @@ impl SnapshotView {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if self.browser_state.surface != browser::Surface::Workspace {
+        if self.browser_state.surface != browser::Surface::Workspace
+            || self.browser_state.workspace_fleet_agents.is_some()
+        {
             return None;
         }
         let w = self.browser_state.workspace_agents.as_ref()?;
@@ -103,6 +105,7 @@ impl SnapshotView {
                 target: None,
                 depth: 0,
                 machine: None,
+                agent: None,
                 icon: None,
                 favorite: None,
             };

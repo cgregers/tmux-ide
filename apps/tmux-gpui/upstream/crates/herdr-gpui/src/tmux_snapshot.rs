@@ -31,6 +31,7 @@ mod terminal_font;
 #[cfg(test)]
 mod tests;
 mod workspace_chrome;
+mod workspace_fleet_agents;
 
 use crate::terminal_painter::TerminalPainter;
 use gpui::{prelude::*, *};
@@ -237,6 +238,7 @@ fn show(
                         attention: Default::default(),
                         palette: Default::default(),
                         session_history: Default::default(),
+                        workspace_fleet_agents: Default::default(),
                         home_filter: None,
                         pane_actions: None,
                         new_session: None,
@@ -297,6 +299,7 @@ struct SnapshotView {
     attention: picker::attention::Owner,
     palette: picker::palette::Owner,
     session_history: session_history::Owner,
+    workspace_fleet_agents: workspace_fleet_agents::Owner,
     home_filter: Option<home::filters::Controls>,
     pane_actions: Option<pane_actions::Menu>,
     new_session: Option<new_session::Dialog>,

@@ -29,3 +29,22 @@ review approved the fresh target equality guard for selectedKey. Focused tests:
 scoped lint passed. The same real-daemon fixture reran after repair and exited 0;
 `real-daemon-final.log` records the assertions. This remains source bridge proof,
 not a native GUI or packaged test. Native fixes and acceptance remain pending.
+
+## Native focused verification
+
+Independent review approved the 28-file `native-final-freeze.json` and the parent
+keyboard-reference text. `native-focus-before.log` reproduces lost focus after an
+observation revision; `native-pending-before.log` reproduces competing old-origin
+F5/F7 navigation. The fixes rebind only a still-actionable same-scope/key row at
+redraw and block competing agent submissions during pending admission. Old
+callbacks remain refused. Focused tests pass: 303, zero failures. Broad Rust gates
+and native physical qualification are still pending; these unit tests do not prove
+rendering or macOS input behavior.
+
+## Broad native gates
+
+All six local gates completed with exit 0: format, file size, strict all-feature
+and no-default-feature Clippy, default tests (2,983 passed, 10 ignored), and
+all-feature tests (3017 passed, 17 ignored).
+Final native source hashes were rechecked after the run. Native visual and
+package acceptance remain pending. Logs and command results are preserved here.
