@@ -76,6 +76,7 @@ fn make_view(
         attention: Default::default(),
         palette: Default::default(),
         session_history: Default::default(),
+        session_tabs: Default::default(),
         workspace_fleet_agents: Default::default(),
         home_filter: None,
         pane_actions: None,

@@ -164,6 +164,7 @@ impl SnapshotView {
             || !self.marked.is_empty()
             || self.divider.is_some()
             || self.workspace_fleet_agents.pending.is_some()
+            || self.session_tabs.pending.is_some()
             || self.session_history.pending.is_some()
             || self.palette.pending.is_some()
             || self.attention.pending.is_some()

@@ -84,6 +84,8 @@ pub(super) struct State {
     pub home_agents: Option<home_agents::Roster>,
     pub home_agent_filter: Option<super::home::machine_filter::Capability>,
     pub home_agent_recovery: Option<super::home::recovery::Capability>,
+    pub session_tabs: Option<super::session_tabs::Publication>,
+    pub session_tab_result: Option<super::session_tabs::Result>,
     pub session_history: Option<super::session_history::Capability>,
     pub session_history_rejected: Option<super::session_history::Rejected>,
     pub palette_supported: bool,
@@ -130,6 +132,8 @@ struct Publication {
     home_agents: Option<home_agents::Roster>,
     home_agent_filter: Option<super::home::machine_filter::Capability>,
     home_agent_recovery: Option<super::home::recovery::Capability>,
+    session_tabs: Option<super::session_tabs::Publication>,
+    session_tab_result: Option<super::session_tabs::Result>,
     session_history: Option<super::session_history::Capability>,
     session_history_rejected: Option<super::session_history::Rejected>,
     #[serde(default)]
@@ -180,6 +184,13 @@ pub(super) enum Command {
         scope: u64,
         roster_revision: u64,
         key: String,
+    },
+    #[serde(rename = "session-tab", rename_all = "camelCase")]
+    SessionTab {
+        request: u64,
+        from_request: u64,
+        revision: u64,
+        action: String,
     },
     #[serde(rename = "session-history", rename_all = "camelCase")]
     SessionHistory {
@@ -457,6 +468,12 @@ impl Reader {
             || p.workspace_fleet_agent_rejected
                 .as_ref()
                 .is_some_and(|r| !r.valid() || r.from_request != p.request)
+            || p.session_tabs
+                .as_ref()
+                .is_some_and(|t| !t.valid() || t.request != p.request)
+            || p.session_tab_result
+                .as_ref()
+                .is_some_and(|r| !r.valid() || r.from_request != p.request)
             || p.session_history.as_ref().is_some_and(|h| !h.valid())
             || p.session_history_rejected
                 .as_ref()
@@ -566,6 +583,8 @@ impl Reader {
             palette_supported: p.palette_supported,
             workspace_fleet_agents: p.workspace_fleet_agents,
             workspace_fleet_agent_rejected: p.workspace_fleet_agent_rejected,
+            session_tabs: p.session_tabs,
+            session_tab_result: p.session_tab_result,
             session_history: p.session_history,
             session_history_rejected: p.session_history_rejected,
             palette_selection_rejected: p.palette_selection_rejected,
@@ -708,3 +727,7 @@ mod session_history_tests;
 #[cfg(test)]
 #[path = "browser_workspace_fleet_tests.rs"]
 mod workspace_fleet_tests;
+
+#[cfg(test)]
+#[path = "browser_session_tabs_tests.rs"]
+mod session_tabs_tests;

@@ -768,3 +768,19 @@ bridge's real isolated canonical-daemon switching fixture, without source fallba
 All 22 regular archived files match the assembled app. Native and daemon checks
 remain separate; combined remote, signed/clean-Mac install/update acceptance and
 retained session tabs remain open. See the Workspace fleet evidence directory.
+
+
+### Retained session tabs in validation — 13 October
+
+Bridge `cbb8ce9f` retains up to eight accepted session identities without additional
+terminal owners. It publishes exact activation/close capabilities, unread/activity
+from shared observations, and the TUI's F9/Shift-F9/Ctrl-F9 behavior. Inactive close
+preserves the current terminal; active/pending close returns Home without killing
+tmux sessions. The same real-daemon fixture passes these paths and original pane
+identity checks after fixing capability invalidation during badge refresh.
+Bridge: 511 tests passed, five optional skips, typecheck/lint and review passed.
+
+Native strip, controls and shortcuts are source-reviewed with 311 focused tests
+passing. Full native gates, visual acceptance and packaging are pending; alpha1311
+does not include retained tabs. Evidence: retained-session-tabs-2026-10-13.
+No full-parity or combined native/remote acceptance claim is made.

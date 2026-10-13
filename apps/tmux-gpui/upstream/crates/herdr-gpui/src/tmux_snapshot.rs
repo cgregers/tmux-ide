@@ -25,6 +25,7 @@ mod presence;
 mod selection;
 mod session_history;
 mod session_open;
+mod session_tabs;
 mod shell;
 mod stream;
 mod terminal_font;
@@ -238,6 +239,7 @@ fn show(
                         attention: Default::default(),
                         palette: Default::default(),
                         session_history: Default::default(),
+                        session_tabs: Default::default(),
                         workspace_fleet_agents: Default::default(),
                         home_filter: None,
                         pane_actions: None,
@@ -299,6 +301,7 @@ struct SnapshotView {
     attention: picker::attention::Owner,
     palette: picker::palette::Owner,
     session_history: session_history::Owner,
+    session_tabs: session_tabs::Owner,
     workspace_fleet_agents: workspace_fleet_agents::Owner,
     home_filter: Option<home::filters::Controls>,
     pane_actions: Option<pane_actions::Menu>,

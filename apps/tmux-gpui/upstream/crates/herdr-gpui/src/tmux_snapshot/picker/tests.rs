@@ -13,6 +13,7 @@ mod popover;
 mod saved_machines;
 mod session_history;
 mod session_popover;
+mod session_tabs;
 use crate::tmux_snapshot::{decode, presence::Presence};
 use core::prelude::v1::test;
 use std::{
@@ -59,6 +60,7 @@ pub(super) fn make_view(
         attention: Default::default(),
         palette: Default::default(),
         session_history: Default::default(),
+        session_tabs: Default::default(),
         workspace_fleet_agents: Default::default(),
         home_filter: None,
         pane_actions: None,

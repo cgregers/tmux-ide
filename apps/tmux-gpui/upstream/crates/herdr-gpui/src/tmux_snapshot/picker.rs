@@ -782,6 +782,9 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.session_tabs_key(event, window, cx) {
+            return;
+        }
         if self.session_history_key(event, window, cx) {
             return;
         }

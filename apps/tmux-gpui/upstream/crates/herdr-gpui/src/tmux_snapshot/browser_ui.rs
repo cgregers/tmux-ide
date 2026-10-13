@@ -227,6 +227,7 @@ impl SnapshotView {
         // Let application navigation consume its keys before terminal input forwarding.
         if super::picker::commands::shortcut(&event.keystroke)
             || super::session_history::shortcut(&event.keystroke)
+            || super::session_tabs::shortcut(&event.keystroke)
             || sidebar::focus_shortcut(&event.keystroke)
         {
             return;
@@ -440,6 +441,7 @@ impl SnapshotView {
         };
         self.workspace_fleet_agents.pending = None;
         self.session_history.pending = None;
+        self.session_tabs.pending = None;
         let changing_machine = matches!(
             selection,
             Selection::Machine(_)
@@ -656,8 +658,9 @@ impl SnapshotView {
         let is_home = self.browser_state.surface == browser::Surface::Home;
         let show_sidebar = (!is_home && !self.sidebar_hidden) || self.picker_in_sidebar();
         let viewport = window.viewport_size();
-        let chrome_height =
-            crate::titlebar::HEIGHT + super::workspace_chrome::APPLICATION_TABS_HEIGHT;
+        let chrome_height = crate::titlebar::HEIGHT
+            + super::workspace_chrome::APPLICATION_TABS_HEIGHT
+            + self.retained_session_height();
         let glass = self.glass.sync(
             window,
             Bounds::new(
@@ -798,6 +801,7 @@ impl SnapshotView {
                 ),
         );
         let application_tabs = self.application_tabs(window, cx);
+        let session_tabs = self.retained_session_strip(cx);
         let window_strip = self.workspace_window_strip(window, cx);
         let status = if self.selection.is_some() {
             "Selecting captured frame — Cmd-C copies; Escape or click resumes".into()
@@ -925,6 +929,7 @@ impl SnapshotView {
             .text_color(rgb(theme.foreground))
             .on_key_down(cx.listener(Self::picker_key))
             .child(application_tabs)
+            .children(session_tabs)
             .child(main)
             .children(
                 self.picker_popover(window, cx)

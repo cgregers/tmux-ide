@@ -24,3 +24,13 @@ real fixture reran against the frozen repair and exited 0: accepted tabs, stale
 refusal, retained activation, both close paths, original pane identities and
 owned cleanup all passed. This is source-bridge/real-daemon proof, not native GUI
 or packaged proof. No blind retry or fixture assertion change was used.
+
+Native source independently approved against native-final-freeze.json. Focused
+native tests: 311 passed, including narrow strip pointer selection and cross-owner
+pending guards. Full Rust gates and physical GUI acceptance remain in progress.
+The headless pointer test does not prove the physical close-button action.
+
+All six broad native gates passed (format, size, both strict Clippy modes,
+default/all-feature tests). Counts: {"test-default": {"passed": 2991, "ignored": 10}, "test-all": {"passed": 3025, "ignored": 17}}.
+Final native source hashes were rechecked afterward. Physical and package
+acceptance remain pending.

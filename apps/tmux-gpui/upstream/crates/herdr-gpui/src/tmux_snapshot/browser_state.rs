@@ -8,6 +8,7 @@ impl SnapshotView {
         cx: &mut Context<Self>,
     ) {
         if let Some(state) = &state {
+            self.accept_session_tabs_state(state, cx);
             self.accept_workspace_fleet_agent_state(state, cx);
             self.accept_session_history_state(state, cx);
             self.accept_attention_state(state);
@@ -44,6 +45,7 @@ impl SnapshotView {
             None => {
                 self.workspace_fleet_agents.pending = None;
                 self.session_history.pending = None;
+                self.session_tabs.pending = None;
                 self.attention.pending = None;
                 self.palette.pending = None;
                 self.cancel_palette();

@@ -54,6 +54,7 @@ impl SnapshotView {
             .max(self.attention.last_request)
             .max(self.palette.last_request)
             .max(self.session_history.last_request)
+            .max(self.session_tabs.last_request)
             .max(self.workspace_fleet_agents.last_request)
             .checked_add(1)
             .filter(|v| *v <= MAX)
@@ -80,6 +81,7 @@ impl SnapshotView {
             || self.home_search_composing(window, cx)
             || self.workspace_fleet_agents.pending.is_some()
             || self.session_history.pending.is_some()
+            || self.session_tabs.pending.is_some()
             || self.attention.pending.is_some()
             || self.palette.pending.is_some()
         {
