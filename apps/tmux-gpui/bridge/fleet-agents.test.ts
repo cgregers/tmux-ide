@@ -30,6 +30,7 @@ const row: HomeAgentRow = {
 };
 function fixture(count = 1) {
   let machine: string | null = null;
+  let palette: string | null = null;
   let starts = 0,
     publications = 0;
   let groups: MachineAgentGroup[] = ["local", "remote"].map((machineId) => ({
@@ -94,10 +95,16 @@ function fixture(count = 1) {
     },
     () => "ready",
     () => machine,
+    undefined,
+    () => palette,
   );
   owner.start();
   return {
     owner,
+    palette(query: string | null) {
+      palette = query;
+      owner.refresh();
+    },
     filter(id: string | null) {
       machine = id;
       owner.refresh(false);
@@ -386,5 +393,35 @@ test("connected partial Home coverage does not claim machine disconnection", () 
     "Some machines are connecting or unavailable.",
     "F7 global projection remains unchanged",
   );
+  f.owner.dispose();
+});
+
+test("palette query retains beyond Home/attention caps and releases only its budget", () => {
+  const f = fixture(300);
+  f.setRows(
+    f
+      .groups()
+      .map((group) => ({
+        ...group,
+        agents: group.agents.map((agent, i) =>
+          group.machineId === "remote" && i === 299
+            ? { ...agent, name: "Zebra late agent" }
+            : agent,
+        ),
+      })),
+  );
+  f.filter("local");
+  f.emit();
+  let late = f.snapshot().rows.find((r) => r.name === "Zebra late agent")!;
+  assert.equal(f.owner.resolve(late.key), null);
+  f.palette("agent zebra");
+  late = f.snapshot().rows.find((r) => r.name === "Zebra late agent")!;
+  assert.ok(f.owner.resolve(late.key));
+  assert.equal(f.starts(), 1);
+  assert.ok(f.snapshot().rows.filter((r) => f.owner.resolve(r.key)).length <= 768);
+  const homeKey = f.owner.homeSnapshot()!.rows[0]!.key;
+  f.palette(null);
+  assert.equal(f.owner.resolve(late.key), null);
+  assert.ok(f.owner.resolve(homeKey));
   f.owner.dispose();
 });

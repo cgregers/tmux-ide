@@ -593,3 +593,39 @@ test("favorite cap reprioritization resets displaced Home filter without restart
     preferences.dispose();
   }
 });
+
+test("Home, F7 and query-changing F5 retain one scanner and independent subscriber lifetimes", async () => {
+  const f = await fixture();
+  const stopHome = f.fleet.observeHomeAgents(() => {});
+  const stopAttention = f.fleet.observeAgents(() => {});
+  let published = 0;
+  const stopPalette = f.fleet.observePaletteAgents("agent alpha", () => published++);
+  try {
+    assert.equal(published, 1);
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    stopPalette.update("agent beta");
+    assert.equal(published, 2);
+    stopHome();
+    stopPalette.dispose();
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    stopAttention();
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 1 });
+  } finally {
+    f.close();
+  }
+});
+
+test("palette-only query replacement keeps its scanner until explicit dismissal", async () => {
+  const f = await fixture();
+  try {
+    let publications = 0;
+    const palette = f.fleet.observePaletteAgents("agent alpha", () => publications++);
+    palette.update("agent zebra");
+    assert.equal(publications, 2);
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+    palette.dispose();
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 1 });
+  } finally {
+    f.close();
+  }
+});

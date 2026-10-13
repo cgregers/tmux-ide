@@ -1,3 +1,4 @@
+import { matchesPaletteQuery } from "./palette.ts";
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { createMachineAgents } from "../../../packages/daemon/src/lib/machine-agents.ts";
@@ -23,6 +24,7 @@ export function createFleetAgentRoster(
   machineState: (id: string) => "ready" | "connecting" | "disconnected",
   homeMachine: () => string | null = () => null,
   machineSessions?: (id: string) => number,
+  paletteQuery: () => string | null = () => null,
 ) {
   let stopped = false;
   let stop = () => {};
@@ -64,10 +66,14 @@ export function createFleetAgentRoster(
     });
     const selected = homeMachine();
     const homeRows = rows.filter((row) => selected === null || row.machineId === selected);
+    const query = paletteQuery();
+    const paletteRows = query === null ? [] : rows.filter((row) => matchesPaletteQuery(row, query));
     const visible = new Set(
-      [...homeRows.slice(0, 256), ...rows.filter((row) => row.attention).slice(0, 256)].map(
-        (row) => row.key,
-      ),
+      [
+        ...homeRows.slice(0, 256),
+        ...rows.filter((row) => row.attention).slice(0, 256),
+        ...paletteRows.slice(0, 256),
+      ].map((row) => row.key),
     );
     targets = new Map([...next].filter(([key]) => visible.has(key)));
     keys = nextKeys;

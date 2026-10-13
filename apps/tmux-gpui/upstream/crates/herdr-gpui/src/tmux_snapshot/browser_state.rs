@@ -9,6 +9,7 @@ impl SnapshotView {
     ) {
         if let Some(state) = &state {
             self.accept_attention_state(state);
+            self.accept_palette_state(state);
         }
         match state {
             Some(state) if state.request == self.browser_request => {
@@ -40,6 +41,8 @@ impl SnapshotView {
             }
             None => {
                 self.attention.pending = None;
+                self.palette.pending = None;
+                self.cancel_palette();
                 self.cancel_attention();
                 self.pending_session_open = None;
                 self.discard_composition(cx);

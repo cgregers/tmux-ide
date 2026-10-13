@@ -8,6 +8,7 @@ mod machine_edit;
 mod machine_remove;
 mod navigation_commands;
 mod new_agent;
+pub(super) mod palette;
 mod pane_close;
 mod pane_commands;
 mod reference;
@@ -373,6 +374,8 @@ impl SnapshotView {
     }
     pub(super) fn open_commands(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_picker_mode(Mode::Commands, window, cx);
+        self.reopen_palette();
+        self.sync_palette_query(cx);
     }
     pub(super) fn open_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.open_picker_mode(Mode::Navigation, window, cx);
@@ -388,6 +391,7 @@ impl SnapshotView {
         }
         self.sidebar_keyboard.active = false;
         self.cancel_attention();
+        self.cancel_palette();
         self.header_controls = Default::default();
         self.pending_session_open = None;
         self.pane_actions = None;
@@ -455,15 +459,18 @@ impl SnapshotView {
             scroll: ScrollHandle::new(),
         });
         if let Some(picker) = &mut self.picker {
+            navigation_commands::retain_palette_scope(&mut picker.rows, self.palette.active);
             navigation_commands::bind(&mut picker.rows, picker.search.entity_id());
         }
         cx.notify();
     }
     pub(super) fn refresh_picker(&mut self, cx: &mut Context<Self>) {
+        self.sync_palette_query(cx);
         if self.attention.active.is_some_and(|(request, _)| {
             request != self.browser_request || self.browser_commands.is_none()
         }) {
             self.cancel_attention();
+            self.cancel_palette();
         }
         let theme = self.theme();
         let Some(picker) = &mut self.picker else {
@@ -511,6 +518,7 @@ impl SnapshotView {
         } else {
             rows(&self.browser_state, picker.search.read(cx).text())
         };
+        navigation_commands::retain_palette_scope(&mut picker.rows, self.palette.active);
         navigation_commands::bind(&mut picker.rows, picker.search.entity_id());
         if picker.pane_scope.is_some() {
             picker.rows.retain(|row| matches!(&row.target, Target::PaneAction { action, .. }
@@ -520,6 +528,7 @@ impl SnapshotView {
     }
     fn close_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cancel_attention();
+        self.cancel_palette();
         self.picker = None;
         self.terminal_focus.focus(window, cx);
         cx.notify();

@@ -96,6 +96,7 @@ fn browser_fixture(
         input_interrupted: true,
         picker: None,
         attention: Default::default(),
+        palette: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,

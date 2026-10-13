@@ -82,6 +82,9 @@ pub(super) struct State {
     pub home_agents: Option<home_agents::Roster>,
     pub home_agent_filter: Option<super::home::machine_filter::Capability>,
     pub home_agent_recovery: Option<super::home::recovery::Capability>,
+    pub palette_supported: bool,
+    pub palette_selection_rejected: Option<super::picker::attention::Rejected>,
+    pub palette_agents: Option<super::picker::attention::Publication>,
     pub attention_supported: bool,
     pub attention_selection_rejected: Option<super::picker::attention::Rejected>,
     pub attention_agents: Option<super::picker::attention::Publication>,
@@ -121,6 +124,10 @@ struct Publication {
     home_agents: Option<home_agents::Roster>,
     home_agent_filter: Option<super::home::machine_filter::Capability>,
     home_agent_recovery: Option<super::home::recovery::Capability>,
+    #[serde(default)]
+    palette_supported: bool,
+    palette_selection_rejected: Option<super::picker::attention::Rejected>,
+    palette_agents: Option<super::picker::attention::Publication>,
     #[serde(default)]
     attention_supported: bool,
     attention_selection_rejected: Option<super::picker::attention::Rejected>,
@@ -169,6 +176,21 @@ pub(super) enum Command {
         request: u64,
         roster_revision: u64,
         action: super::home::recovery::Action,
+    },
+    #[serde(rename = "palette-observe")]
+    PaletteObserve {
+        request: u64,
+        scope: u64,
+        active: bool,
+        query: String,
+    },
+    #[serde(rename = "open-palette-agent", rename_all = "camelCase")]
+    OpenPaletteAgent {
+        request: u64,
+        from_request: u64,
+        scope: u64,
+        roster_revision: u64,
+        key: String,
     },
     #[serde(rename = "attention-observe")]
     AttentionObserve {
@@ -406,6 +428,10 @@ impl Reader {
             || p.fleet.as_ref().is_some_and(|f| !f.valid())
             || p.appearance.as_ref().is_some_and(|a| !a.valid())
             || p.home_agents.as_ref().is_some_and(|r| !r.valid())
+            || p.palette_agents.as_ref().is_some_and(|r| !r.valid())
+            || p.palette_selection_rejected
+                .as_ref()
+                .is_some_and(|r| !r.valid())
             || p.attention_agents.as_ref().is_some_and(|r| !r.valid())
             || p.attention_selection_rejected
                 .as_ref()
@@ -504,6 +530,9 @@ impl Reader {
             home_agents: p.home_agents,
             home_agent_filter: p.home_agent_filter,
             home_agent_recovery: p.home_agent_recovery,
+            palette_supported: p.palette_supported,
+            palette_selection_rejected: p.palette_selection_rejected,
+            palette_agents: p.palette_agents,
             attention_supported: p.attention_supported,
             attention_selection_rejected: p.attention_selection_rejected,
             attention_agents: p.attention_agents,
@@ -630,3 +659,7 @@ mod fleet_disconnect_tests;
 #[cfg(test)]
 #[path = "browser_fleet_server_tests.rs"]
 mod fleet_server_tests;
+
+#[cfg(test)]
+#[path = "browser_palette_tests.rs"]
+mod palette_tests;

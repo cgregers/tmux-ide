@@ -44,6 +44,7 @@ fn make_view(
         input_interrupted: false,
         picker: None,
         attention: Default::default(),
+        palette: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,

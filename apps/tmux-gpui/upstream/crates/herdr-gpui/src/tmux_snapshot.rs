@@ -161,6 +161,7 @@ fn show(
                                         }
                                         view.flush_resize_gesture(cx);
                                         view.flush_attention();
+                                        view.flush_palette(cx);
                                         view.tick_agent_indicators(cx);
                                         if view.glass.take_policy_change() {
                                             cx.notify();
@@ -195,6 +196,7 @@ fn show(
                             view.pending_session_open = None;
                             view.header_controls = Default::default();
                             view.cancel_attention();
+                            view.cancel_palette();
                             if view.attention_picker_open() {
                                 view.picker = None;
                             }
@@ -232,6 +234,7 @@ fn show(
                         input_interrupted: false,
                         picker: None,
                         attention: Default::default(),
+                        palette: Default::default(),
                         home_filter: None,
                         pane_actions: None,
                         new_session: None,
@@ -290,6 +293,7 @@ struct SnapshotView {
     input_interrupted: bool,
     picker: Option<picker::Picker>,
     attention: picker::attention::Owner,
+    palette: picker::palette::Owner,
     home_filter: Option<home::filters::Controls>,
     pane_actions: Option<pane_actions::Menu>,
     new_session: Option<new_session::Dialog>,

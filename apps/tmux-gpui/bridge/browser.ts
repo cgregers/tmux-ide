@@ -1,3 +1,4 @@
+import { createPaletteOwner, paletteObserveSchema, openPaletteAgentSchema } from "./palette.ts";
 import { fleetPreferenceCommand } from "./fleet-preference-publication.ts";
 import { createDiagnosticChannel } from "./diagnostic-channel.ts";
 import { diagnosticStatus } from "./live-diagnostics.ts";
@@ -116,6 +117,8 @@ const commandSchema = z.union([
   fleetPreferenceCommand,
   attentionObserveSchema,
   openAttentionAgentSchema,
+  paletteObserveSchema,
+  openPaletteAgentSchema,
   machineRegistryCommand,
   z
     .object({
@@ -324,6 +327,8 @@ let active:
 let attentionSelectionRejected: { request: number; fromRequest: number; scope: number } | null =
   null;
 const attention = createAttentionOwner(publish);
+let paletteSelectionRejected: { request: number; fromRequest: number; scope: number } | null = null;
+const palette = createPaletteOwner(publish);
 let agentOwner: ReturnType<typeof createHomeAgentObserver> | undefined;
 const homeRecovery = createHomeAgentRecovery();
 let homeAgentFilter: { revision: number; machineId: string | null } | null = null;
@@ -579,6 +584,9 @@ function publish() {
       homeAgentRecovery: surface === "home" && fleet ? homeRecovery.publication() : null,
       homeAgentFilter: surface === "home" && fleet ? homeAgentFilter : null,
       // Protocol support; private hosts publish an explicit unavailable roster.
+      paletteSupported: !!fleet,
+      paletteAgents: palette.publication(),
+      paletteSelectionRejected,
       attentionSupported: true,
       attentionAgents: attention.publication(),
       attentionSelectionRejected,
@@ -632,7 +640,9 @@ process.stdout.on("drain", () => {
 });
 async function retire() {
   attentionSelectionRejected = null;
+  paletteSelectionRejected = null;
   attention.cancel();
+  palette.cancel();
   const old = active;
   active = undefined;
   pendingPaneSplit = null;
@@ -797,6 +807,7 @@ async function openPane(
         return;
       }
       attention.cancel();
+      palette.cancel();
       retireAgents();
       snapshot = null;
       inputReady = false;
@@ -1453,6 +1464,7 @@ async function command(value: unknown) {
     foreground = cmd.active;
     if (!foreground) {
       attention.cancel();
+      palette.cancel();
       initialPane = null;
       pendingPaneSplit = null;
       pendingNewWindow = null;
@@ -1677,6 +1689,53 @@ async function command(value: unknown) {
     active.child.stdin.write(line);
     return;
   }
+  if (cmd.type === "palette-observe") {
+    palette.observe(cmd, request, foreground && !stopped, fleet);
+    return;
+  }
+  if (cmd.type === "open-palette-agent") {
+    if (!palette.admitAttempt(cmd.request, request)) return;
+    const target = palette.resolve(cmd, request, foreground && !stopped, fleet);
+    if (!target) {
+      paletteSelectionRejected = {
+        request: cmd.request,
+        fromRequest: cmd.fromRequest,
+        scope: cmd.scope,
+      };
+      publish();
+      return;
+    }
+    attention.cancel();
+    palette.cancel();
+    request = cmd.request;
+    const token = request;
+    const capturedPresence = presenceRevision;
+    const current = () =>
+      !stopped &&
+      token === request &&
+      foreground &&
+      capturedPresence === presenceRevision &&
+      palette.latest(cmd.scope);
+    retireAgents();
+    sessionCatalogComplete = false;
+    initialPane = null;
+    snapshot = null;
+    inputReady = false;
+    selectedPane = null;
+    paneActions = null;
+    surface = "workspace";
+    selectedSession = null;
+    panes = [];
+    layouts = [];
+    status = "Loading agent";
+    paletteSelectionRejected = null;
+    // Accepted navigation is published before any asynchronous retirement.
+    publish();
+    await retire();
+    if (!current()) return;
+    launchFleetSelection(target.selection, token, target.row, current);
+    return;
+  }
   if (cmd.type === "attention-observe") {
     attention.observe(cmd, request, foreground && !stopped, fleet);
     return;
@@ -1694,6 +1753,7 @@ async function command(value: unknown) {
       return;
     }
     attention.cancel();
+    palette.cancel();
     request = cmd.request;
     const token = request;
     const capturedPresence = presenceRevision;
@@ -1743,6 +1803,7 @@ async function command(value: unknown) {
       workspace;
     if (cmd.request <= request) throw new Error("Stale workspace agent command");
     attention.cancel();
+    palette.cancel();
     request = cmd.request;
     sessionCatalogComplete = false;
     initialPane = null;
@@ -1779,6 +1840,7 @@ async function command(value: unknown) {
       agentPublication.rows.some((row) => row.key === cmd.key && row.available) &&
       target;
     attention.cancel();
+    palette.cancel();
     request = cmd.request;
     const token = request;
     const capturedPresence = presenceRevision;
@@ -1820,6 +1882,7 @@ async function command(value: unknown) {
       host;
     if (cmd.request <= request) throw new Error("Stale agent command");
     attention.cancel();
+    palette.cancel();
     request = cmd.request;
     sessionCatalogComplete = false;
     initialPane = null;
@@ -1850,6 +1913,7 @@ async function command(value: unknown) {
   }
   if (cmd.request <= request) throw new Error("Stale browser command");
   attention.cancel();
+  palette.cancel();
   retireAgents();
   request = cmd.request;
   sessionCatalogComplete = false;

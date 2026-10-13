@@ -28,7 +28,7 @@ fn choice(id: &str, label: &str) -> browser::Choice {
         window_label: None,
     }
 }
-fn make_view(
+pub(super) fn make_view(
     window: &mut Window,
     cx: &mut Context<SnapshotView>,
     sender: mpsc::SyncSender<browser::Command>,
@@ -56,6 +56,7 @@ fn make_view(
         input_interrupted: false,
         picker: None,
         attention: Default::default(),
+        palette: Default::default(),
         home_filter: None,
         pane_actions: None,
         new_session: None,

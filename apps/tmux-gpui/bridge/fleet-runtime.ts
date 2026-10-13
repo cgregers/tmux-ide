@@ -159,6 +159,7 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     preferenceCommand: fleet.preferenceCommand,
     publication: fleet.publication,
     observeAgents: fleet.observeAgents,
+    observePaletteAgents: fleet.observePaletteAgents,
     observeHomeAgents: fleet.observeHomeAgents,
     filterHomeAgents: fleet.filterHomeAgents,
     recoverAgents: fleet.recoverAgents,

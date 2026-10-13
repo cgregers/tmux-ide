@@ -7,6 +7,11 @@ pub(super) enum Destination {
         selection: String,
         session_id: String,
     },
+    PaletteAgent {
+        scope: u64,
+        revision: u64,
+        key: String,
+    },
     HomeAgent {
         revision: u64,
         key: String,
@@ -38,6 +43,13 @@ impl Captured {
                 .as_ref()
                 .and_then(|f| f.session(selection))
                 .is_some_and(|s| s.session_id.as_ref() == Some(session_id)),
+            Destination::PaletteAgent {
+                scope,
+                revision,
+                key,
+            } => state.palette_agents.as_ref().is_some_and(|p| {
+                p.scope == *scope && p.roster.revision == *revision && p.roster.available(key)
+            }),
             Destination::HomeAgent { revision, key } => {
                 state.surface == browser::Surface::Home
                     && state
@@ -97,35 +109,50 @@ pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
             )
         }));
     }
-    match state.surface {
-        browser::Surface::Home => {
-            if let Some(roster) = &state.home_agents {
-                for row in &roster.rows {
-                    candidates.push((
-                        format!("Jump to agent · {} · {}", row.name, row.context_label()),
-                        Destination::HomeAgent {
-                            revision: roster.revision,
-                            key: row.key.clone(),
-                        },
-                    ));
-                }
+    if state.fleet.is_some() && state.palette_supported {
+        if let Some(p) = &state.palette_agents {
+            for row in &p.roster.rows {
+                candidates.push((
+                    format!("Jump to agent · {} · {}", row.name, row.context_label()),
+                    Destination::PaletteAgent {
+                        scope: p.scope,
+                        revision: p.roster.revision,
+                        key: row.key.clone(),
+                    },
+                ));
             }
         }
-        browser::Surface::Workspace => {
-            if let Some(w) = &state.workspace_agents {
-                for row in &w.roster.rows {
-                    candidates.push((
-                        format!(
-                            "Jump to workspace agent · {} · {}",
-                            row.name,
-                            row.context_label()
-                        ),
-                        Destination::WorkspaceAgent {
-                            revision: w.roster.revision,
-                            key: row.key.clone(),
-                            session: w.session_id.clone(),
-                        },
-                    ));
+    } else {
+        match state.surface {
+            browser::Surface::Home => {
+                if let Some(roster) = &state.home_agents {
+                    for row in &roster.rows {
+                        candidates.push((
+                            format!("Jump to agent · {} · {}", row.name, row.context_label()),
+                            Destination::HomeAgent {
+                                revision: roster.revision,
+                                key: row.key.clone(),
+                            },
+                        ));
+                    }
+                }
+            }
+            browser::Surface::Workspace => {
+                if let Some(w) = &state.workspace_agents {
+                    for row in &w.roster.rows {
+                        candidates.push((
+                            format!(
+                                "Jump to workspace agent · {} · {}",
+                                row.name,
+                                row.context_label()
+                            ),
+                            Destination::WorkspaceAgent {
+                                revision: w.roster.revision,
+                                key: row.key.clone(),
+                                session: w.session_id.clone(),
+                            },
+                        ));
+                    }
                 }
             }
         }
@@ -136,6 +163,10 @@ pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
             query.split_whitespace().all(|term| {
                 label.to_lowercase().contains(term)
                     || match destination {
+                        // The bridge applies the complete query before its row cap.
+                        // Current palette scope is separately checked before display
+                        // and dispatch, so do not reinterpret its matching vocabulary.
+                        Destination::PaletteAgent { .. } => true,
                         Destination::HomeAgent { key, .. } => state
                             .home_agents
                             .as_ref()
@@ -160,6 +191,10 @@ pub(super) fn rows(state: &browser::State, query: &str) -> Vec<Row> {
             }),
         })
         .collect()
+}
+pub(super) fn retain_palette_scope(rows: &mut Vec<Row>, active: Option<(u64, u64)>) {
+    rows.retain(|row| !matches!(&row.target, Target::DirectNavigation(Captured {request, destination: Destination::PaletteAgent {scope,..},..})
+        if active != Some((*request,*scope))));
 }
 pub(super) fn bind(rows: &mut [Row], identity: EntityId) {
     for row in rows {
@@ -194,8 +229,18 @@ impl SnapshotView {
         {
             return;
         }
+        if let Destination::PaletteAgent {
+            scope,
+            revision,
+            key,
+        } = &captured.destination
+        {
+            self.choose_palette(*scope, *revision, key, cx);
+            return;
+        }
         self.close_picker(window, cx);
         match captured.destination {
+            Destination::PaletteAgent { .. } => {}
             Destination::Session(id) => self.select(Selection::Session(id), window, cx),
             Destination::FleetSession {
                 selection,

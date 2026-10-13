@@ -122,6 +122,12 @@ impl SnapshotView {
                     "Commands · F5"
                 }))
             })
+            .when(
+                picker.mode == Mode::Commands
+                    && picker.pane_scope.is_none()
+                    && self.browser_state.fleet.is_some(),
+                |panel| panel.child(div().px_2().py_1().child(self.palette_status())),
+            )
             .when(picker.mode == Mode::Navigation, |panel| {
                 panel.child(div().px_2().py_1().child("Sessions and panes · F6"))
             })

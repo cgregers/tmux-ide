@@ -416,6 +416,8 @@ impl SnapshotView {
         self.sidebar_keyboard.active = false;
         self.attention.pending = None;
         self.cancel_attention();
+        self.cancel_palette();
+        self.palette.pending = None;
         self.divider = None;
         self.picker = None;
         self.pane_actions = None;
@@ -435,6 +437,7 @@ impl SnapshotView {
         let Some(request) = self
             .browser_request
             .max(self.attention.last_request)
+            .max(self.palette.last_request)
             .checked_add(1)
         else {
             return;

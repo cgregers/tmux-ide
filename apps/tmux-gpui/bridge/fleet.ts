@@ -89,6 +89,7 @@ export function createNativeFleet(
     if (snapshot)
       for (const listener of [...homeListeners]) listener({ machineId: homeMachineId, snapshot });
   };
+  let paletteQuery: string | null = null;
   let agentRoster: ReturnType<typeof createFleetAgentRoster> | undefined;
   let stopped = false;
   let started = false;
@@ -255,6 +256,7 @@ export function createNativeFleet(
         catalog.getSnapshot().groups.find((group) => group.id === id)?.state ?? "disconnected",
       () => homeMachineId,
       (id) => catalog.getSnapshot().groups.find((group) => group.id === id)?.sessions.length ?? 0,
+      () => paletteQuery,
     );
     agentRoster = roster;
     roster.start();
@@ -279,6 +281,26 @@ export function createNativeFleet(
       catalog.start();
     },
     observeAgents: observation.subscribe,
+    observePaletteAgents(query: string, listener: (value: HomeAgentSnapshot) => void) {
+      paletteQuery = query;
+      agentRoster?.refresh();
+      const unsubscribe = observation.subscribe(listener);
+      let disposed = false;
+      return {
+        update(nextQuery: string) {
+          if (disposed) return;
+          paletteQuery = nextQuery;
+          agentRoster?.refresh();
+        },
+        dispose() {
+          if (disposed) return;
+          disposed = true;
+          unsubscribe();
+          paletteQuery = null;
+          agentRoster?.refresh();
+        },
+      };
+    },
     observeHomeAgents(
       listener: (value: { machineId: string | null; snapshot: HomeAgentSnapshot }) => void,
     ) {
