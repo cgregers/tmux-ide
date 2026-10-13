@@ -1,6 +1,10 @@
 //! Session navigation, matching the TUI shell. Windows belong to the workspace strip.
+#[path = "sidebar/keyboard.rs"]
+mod keyboard;
 use crate::{config::Theme, tmux_snapshot::browser};
 use gpui::{prelude::*, *};
+pub(in crate::tmux_snapshot) use keyboard::Keyboard;
+pub(super) use keyboard::focus_shortcut;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {

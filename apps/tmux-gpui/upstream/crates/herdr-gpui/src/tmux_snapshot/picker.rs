@@ -383,6 +383,7 @@ impl SnapshotView {
         if self.browser_commands.is_none() {
             return;
         }
+        self.sidebar_keyboard.active = false;
         self.cancel_attention();
         self.header_controls = Default::default();
         self.pending_session_open = None;
@@ -787,6 +788,9 @@ impl SnapshotView {
             return;
         }
         if self.home_search_composing(window, cx) {
+            return;
+        }
+        if self.sidebar_keyboard_key(event, window, cx) {
             return;
         }
         if self.home_filter_key(event, window, cx) {

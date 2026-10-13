@@ -102,6 +102,7 @@ fn browser_fixture(
         new_session_queued: None,
         agent_animation: Default::default(),
         sidebar_hidden: false,
+        sidebar_keyboard: Default::default(),
         terminal_font: Default::default(),
         window_reveal: Default::default(),
         resize_gesture: Default::default(),

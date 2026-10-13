@@ -191,6 +191,7 @@ fn show(
                     });
                     let activation = cx.observe_window_activation(window, |view, window, cx| {
                         if !window.is_window_active() {
+                            view.sidebar_keyboard.active = false;
                             view.pending_session_open = None;
                             view.header_controls = Default::default();
                             view.cancel_attention();
@@ -237,6 +238,7 @@ fn show(
                         new_session_queued: None,
                         agent_animation: Default::default(),
                         sidebar_hidden: false,
+                        sidebar_keyboard: Default::default(),
                         terminal_font: Default::default(),
                         window_reveal: Default::default(),
                         resize_gesture: Default::default(),
@@ -294,6 +296,7 @@ struct SnapshotView {
     new_session_queued: Option<(u64, u64)>,
     agent_animation: agent_indicator::Clock,
     sidebar_hidden: bool,
+    sidebar_keyboard: browser_ui::SidebarKeyboard,
     terminal_font: terminal_font::Settings,
     window_reveal: workspace_chrome::WindowReveal,
     resize_gesture: divider::Owner,

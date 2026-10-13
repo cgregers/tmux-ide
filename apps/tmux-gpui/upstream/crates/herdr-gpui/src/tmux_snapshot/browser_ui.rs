@@ -1,5 +1,6 @@
 #[path = "sidebar.rs"]
 mod sidebar;
+pub(super) use sidebar::Keyboard as SidebarKeyboard;
 #[path = "workspace_agents.rs"]
 mod workspace_agents;
 use super::{SnapshotView, browser, controls};
@@ -224,7 +225,9 @@ impl SnapshotView {
             return;
         }
         // Let application navigation consume its keys before terminal input forwarding.
-        if super::picker::commands::shortcut(&event.keystroke) {
+        if super::picker::commands::shortcut(&event.keystroke)
+            || sidebar::focus_shortcut(&event.keystroke)
+        {
             return;
         }
         if self.divider.is_some() && !event.keystroke.modifiers.platform {
@@ -410,6 +413,7 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.sidebar_keyboard.active = false;
         self.attention.pending = None;
         self.cancel_attention();
         self.divider = None;
@@ -602,6 +606,7 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.reconcile_sidebar_keyboard(window, cx);
         self.agent_animation.begin_render();
         // GPUI dispatches shortcuts along the focused element path. Initial catalog
         // and selection transitions have no focused control; retain navigation without
@@ -636,6 +641,11 @@ impl SnapshotView {
         );
         let mut sidebar = div()
             .id("session-list")
+            .debug_selector(|| "session-list".into())
+            .track_scroll(&self.sidebar_keyboard.scroll)
+            .when_some(self.sidebar_keyboard.focus.as_ref(), |list, focus| {
+                list.track_focus(focus)
+            })
             .w(px(224.))
             .h_full()
             .overflow_y_scroll()
@@ -655,7 +665,8 @@ impl SnapshotView {
             );
         let request = self.browser_request;
         for (index, row) in sidebar::rows(&self.browser_state).into_iter().enumerate() {
-            let mut element = sidebar::render_row(index, &row, &theme, self.accent(), glass);
+            let mut element = sidebar::render_row(index, &row, &theme, self.accent(), glass)
+                .when(self.sidebar_keyboard.active && row.target.as_ref().is_some_and(|target| matches!(target, sidebar::Target::Session(id) if Some(id) == self.sidebar_keyboard.selected.as_ref())), |row| row.border_1().border_color(rgb(self.accent())));
             if let Some(target) = row.target {
                 element =
                     element

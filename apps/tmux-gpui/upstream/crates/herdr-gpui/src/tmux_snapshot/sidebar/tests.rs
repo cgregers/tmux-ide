@@ -1,5 +1,7 @@
 #![allow(clippy::unwrap_used)]
 use super::*;
+#[path = "keyboard_tests.rs"]
+mod keyboard_tests;
 use crate::tmux_snapshot::{SnapshotView, decode, presence::Presence};
 use core::prelude::v1::test;
 use std::{
@@ -50,6 +52,7 @@ fn make_view(
         new_session_queued: None,
         agent_animation: Default::default(),
         sidebar_hidden: false,
+        sidebar_keyboard: Default::default(),
         terminal_font: Default::default(),
         window_reveal: Default::default(),
         resize_gesture: Default::default(),
