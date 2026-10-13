@@ -47,11 +47,14 @@ impl SnapshotView {
         if self.selection.is_some() {
             self.clear_selection(cx);
         }
-        if !self.terminal_input_ready() {
+        let input_ready = self.terminal_input_ready();
+        if !input_ready {
             self.interrupt_input(cx);
             // Keep keydown observable even before AppKit text input is installed.
             self.terminal_focus.focus(window, cx);
-            return;
+            if !self.historical_selection_ready() {
+                return;
+            }
         }
         if !super::hit_regions::is_painted(self.frame.as_ref(), self.painted_frame.as_ref()) {
             return;
@@ -73,9 +76,14 @@ impl SnapshotView {
         .map(str::to_owned);
         if let Some(id) = id {
             if self.browser_state.selected_pane.as_ref() != Some(&id) {
-                self.select(Selection::Pane(id), window, cx);
+                if input_ready {
+                    self.select(Selection::Pane(id), window, cx);
+                }
             } else {
-                self.input_interrupted = false;
+                // Copying history is local; it cannot re-arm terminal input.
+                if input_ready {
+                    self.input_interrupted = false;
+                }
                 self.discard_composition(cx);
                 self.selection = super::selection::Capture::begin(
                     &self.browser_state,

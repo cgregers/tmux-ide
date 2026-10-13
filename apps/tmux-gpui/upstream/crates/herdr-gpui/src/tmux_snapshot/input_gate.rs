@@ -11,6 +11,23 @@ impl SnapshotView {
             && self.frame.is_some()
             && self.browser_state.selected_pane.is_some()
     }
+    pub(super) fn historical_selection_ready(&self) -> bool {
+        self.picker.is_none()
+            && self.pane_actions.is_none()
+            && self.new_session.is_none()
+            && self.presence.ready()
+            && self.browser_commands.is_some()
+            && self.browser_state.request == self.browser_request
+            && self.browser_state.surface == super::browser::Surface::Workspace
+            && self.browser_state.history_offset > 0
+            && !self.browser_state.input_ready
+            && self
+                .frame
+                .as_ref()
+                .zip(self.browser_state.frame.as_ref())
+                .is_some_and(|(paint, current)| std::sync::Arc::ptr_eq(paint, current))
+            && self.browser_state.selected_pane.is_some()
+    }
     pub(super) fn interrupt_input(&mut self, cx: &mut Context<Self>) {
         self.input_interrupted = true;
         self.discard_composition(cx);

@@ -295,3 +295,6 @@ fn dropped_drag_prefix_stays_interrupted_after_release_until_ready_click(cx: &mu
 
 #[path = "wheel_event_tests.rs"]
 mod wheel_event_tests;
+
+#[path = "historical_selection_tests.rs"]
+mod historical_selection_tests;
