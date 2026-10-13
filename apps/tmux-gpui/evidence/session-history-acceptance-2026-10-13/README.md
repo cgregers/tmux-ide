@@ -41,3 +41,14 @@ resize was sent. This is a local daemon integration check, not remote-host cover
 Full bridge gate: 494 passed, 5 optional skips, 0 failed; TypeScript included.
 Focused tests: 43 passed; scoped lint passed. Rust source did not change after its
 recorded broad gates/build/physical checks. Public distribution is still unqualified.
+
+## Local alpha 2026101310
+
+Assembled from bridge commit 92a07ae3 and qualified native sources at b4ed0c99.
+Ten exact-package tests passed with zero skips. Archive contains 27 entries; all
+22 regular files were streamed and SHA256-compared against the assembled app.
+Archive SHA256: 0f0149f784971b8240db4c21d016be7dd397a6f5e42c39f0eb3b3d65b203f644.
+Size: 46,442,310 bytes. Local download folder: ~/Downloads/tmux-ide-alpha-2026101310.
+Unsigned/unnotarized Apple Silicon macOS14.2+; existing daemon required. This does
+not prove combined packaged native GUI + real remote history, clean-Mac installation,
+normal Finder launch activation or full TUI parity. Prior alphas preserved.
