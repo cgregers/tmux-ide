@@ -52,3 +52,16 @@ Size: 46,442,310 bytes. Local download folder: ~/Downloads/tmux-ide-alpha-202610
 Unsigned/unnotarized Apple Silicon macOS14.2+; existing daemon required. This does
 not prove combined packaged native GUI + real remote history, clean-Mac installation,
 normal Finder launch activation or full TUI parity. Prior alphas preserved.
+
+## Exact packaged bridge with real daemon
+
+Alpha1310 also passed the isolated real canonical-daemon history journey using
+only its bundled Node/browser/live helper and private scratch cwd, with no source
+fallback. The same assertions cover local/fleet visits, no catalog-only visits,
+invalid admission retaining the current terminal, Back/Forward, canonical storage,
+unchanged pane births/processes and owned cleanup. This remains a headless bridge
+journey, not combined native GUI plus remote-host acceptance.
+
+The opt-in fixture rejects invalid explicit packages before scratch allocation.
+Seven malformed-package cases and a valid-layout control passed. Both changed
+fixture files received independent hash-bound review; no product binary changed.

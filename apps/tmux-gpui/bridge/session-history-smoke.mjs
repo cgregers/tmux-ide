@@ -1,4 +1,4 @@
-// Isolated canonical daemon + current source browser. No GUI, input, resize or personal discovery.
+// Isolated canonical daemon + source or explicitly selected packaged browser. No GUI, input, resize or personal discovery.
 import assert from "node:assert/strict";
 import process from "node:process";
 import console from "node:console";
@@ -12,6 +12,22 @@ import { randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import { createScratchFleet } from "../../../scripts/lib/product-fixtures/scratch-fleet.ts";
 import { stopFixtureChild } from "./fixture-child.mjs";
+// Validate an explicit package before CLI checks or any scratch allocation. Never fall back.
+const app = process.env.TMUX_GPUI_TEST_APP;
+if (app !== undefined) {
+  assert.ok(isAbsolute(app), "TMUX_GPUI_TEST_APP must be a nonempty absolute path");
+  assert.ok((await stat(app)).isDirectory(), "TMUX_GPUI_TEST_APP must be a directory");
+  for (const file of ["node", "bridge/browser.bundle.mjs", "bridge/live.bundle.mjs"]) {
+    const path = join(app, "Contents/Resources", file);
+    assert.ok((await stat(path)).isFile(), "Packaged helper must be a regular file");
+    await access(path, file === "node" ? constants.X_OK : constants.R_OK);
+  }
+}
+const browserNode = app === undefined ? process.execPath : join(app, "Contents/Resources/node");
+const browserEntry =
+  app === undefined
+    ? fileURLToPath(new URL("./browser.ts", import.meta.url))
+    : join(app, "Contents/Resources/bridge/browser.bundle.mjs");
 const cli = process.env.TMUX_GPUI_TEST_CLI;
 assert.ok(cli && isAbsolute(cli), "Explicit absolute private CLI required");
 assert.ok((await stat(cli)).isFile());
@@ -206,14 +222,13 @@ try {
   });
   browser = own(
     spawn(
-      process.execPath,
+      browserNode,
       [
-        "--import",
-        import.meta.resolve("tsx"),
-        fileURLToPath(new URL("./browser.ts", import.meta.url)),
+        ...(app === undefined ? ["--import", import.meta.resolve("tsx")] : []),
+        browserEntry,
         "--local",
       ],
-      { env, stdio: ["pipe", "pipe", "pipe"] },
+      { env, stdio: ["pipe", "pipe", "pipe"], ...(app === undefined ? {} : { cwd: fleet.root }) },
     ),
   );
   for (const stream of [browser.stdin, browser.stdout, browser.stderr]) stream.on("error", cancel);
@@ -340,7 +355,9 @@ if (failures.length) {
 console.log(
   JSON.stringify({
     passed: true,
-    sourceBrowser: true,
+    sourceBrowser: app === undefined,
+    packagedBrowser: app !== undefined,
+    packagedIsolatedCwd: app !== undefined,
     canonicalDaemon: true,
     defaultLocalVisit: true,
     fleetVisit: true,

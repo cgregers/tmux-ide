@@ -686,3 +686,48 @@ or production daemon changes occurred. See
 
 Remaining: cross-session Workspace agent tree, visited-session history, activation
 diagnosis, narrow/IME/remote qualification and signed install/update acceptance.
+
+### 13 October: acknowledged session history and local alpha10
+
+Commits `eed9e807`, `b4ed0c99` and `92a07ae3` implement F8 Back / Shift-F8
+Forward using daemon-persisted canonical visits and fresh target revalidation.
+Visits advance only after a current live frame gains input readiness. Rejected
+history admission retains the displayed terminal. The catalog-to-pane handoff
+now survives intentional metadata-helper retirement; the first real smoke
+exposed and reproduced the missing Forward action before this repair.
+
+Native default/all-feature gates passed 2,974/3,008 tests (10/17 existing ignored),
+format/size/both strict Clippy checks passed, and a qualified optimized build
+passed the physical synthetic rejection → Back → Forward journey. The source
+bridge with a real private canonical daemon passed the same navigation plus
+persisted visits and unchanged pane identities. Bridge: 494 passed, five optional
+skips. Ten exact-package checks and all 22 archived-file comparisons passed.
+Evidence: `evidence/session-history-acceptance-2026-10-13/`; package evidence
+commit `010834bd`. Unsigned local alpha `2026101310` includes these controls.
+
+This supersedes the missing history implementation statement above. Native GUI
+and real-daemon history were checked separately; combined packaged native/remote
+acceptance remains open. The activation trace narrowed automated failures to
+AppKit-inactive delivery, not a proven missing presence ACK, and does not claim
+a fix for normal Finder launch. Full cross-session Workspace agent hierarchy,
+narrow/IME/remote checks and clean-machine signed install/update remain open.
+The existing daemon remains required. No hosted runner or release was used.
+
+### Current remaining workflow audit — 13 October
+
+Alpha1310's bundled bridge now also passes the real private canonical-daemon
+history smoke, without source fallback. Native GUI and daemon checks remain
+separate. See the same session-history evidence folder.
+
+Source comparison identifies two substantive missing workflows: persistent
+Workspace cross-session fleet-agent rows (TUI `application-machine-sidebar.tsx`
+and `application-machine-navigation.ts`) and retained session tabs with F9 /
+Shift-F9 / Ctrl-F9 (TUI `application-fleet-tabs.ts`). GPUI tmux-window tabs and
+F5/F7 agent search do not substitute for either. A bounded shared-observer roster
+and exact session navigation targets should reuse existing admission paths; do
+not create background terminal owners or reinterpret tab close as session kill.
+
+The base TUI F5 command vocabulary is represented in native source; older blanket
+missing-palette claims above are superseded. The native shortcut reference still
+needs F8/Shift-F8 plus sidebar collapse/favorite guidance. Physical/remote checks
+remain acceptance gaps even where implementation exists.

@@ -37,5 +37,6 @@
   },
   "nativeSyntheticHistory": true,
   "localSourceBridgeDaemonHistory": true,
-  "remoteHistoryQualified": false
+  "remoteHistoryQualified": false,
+  "packagedBridgeDaemonHistory": true
 }
