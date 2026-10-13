@@ -40,7 +40,7 @@ Full-screen OpenTUI app (production entry `tui/mirror/runtime/application-entry.
    tmux set-option -p @agent_state "working:$(date +%s)"   # working|blocked|done|idle
    ```
    Staleness guard: working/blocked older than 10 min fall back to scraping.
-2. **Fallback** (scraping): process-tree resolution (pane_pid → the real agent, not `node`) → evidence-tuned screen manifests (claude/codex tuned from real captures; opencode/gemini/aider/copilot conservative). User overrides in `~/.tmux-ide/agent-detection/*.json`; per-pane `@agent_hint <id>` forces a manifest. Debug any pane: `tmux-ide agent explain <pane|session>`.
+2. **Fallback** (scraping): process-tree resolution (pane_pid → the real agent, not `node`) → evidence-tuned screen manifests (claude/codex tuned from real captures, aider/copilot from verbatim source strings; opencode/gemini and the rest conservative). User overrides in `~/.tmux-ide/agent-detection/*.json`; per-pane `@agent_hint <id>` forces a manifest. Debug any pane: `tmux-ide agent explain <pane|session>`.
 
 ## CLI surface (everything supports --json)
 

@@ -96,12 +96,13 @@ were built from real captured screens or the agent's own source strings.
 **Conservative** manifests report a state only on strong evidence, such as an
 explicit prompt or a spinner; anything they miss shows as unknown.
 
-| Manifest id                                                                                                                | Agent            | Fallback     |
-| -------------------------------------------------------------------------------------------------------------------------- | ---------------- | ------------ |
-| `claude`                                                                                                                   | Claude Code      | tuned        |
-| `codex`                                                                                                                    | Codex            | tuned        |
-| `aider`                                                                                                                    | Aider            | tuned        |
-| `opencode`, `gemini`, `copilot`, `cursor`, `goose`, `amp`, `devin`, `kimi`, `pi`, `grok`, `kiro`, `cline`, `droid`, `kilo` | Other agent CLIs | conservative |
+| Manifest id                                                                                                     | Agent              | Fallback     |
+| --------------------------------------------------------------------------------------------------------------- | ------------------ | ------------ |
+| `claude`                                                                                                        | Claude Code        | tuned        |
+| `codex`                                                                                                         | Codex              | tuned        |
+| `aider`                                                                                                         | Aider              | tuned        |
+| `copilot`                                                                                                       | GitHub Copilot CLI | tuned        |
+| `opencode`, `gemini`, `cursor`, `goose`, `amp`, `devin`, `kimi`, `pi`, `grok`, `kiro`, `cline`, `droid`, `kilo` | Other agent CLIs   | conservative |
 
 Any agent, listed or not, can [report its own state](#the-self-report-contract),
 and you can [add or replace a manifest](#override-detection-for-a-tool).
