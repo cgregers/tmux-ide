@@ -1,14 +1,63 @@
+import process from "node:process";
+import console from "node:console";
+import { Buffer } from "node:buffer";
+import { setTimeout } from "node:timers";
 // Sustained correctness, not a benchmark or native heap/GPU qualification.
 // Fixed 2000 ASCII lines over 200 producer ticks; bounded latest-only evidence.
 import assert from "node:assert/strict";
 import { spawn, execFileSync } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { writeFile, access, readFile, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { parseDiagnosticLine, diagnosticStatus } from "./live-diagnostics.ts";
 import { randomUUID } from "node:crypto";
 import { stopFixtureChild } from "./fixture-child.mjs";
 import { resolve, join, isAbsolute } from "node:path";
 import { createScratchFleet } from "../../../scripts/lib/product-fixtures/scratch-fleet.ts";
 import { startDaemon } from "../../../scripts/lib/product-fixtures/daemon.ts";
 
+const privateCli = process.env.TMUX_GPUI_TEST_CLI;
+if (privateCli !== undefined) {
+  assert.ok(isAbsolute(privateCli), "TMUX_GPUI_TEST_CLI must be absolute");
+  assert.ok((await stat(privateCli)).isFile(), "Private CLI must be a regular file");
+  await access(privateCli, constants.R_OK);
+}
+async function startFixtureDaemon(fleet) {
+  if (privateCli === undefined) return startDaemon(fleet);
+  const child = spawn(process.execPath, [privateCli, "--headless"], {
+    env: { ...process.env, ...fleet.environment },
+    stdio: "ignore",
+  });
+  let childError;
+  child.on("error", (error) => {
+    childError = error;
+  });
+  try {
+    const deadline = Date.now() + 45000;
+    for (;;) {
+      if (childError) throw childError;
+      assert.ok(child.exitCode === null && child.signalCode === null, "Private daemon exited");
+      assert.ok(Date.now() < deadline, "Private daemon startup deadline");
+      let record;
+      try {
+        record = JSON.parse(await readFile(join(fleet.daemonInfoDir, "daemon.json"), "utf8"));
+      } catch {
+        /* Await the owned atomic discovery record. */
+      }
+      if (record?.pid === child.pid && typeof record.authToken === "string" && record.instanceId)
+        return { record, stop: () => stopFixtureChild(child) };
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  } catch (error) {
+    try {
+      await stopFixtureChild(child);
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Private daemon startup failed", {
+        cause: cleanupError,
+      });
+    }
+    throw error;
+  }
+}
 const app = process.env.TMUX_GPUI_TEST_APP;
 if (app && !isAbsolute(app)) throw new Error("TMUX_GPUI_TEST_APP must be absolute");
 
@@ -29,7 +78,7 @@ let daemon, browser;
 let latest,
   buffer = "",
   stderr = "";
-let fatal;
+let fatal, shutdownDiagnostic;
 const failures = [];
 let publications = 0,
   maxPublicationBytes = 0,
@@ -125,7 +174,7 @@ try {
   assert.equal(latest.inputReady, false);
   const connection = latest.connection;
   const before = fleet.captureWindowPanes(fleet.sessionNames[0]);
-  daemon = await startDaemon(fleet);
+  daemon = await startFixtureDaemon(fleet);
   send({ type: "refresh", request: 1 });
   await until(() => latest?.request === 1 && latest.home.phase === "live");
   assert.equal(latest.connection, connection);
@@ -214,12 +263,28 @@ try {
   });
   await until(() => sourceRows().some((row) => row === inputMarker));
   await until(() => JSON.stringify(projected()) === JSON.stringify(sourceRows()));
+  assert.equal(stderr, "", "No diagnostics before the controlled daemon stop");
   const baseline = latest.sequence;
   await daemon.stop();
   daemon = undefined;
-  await until(() => latest.sequence > baseline && latest.snapshot === null && !latest.inputReady);
+  await until(() => {
+    const lines = stderr.trim().split("\n").filter(Boolean);
+    const diagnostic = lines.length === 1 ? parseDiagnosticLine(lines[0]) : null;
+    const expected =
+      diagnostic?.code === "source-closed" ||
+      (diagnostic?.code === "transport-closed" && diagnostic.closeCode === 1001);
+    if (
+      !expected ||
+      !(latest?.sequence > baseline) ||
+      latest.snapshot !== null ||
+      latest.inputReady !== false ||
+      latest.status !== diagnosticStatus(diagnostic)
+    )
+      return false;
+    shutdownDiagnostic = diagnostic;
+    return true;
+  });
   assert.equal(latest.connection, connection);
-  assert.equal(stderr, "");
   checkFatal();
   result = {
     passed: true,
@@ -233,6 +298,7 @@ try {
     finalTextCellsMatchTmux: true,
     responsiveInputAfterFlood: true,
     disconnectCleared: true,
+    shutdownDiagnostic,
     retainedEvidence: "latest publication and scalar counters only",
     nativeUi: false,
     resourceScope:
@@ -255,6 +321,17 @@ try {
     } catch (error) {
       failures.push(error);
     }
+  }
+}
+if (shutdownDiagnostic) {
+  try {
+    assert.deepEqual(
+      stderr.trim().split("\n").map(parseDiagnosticLine),
+      [shutdownDiagnostic],
+      "Only the controlled shutdown diagnostic is expected through cleanup",
+    );
+  } catch (error) {
+    failures.push(error);
   }
 }
 if (fatal && !failures.includes(fatal)) failures.push(fatal);
