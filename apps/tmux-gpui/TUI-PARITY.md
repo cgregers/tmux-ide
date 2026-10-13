@@ -580,3 +580,24 @@ Help, What's new, new-agent workflows, broader remote/native acceptance and
 release qualification remain separate gaps. An intermittent runtime-failure
 observed during an earlier font fixture is still unexplained; a successful fresh
 run is not a fix for that observation.
+
+## Help and preview changes checkpoint — 13 October
+
+Local commit `606edc7d` adds F5 Using tmux-ide and What's new, sharing searchable
+reference popovers and Escape-to-Commands. Informational paragraphs wrap;
+composing Commands search text cannot be discarded by retained reference-entry
+callbacks. The exact composition regression failed before the guard and passed
+after it. All 77 focused picker tests passed, along with both Rust workspace
+configurations and Clippy checks.
+
+The optimized macOS artifact passed a synthetic Home visual check for readable
+wrapping, final-paragraph keyboard reveal, search and Escape. No terminal input
+was emitted. Physical narrow-window, Workspace and OS-composition checks remain
+open; attempted edge drags did not change the QA window dimensions. Evidence:
+`evidence/help-reference-2026-10-13/`. This supersedes the missing-implementation
+claim for Help/What's new, without closing complete F5 or release acceptance.
+
+The downloadable local unsigned alpha build 2026101302 predates this increment.
+All development and runners currently remain local; no hosted CI, publication or
+Sfora update is authorized by the current local-only working preference. Session
+sidebar keyboard focus/navigation is the next bounded implementation slice.
