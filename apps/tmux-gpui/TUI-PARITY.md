@@ -624,3 +624,20 @@ favorite/collapse → actual compiled TUI startup → TUI expand/unstar → TUI 
 Fresh CLI/TUI artifacts and captured TUI screens are recorded in the same evidence
 folder. An initial inactive-presence run remains recorded and unresolved; no
 instant synchronization or physical narrow-window claim is made.
+
+### 13 October: F5 direct navigation
+
+Native F5 now searches published sessions and the agents available on the current
+screen. It preserves exact targets behind duplicate names, displays machine/server
+context, searches agent project/harness/team metadata, and rejects callbacks from
+a replaced popover. Reviewed commit `d02c27da` passed both workspace test modes and
+strict Clippy configurations. A private native fixture verified exact session and
+agent command dispatch through the visible F5 popover; see
+`evidence/f5-direct-navigation-2026-10-13/`. This was a synthetic routing check,
+not a live daemon/terminal admission test.
+
+Full fleet-wide agent search from Workspace remains open: its current roster is
+selected-session scoped, and Home still uses its existing machine filter. The
+follow-up must reuse the shared fleet observer with bounded target retention and
+request/scope/revision checks. Narrow-window acceptance and the earlier intermittent
+activation issue also remain open. The downloadable alpha has not been replaced.
