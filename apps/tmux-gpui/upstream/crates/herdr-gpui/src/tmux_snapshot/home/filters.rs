@@ -51,7 +51,7 @@ pub(in crate::tmux_snapshot) struct Controls {
     theme: crate::config::Theme,
 }
 impl SnapshotView {
-    pub(super) fn prepare_home_filter(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::tmux_snapshot) fn prepare_home_filter(&mut self, cx: &mut Context<Self>) {
         let theme = self.theme();
         if self.home_filter.is_none() {
             let search = cx.new(|cx| {

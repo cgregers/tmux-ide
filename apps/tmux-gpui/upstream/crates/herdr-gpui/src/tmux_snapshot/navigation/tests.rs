@@ -99,6 +99,7 @@ fn make_view(
         wheel: crate::terminal::WheelRemainder::default(),
         browser_request: 7,
         browser_state: browser::State {
+            request: 7,
             input_ready: true,
             sessions: vec![pane("session-a", None)],
             panes: vec![

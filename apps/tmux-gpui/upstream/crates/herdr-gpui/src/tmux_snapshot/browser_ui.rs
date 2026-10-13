@@ -563,13 +563,39 @@ impl SnapshotView {
         cx: &mut Context<Self>,
     ) {
         if self.browser_request != request
+            || self.browser_state.request != request
+            || !self.presence.ready()
+            || self.picker.is_some()
+            || self.new_session.is_some()
+            || self.pane_actions.is_some()
+            || !self.marked.is_empty()
             || self.browser_commands.is_none()
             || !sidebar::current(&self.browser_state, target)
         {
             return;
         }
+        if let sidebar::Target::Collapse {
+            revision,
+            action,
+            enabled,
+            ..
+        } = target
+        {
+            self.change_fleet_preference(request, *revision, action, *enabled, cx);
+            return;
+        }
         self.select(
             match target {
+                sidebar::Target::Collapse { .. } => return,
+                sidebar::Target::FleetSession {
+                    selection, session, ..
+                } => Selection::FleetSession {
+                    selection: selection.clone(),
+                    session_id: session.clone(),
+                },
+                sidebar::Target::FleetServer { selection, .. } => {
+                    Selection::FleetServer(selection.clone())
+                }
                 sidebar::Target::Session(id) => Selection::Session(id.clone()),
                 sidebar::Target::Pane { id, .. } => Selection::Pane(id.clone()),
             },
@@ -609,6 +635,7 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.prepare_home_filter(cx);
         self.reconcile_sidebar_keyboard(window, cx);
         self.agent_animation.begin_render();
         // GPUI dispatches shortcuts along the focused element path. Initial catalog
@@ -668,8 +695,33 @@ impl SnapshotView {
             );
         let request = self.browser_request;
         for (index, row) in sidebar::rows(&self.browser_state).into_iter().enumerate() {
-            let mut element = sidebar::render_row(index, &row, &theme, self.accent(), glass)
-                .when(self.sidebar_keyboard.active && row.target.as_ref().is_some_and(|target| matches!(target, sidebar::Target::Session(id) if Some(id) == self.sidebar_keyboard.selected.as_ref())), |row| row.border_1().border_color(rgb(self.accent())));
+            let mut element = sidebar::render_row(index, &row, &theme, self.accent(), glass).when(
+                self.sidebar_keyboard.active
+                    && (row.target.as_ref().is_some_and(|target| {
+                        Some(target) == self.sidebar_keyboard.selected.as_ref()
+                    }) || row.machine.as_ref().is_some_and(|machine| {
+                        Some(machine) == self.sidebar_keyboard.machine_focus.as_ref()
+                    })),
+                |row| row.border_1().border_color(rgb(self.accent())),
+            );
+            if let Some((action, favorite)) = &row.favorite {
+                element = element.child(self.fleet_preference_button(
+                    ("sidebar-favorite", index),
+                    action.as_deref(),
+                    !*favorite,
+                    if *favorite {
+                        "Remove favorite"
+                    } else {
+                        "Add favorite"
+                    },
+                    if *favorite {
+                        "icons/fleet-star-filled.svg"
+                    } else {
+                        "icons/fleet-star.svg"
+                    },
+                    cx,
+                ));
+            }
             if let Some(target) = row.target {
                 element =
                     element
@@ -679,6 +731,14 @@ impl SnapshotView {
                         }));
             }
             sidebar = sidebar.child(element);
+        }
+        if let Some(status) = self.fleet_preference_status() {
+            sidebar = sidebar.child(
+                div()
+                    .text_sm()
+                    .text_color(rgb(theme.muted))
+                    .child(status.to_owned()),
+            );
         }
         sidebar = sidebar.children(self.workspace_agent_rows(cx));
         sidebar = sidebar.child(div().flex_1()).child(

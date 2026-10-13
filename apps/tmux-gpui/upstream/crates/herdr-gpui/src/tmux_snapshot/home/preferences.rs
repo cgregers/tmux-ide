@@ -12,7 +12,10 @@ impl SnapshotView {
     ) -> bool {
         self.browser_request == request
             && self.browser_state.request == request
-            && self.browser_state.surface == browser::Surface::Home
+            && matches!(
+                self.browser_state.surface,
+                browser::Surface::Home | browser::Surface::Workspace
+            )
             && self.browser_commands.is_some()
             && self.presence.ready()
             && self.picker.is_none()
@@ -30,7 +33,7 @@ impl SnapshotView {
                 .as_ref()
                 .is_some_and(|f| f.preference_action(revision, action, enabled))
     }
-    pub(super) fn change_fleet_preference(
+    pub(in crate::tmux_snapshot) fn change_fleet_preference(
         &mut self,
         request: u64,
         revision: u64,
@@ -60,7 +63,7 @@ impl SnapshotView {
         }
         cx.notify();
     }
-    pub(super) fn fleet_preference_button(
+    pub(in crate::tmux_snapshot) fn fleet_preference_button(
         &self,
         id: (&'static str, usize),
         action: Option<&str>,
@@ -120,7 +123,7 @@ impl SnapshotView {
             }))
             .into_any_element()
     }
-    pub(super) fn fleet_preference_status(&self) -> Option<&str> {
+    pub(in crate::tmux_snapshot) fn fleet_preference_status(&self) -> Option<&str> {
         if self
             .home_filter
             .as_ref()

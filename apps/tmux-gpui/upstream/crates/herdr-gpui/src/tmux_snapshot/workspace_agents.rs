@@ -101,6 +101,10 @@ impl SnapshotView {
                 selected: agent.pane_id.is_some()
                     && agent.pane_id == self.browser_state.selected_pane,
                 target: None,
+                depth: 0,
+                machine: None,
+                icon: None,
+                favorite: None,
             };
             let mut element = sidebar::render_row(512 + index, &row, &theme, self.accent(), false)
                 .debug_selector(move || format!("tmux-workspace-agent-{index}"))

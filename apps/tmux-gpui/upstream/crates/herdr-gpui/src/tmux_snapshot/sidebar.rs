@@ -1,4 +1,6 @@
 //! Session navigation, matching the TUI shell. Windows belong to the workspace strip.
+#[path = "sidebar/hierarchy.rs"]
+mod hierarchy;
 #[path = "sidebar/keyboard.rs"]
 mod keyboard;
 use crate::{config::Theme, tmux_snapshot::browser};
@@ -9,7 +11,29 @@ pub(super) use keyboard::focus_shortcut;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
     Session(String),
-    Pane { session: String, id: String },
+    FleetSession {
+        machine: String,
+        id: String,
+        session: String,
+        server: Option<(String, String)>,
+        selection: String,
+    },
+    FleetServer {
+        machine: String,
+        id: String,
+        generation: String,
+        selection: String,
+    },
+    Collapse {
+        machine: String,
+        revision: u64,
+        action: String,
+        enabled: bool,
+    },
+    Pane {
+        session: String,
+        id: String,
+    },
 }
 #[derive(Debug)]
 pub(super) struct Row {
@@ -17,8 +41,15 @@ pub(super) struct Row {
     pub pane_count: Option<String>,
     pub selected: bool,
     pub target: Option<Target>,
+    pub depth: u8,
+    pub machine: Option<String>,
+    pub icon: Option<&'static str>,
+    pub favorite: Option<(Option<String>, bool)>,
 }
 pub(super) fn rows(state: &browser::State) -> Vec<Row> {
+    if let Some(fleet) = &state.fleet {
+        return hierarchy::rows(state, fleet);
+    }
     state
         .sessions
         .iter()
@@ -27,12 +58,21 @@ pub(super) fn rows(state: &browser::State) -> Vec<Row> {
             pane_count: session.pane_count_label(),
             selected: state.selected_session.as_ref() == Some(&session.id),
             target: Some(Target::Session(session.id.clone())),
+            depth: 0,
+            machine: None,
+            icon: None,
+            favorite: None,
         })
         .collect()
 }
 
 pub(super) fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::FleetSession { .. } | Target::FleetServer { .. } | Target::Collapse { .. } => {
+            rows(state)
+                .iter()
+                .any(|r| r.target.as_ref() == Some(target))
+        }
         Target::Session(id) => state.sessions.iter().any(|s| &s.id == id),
         Target::Pane { session, id } => {
             state.selected_session.as_ref() == Some(session)
@@ -63,7 +103,7 @@ pub(super) fn render_row(
         .flex()
         .items_center()
         .gap(px(6.))
-        .pl(px(8.))
+        .pl(px(8. + f32::from(row.depth) * 10.))
         .pr_2()
         .py_1()
         .rounded(px(4.))
@@ -90,6 +130,13 @@ pub(super) fn render_row(
                 .rounded(px(1.))
                 .when(row.selected, |mark| mark.bg(rgb(accent))),
         )
+        .children(row.icon.map(|path| {
+            svg()
+                .path(path)
+                .size(px(14.))
+                .flex_none()
+                .text_color(rgb(theme.muted))
+        }))
         .child(
             div()
                 .debug_selector(move || format!("tmux-sidebar-label-{index}"))

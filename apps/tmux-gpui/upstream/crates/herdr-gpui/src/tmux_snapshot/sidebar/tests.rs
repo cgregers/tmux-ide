@@ -71,6 +71,7 @@ fn make_view(
         wheel: crate::terminal::WheelRemainder::default(),
         browser_request: 7,
         browser_state: browser::State {
+            request: 7,
             surface: browser::Surface::Workspace,
             input_ready: true,
             sessions: vec![
@@ -220,5 +221,7 @@ fn actual_session_click_routes_exact_id_and_long_labels_fit(cx: &mut TestAppCont
     view.read_with(cx, |view, _| assert!(!view.browser_state.input_ready));
 }
 
+#[path = "fleet_tests.rs"]
+mod fleet_tests;
 #[path = "workspace_agents.rs"]
 mod workspace_agents;

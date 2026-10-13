@@ -6,10 +6,11 @@ use crate::tmux_snapshot::SnapshotView;
 pub(in crate::tmux_snapshot) struct Keyboard {
     pub(in crate::tmux_snapshot) active: bool,
     pub(in crate::tmux_snapshot::browser_ui) focus: Option<FocusHandle>,
-    pub(in crate::tmux_snapshot::browser_ui) selected: Option<String>,
+    pub(in crate::tmux_snapshot::browser_ui) selected: Option<Target>,
     pub(in crate::tmux_snapshot::browser_ui) scroll: ScrollHandle,
+    pub(in crate::tmux_snapshot::browser_ui) machine_focus: Option<String>,
     request: u64,
-    displayed: Vec<String>,
+    displayed: Vec<Option<Target>>,
 }
 pub(in crate::tmux_snapshot::browser_ui) fn focus_shortcut(key: &Keystroke) -> bool {
     key.key == "g"
@@ -49,20 +50,43 @@ impl SnapshotView {
             }
             return;
         }
-        let old = state
-            .displayed
-            .iter()
-            .position(|id| Some(id) == state.selected.as_ref());
-        state.displayed = self
-            .browser_state
-            .sessions
-            .iter()
-            .map(|s| s.id.clone())
+        let old = state.displayed.iter().position(|id| {
+            id.as_ref()
+                .is_some_and(|id| Some(id) == state.selected.as_ref())
+        });
+        state.displayed = rows(&self.browser_state)
+            .into_iter()
+            .map(|r| r.target)
             .collect();
-        let next = state
-            .displayed
-            .iter()
-            .position(|id| Some(id) == state.selected.as_ref());
+        // Machine focus survives a Saving publication without retaining mutation
+        // authority. Only a later rendered Ready action can become selectable.
+        match &state.selected {
+            Some(Target::Collapse { machine, .. }) => state.machine_focus = Some(machine.clone()),
+            Some(_) => state.machine_focus = None,
+            None => {}
+        }
+        if let Some(machine) = &state.machine_focus {
+            if self
+                .browser_state
+                .fleet
+                .as_ref()
+                .is_some_and(|f| f.groups.iter().any(|g| &g.id == machine))
+            {
+                state.selected = state
+                    .displayed
+                    .iter()
+                    .flatten()
+                    .find(|t| matches!(t,Target::Collapse{machine:id,..}if id==machine))
+                    .cloned();
+            } else {
+                state.machine_focus = None;
+                state.selected = None;
+            }
+        }
+        let next = state.displayed.iter().position(|id| {
+            id.as_ref()
+                .is_some_and(|id| Some(id) == state.selected.as_ref())
+        });
         if next.is_none() {
             state.selected = None;
         }
@@ -95,23 +119,20 @@ impl SnapshotView {
                         .get_or_insert_with(|| cx.focus_handle())
                         .focus(window, cx);
                     state.active = true;
+                    state.machine_focus = None;
                     state.request = self.browser_request;
-                    state.displayed = self
-                        .browser_state
-                        .sessions
-                        .iter()
-                        .map(|s| s.id.clone())
+                    state.displayed = rows(&self.browser_state)
+                        .into_iter()
+                        .map(|r| r.target)
                         .collect();
-                    state.selected = self
-                        .browser_state
-                        .selected_session
-                        .clone()
-                        .filter(|id| state.displayed.contains(id));
-                    if let Some(index) = state
-                        .displayed
-                        .iter()
-                        .position(|id| Some(id) == state.selected.as_ref())
-                    {
+                    state.selected = rows(&self.browser_state)
+                        .into_iter()
+                        .find(|r| r.selected)
+                        .and_then(|r| r.target);
+                    if let Some(index) = state.displayed.iter().position(|id| {
+                        id.as_ref()
+                            .is_some_and(|id| Some(id) == state.selected.as_ref())
+                    }) {
                         state.scroll.scroll_to_item(index + 1);
                     }
                     cx.notify();
@@ -160,11 +181,64 @@ impl SnapshotView {
             cx.notify();
             return true;
         }
+        if matches!(key.key.as_str(), "left" | "right" | "f") {
+            if event.is_held {
+                return true;
+            }
+            if let Some(target) = self
+                .sidebar_keyboard
+                .selected
+                .clone()
+                .filter(|t| current(&self.browser_state, t))
+            {
+                if matches!(key.key.as_str(), "left" | "right") {
+                    let machine = match &target {
+                        Target::Collapse { machine, .. }
+                        | Target::FleetServer { machine, .. }
+                        | Target::FleetSession { machine, .. } => Some(machine),
+                        _ => None,
+                    };
+                    if let Some(machine) = machine
+                        && let Some(parent) = rows(&self.browser_state)
+                            .into_iter()
+                            .filter_map(|r| r.target)
+                            .find(|t| matches!(t,Target::Collapse{machine:id,..} if id==machine))
+                    {
+                        self.sidebar_keyboard.selected = Some(parent.clone());
+                        if matches!(&parent,Target::Collapse{enabled,..}if *enabled==(key.key=="left"))
+                        {
+                            self.select_sidebar(self.browser_request, &parent, window, cx);
+                        }
+                        cx.notify();
+                    }
+                } else if key.key == "f"
+                    && let Some((Some(action), favorite)) = rows(&self.browser_state)
+                        .into_iter()
+                        .find(|r| r.target.as_ref() == Some(&target))
+                        .and_then(|r| r.favorite)
+                    && let Some(revision) = self
+                        .browser_state
+                        .fleet
+                        .as_ref()
+                        .and_then(|f| f.preferences.as_ref())
+                        .map(|p| p.revision)
+                {
+                    self.change_fleet_preference(
+                        self.browser_request,
+                        revision,
+                        &action,
+                        !favorite,
+                        cx,
+                    );
+                }
+            }
+            return true;
+        }
         let state = &mut self.sidebar_keyboard;
         if state
             .selected
             .as_ref()
-            .is_some_and(|id| !self.browser_state.sessions.iter().any(|s| &s.id == id))
+            .is_some_and(|id| !current(&self.browser_state, id))
         {
             state.selected = None;
         }
@@ -175,10 +249,10 @@ impl SnapshotView {
             if let Some(id) = state
                 .selected
                 .clone()
-                .filter(|id| state.displayed.contains(id))
+                .filter(|id| state.displayed.contains(&Some(id.clone())))
             {
                 let request = state.request;
-                self.select_sidebar(request, &Target::Session(id), window, cx);
+                self.select_sidebar(request, &id, window, cx);
             }
             return true;
         }
@@ -186,7 +260,8 @@ impl SnapshotView {
         let rows: Vec<_> = state
             .displayed
             .iter()
-            .filter(|id| self.browser_state.sessions.iter().any(|s| &s.id == *id))
+            .flatten()
+            .filter(|id| current(&self.browser_state, id))
             .cloned()
             .collect();
         if rows.is_empty() {
@@ -210,11 +285,14 @@ impl SnapshotView {
             _ => return true,
         };
         state.selected = Some(rows[index].clone());
-        if let Some(index) = state
-            .displayed
-            .iter()
-            .position(|id| Some(id) == state.selected.as_ref())
-        {
+        state.machine_focus = match &state.selected {
+            Some(Target::Collapse { machine, .. }) => Some(machine.clone()),
+            _ => None,
+        };
+        if let Some(index) = state.displayed.iter().position(|id| {
+            id.as_ref()
+                .is_some_and(|id| Some(id) == state.selected.as_ref())
+        }) {
             state.scroll.scroll_to_item(index + 1);
         }
         cx.notify();

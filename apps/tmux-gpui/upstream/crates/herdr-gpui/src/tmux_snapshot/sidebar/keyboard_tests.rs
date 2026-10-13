@@ -47,7 +47,10 @@ fn sidebar_reorder_retains_id_but_removal_or_request_change_cannot_choose_replac
         view.update(cx, |view, _| view.browser_state.sessions.reverse());
         window.draw(cx).clear(cx);
         view.read_with(cx, |view, _| {
-            assert_eq!(view.sidebar_keyboard.selected.as_deref(), Some("session-b"))
+            assert_eq!(
+                view.sidebar_keyboard.selected.as_ref(),
+                Some(&Target::Session("session-b".into()))
+            )
         });
         // Remove after the last paint: Enter must not adopt another row.
         view.update(cx, |view, _| {
@@ -174,7 +177,10 @@ fn sidebar_empty_selection_starts_first_and_repeated_movement_stays_local(cx: &m
     receiver.try_iter().for_each(drop);
     cx.simulate_keystrokes("ctrl-g down");
     view.read_with(cx, |view, _| {
-        assert_eq!(view.sidebar_keyboard.selected.as_deref(), Some("session-a"))
+        assert_eq!(
+            view.sidebar_keyboard.selected.as_ref(),
+            Some(&Target::Session("session-a".into()))
+        )
     });
     cx.update(|window, cx| {
         view.update(cx, |view, cx| {
@@ -192,7 +198,10 @@ fn sidebar_empty_selection_starts_first_and_repeated_movement_stays_local(cx: &m
                     window,
                     cx,
                 );
-                assert_eq!(view.sidebar_keyboard.selected.as_deref(), Some(expected));
+                assert_eq!(
+                    view.sidebar_keyboard.selected.as_ref(),
+                    Some(&Target::Session(expected.into()))
+                );
             }
         })
     });
