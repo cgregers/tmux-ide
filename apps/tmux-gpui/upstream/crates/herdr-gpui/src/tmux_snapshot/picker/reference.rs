@@ -1,6 +1,6 @@
 //! Native-supported reference only. TUI application-shortcuts.ts supplies the
 //! category pattern; unsupported TUI-only terminal/session keys are not advertised.
-use super::{Action, Row, Target};
+use super::{Action, Mode, Row, Target};
 const SHORTCUTS: &[&str] = &[
     "Application · F1 — Home",
     "Application · F2 — Terminals",
@@ -27,18 +27,45 @@ const SHORTCUTS: &[&str] = &[
     "Menus · Esc — Dismiss; reference returns to Commands",
     "Text fields · Composition owns Enter and Escape",
 ];
-pub(super) fn rows(query: &str) -> Vec<Row> {
+const HELP: &[&str] = &[
+    "Find your work · Home brings agents from connected machines together. Sessions contain terminal windows and panes.",
+    "Find your work · Search Home by agent, team, harness, project, session, machine or server. Coverage notes explain incomplete observations.",
+    "Navigate · F6 searches sessions and panes. F7 shows observed agents needing attention when available.",
+    "Machines · Use Commands to connect, manage saved machines, retry unavailable connections or return to the local machine.",
+    "Terminals · Select a pane before typing. Pane header controls and Commands offer available pane actions.",
+    "History · Scroll back to read earlier output; return to live before sending terminal input.",
+    "Appearance · Commands includes Appearance and Terminal font. Your font family and size are saved for the next launch.",
+    "Safety · Unavailable or stale targets cannot receive input. Refresh or reselect the intended target after a connection changes.",
+];
+const CHANGES: &[&str] = &[
+    "Home and fleet · Agent search, machine filters, observation retry and load more, plus saved-machine management.",
+    "Workspace · New terminal windows and named Claude or Codex agents; pane rename, split, zoom and confirmed close.",
+    "Native controls · Pane header menus, sidebar visibility, searchable Commands and keyboard reference popovers.",
+    "Terminal font · Installed family selection, size controls and automatic symbol fallbacks, saved for the next launch.",
+];
+pub(super) fn heading(mode: Mode) -> &'static str {
+    match mode {
+        Mode::Help => "Using tmux-ide · Esc to Commands",
+        Mode::WhatsNew => "Native preview changes · Esc to Commands",
+        _ => "Keyboard shortcuts · Esc to Commands",
+    }
+}
+pub(super) fn rows(mode: Mode, query: &str) -> Vec<Row> {
     let query = query.to_lowercase();
-    SHORTCUTS
-        .iter()
-        .filter(|label| {
-            query
-                .split_whitespace()
-                .all(|term| label.to_lowercase().contains(term))
-        })
-        .map(|label| Row {
-            target: Target::Command(Action::Shortcuts),
-            label: (*label).into(),
-        })
-        .collect()
+    match mode {
+        Mode::Help => HELP,
+        Mode::WhatsNew => CHANGES,
+        _ => SHORTCUTS,
+    }
+    .iter()
+    .filter(|label| {
+        query
+            .split_whitespace()
+            .all(|term| label.to_lowercase().contains(term))
+    })
+    .map(|label| Row {
+        target: Target::Command(Action::Shortcuts),
+        label: (*label).into(),
+    })
+    .collect()
 }

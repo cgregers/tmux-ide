@@ -74,6 +74,8 @@ pub(super) struct Row {
 enum Mode {
     Font,
     Reference,
+    Help,
+    WhatsNew,
     Attention,
     Navigation,
     Theme,
@@ -81,6 +83,11 @@ enum Mode {
     Machine,
     SavedMachines,
     ManageMachines,
+}
+impl Mode {
+    fn is_reference(self) -> bool {
+        matches!(self, Self::Reference | Self::Help | Self::WhatsNew)
+    }
 }
 pub(super) struct Picker {
     mode: Mode,
@@ -390,6 +397,8 @@ impl SnapshotView {
                 match mode {
                     Mode::Font => "Search installed terminal fonts…",
                     Mode::Reference => "Search keyboard shortcuts…",
+                    Mode::Help => "Search help…",
+                    Mode::WhatsNew => "Search native preview changes…",
                     Mode::Attention => "Search attention agents…",
                     Mode::SavedMachines => "Search saved machines…",
                     Mode::ManageMachines => "Search machine actions…",
@@ -420,8 +429,8 @@ impl SnapshotView {
             _changed: changed,
             rows: if mode == Mode::Font {
                 fonts::rows(&self.terminal_font, "")
-            } else if mode == Mode::Reference {
-                reference::rows("")
+            } else if mode.is_reference() {
+                reference::rows(mode, "")
             } else if mode == Mode::Attention {
                 Vec::new()
             } else if mode == Mode::ManageMachines {
@@ -470,8 +479,8 @@ impl SnapshotView {
         }
         picker.rows = if picker.mode == Mode::Font {
             fonts::rows(&self.terminal_font, picker.search.read(cx).text())
-        } else if picker.mode == Mode::Reference {
-            reference::rows(picker.search.read(cx).text())
+        } else if picker.mode.is_reference() {
+            reference::rows(picker.mode, picker.search.read(cx).text())
         } else if picker.mode == Mode::Attention {
             attention::rows(
                 &self.browser_state,
@@ -508,11 +517,7 @@ impl SnapshotView {
         cx.notify();
     }
     fn choose_picker(&mut self, target: Target, window: &mut Window, cx: &mut Context<Self>) {
-        if self
-            .picker
-            .as_ref()
-            .is_some_and(|p| p.mode == Mode::Reference)
-        {
+        if self.picker.as_ref().is_some_and(|p| p.mode.is_reference()) {
             return;
         }
         if let Target::Font(choice) = &target {
@@ -616,10 +621,17 @@ impl SnapshotView {
         }
         if matches!(
             &target,
-            Target::Command(Action::ToggleSidebar | Action::Shortcuts | Action::Fonts)
+            Target::Command(
+                Action::ToggleSidebar
+                    | Action::Shortcuts
+                    | Action::Help
+                    | Action::WhatsNew
+                    | Action::Fonts
+            )
         ) && (!self.marked.is_empty()
             || self.picker.as_ref().is_none_or(|p| {
                 p.mode != Mode::Commands
+                    || p.search.read(cx).is_composing()
                     || p.agent.is_some()
                     || p.closing.is_some()
                     || p.edit.is_some()
@@ -633,6 +645,8 @@ impl SnapshotView {
             match action {
                 Action::Fonts => self.open_picker_mode(Mode::Font, window, cx),
                 Action::Shortcuts => self.open_picker_mode(Mode::Reference, window, cx),
+                Action::Help => self.open_picker_mode(Mode::Help, window, cx),
+                Action::WhatsNew => self.open_picker_mode(Mode::WhatsNew, window, cx),
                 Action::ToggleSidebar => self.toggle_sidebar(cx),
                 Action::SavedMachines => self.open_saved_machines(window, cx),
                 Action::ManageMachines => self.open_machine_management(window, cx),
@@ -846,7 +860,7 @@ impl SnapshotView {
             return;
         }
         match key.key.as_str() {
-            "escape" if picker.mode == Mode::Reference => self.open_commands(window, cx),
+            "escape" if picker.mode.is_reference() => self.open_commands(window, cx),
             "escape" => self.close_picker(window, cx),
             "up" => picker.selected = picker.selected.saturating_sub(1),
             "down" => {

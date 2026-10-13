@@ -11,7 +11,13 @@ impl SnapshotView {
         self.picker.as_ref().filter(|p| {
             matches!(
                 p.mode,
-                Mode::Commands | Mode::Navigation | Mode::Attention | Mode::Reference | Mode::Font
+                Mode::Commands
+                    | Mode::Navigation
+                    | Mode::Attention
+                    | Mode::Reference
+                    | Mode::Help
+                    | Mode::WhatsNew
+                    | Mode::Font
             )
         })?;
         let theme = self.theme();
@@ -106,13 +112,8 @@ impl SnapshotView {
                         ),
                     )
             })
-            .when(picker.mode == Mode::Reference, |panel| {
-                panel.child(
-                    div()
-                        .px_2()
-                        .py_1()
-                        .child("Keyboard shortcuts · Esc to Commands"),
-                )
+            .when(picker.mode.is_reference(), |panel| {
+                panel.child(div().px_2().py_1().child(reference::heading(picker.mode)))
             })
             .when(picker.mode == Mode::Commands, |panel| {
                 panel.child(div().px_2().py_1().child(if picker.pane_scope.is_some() {
@@ -152,25 +153,32 @@ impl SnapshotView {
         }
         let mut list = div()
             .id("picker-results")
+            .debug_selector(|| "picker-results".into())
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&picker.scroll);
         for (index, row) in picker.rows.iter().enumerate() {
             let target = row.target.clone();
-            let enabled = picker.mode != Mode::Reference
+            let enabled = !picker.mode.is_reference()
                 && !(picker.mode == Mode::Font
                     && (self.terminal_font.saving || !self.terminal_font.ready))
                 && current(&self.browser_state, &target);
             list = list.child(
                 div()
                     .id(("picker-row", index))
+                    .debug_selector(move || format!("picker-row-{index}"))
                     .px_2()
                     .py_1()
                     .rounded(px(4.))
-                    .truncate()
+                    .when(!picker.mode.is_reference(), |row| row.truncate())
+                    .when(picker.mode.is_reference(), |row| {
+                        row.w_full().whitespace_normal()
+                    })
                     .when(enabled, |row| row.cursor_pointer())
-                    .when(!enabled, |row| row.text_color(rgb(theme.muted)))
+                    .when(!enabled && !picker.mode.is_reference(), |row| {
+                        row.text_color(rgb(theme.muted))
+                    })
                     .bg(rgb(if index == picker.selected {
                         theme.active
                     } else {

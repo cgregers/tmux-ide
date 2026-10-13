@@ -5,6 +5,7 @@ mod commands;
 mod fleet;
 mod fleet_disconnect;
 mod fleet_retry;
+mod help;
 mod machine;
 mod navigation_keys;
 mod popover;

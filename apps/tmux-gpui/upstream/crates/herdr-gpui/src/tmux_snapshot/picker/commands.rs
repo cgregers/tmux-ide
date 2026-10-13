@@ -4,6 +4,8 @@ use super::{Row, Target, browser};
 pub(in crate::tmux_snapshot) enum Action {
     Fonts,
     Shortcuts,
+    Help,
+    WhatsNew,
     ToggleSidebar,
     Home,
     Terminals,
@@ -41,6 +43,8 @@ pub(super) fn command_rows_with_sidebar(
         ),
         (Action::Fonts, "Terminal font…"),
         (Action::Shortcuts, "Keyboard shortcuts…"),
+        (Action::Help, "Using tmux-ide…"),
+        (Action::WhatsNew, "What’s new…"),
         (Action::Home, "Home · F1"),
         (Action::Terminals, "Terminals · F2"),
         (Action::AddMachine, "Connect to machine…"),

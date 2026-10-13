@@ -7,7 +7,7 @@ AggregateError: Standalone local release qualification failed
   [errors]: [
     Error: Command failed: /usr/bin/python3 /Users/thijs/.codex/worktrees/retire-web-desktop/tmux-ide/apps/tmux-gpui/scripts/preview-release-package.py --app /Users/thijs/.codex/worktrees/retire-web-desktop/tmux-ide/.tasks/gpui-history-alpha-2026-10-13/Tmux IDE Preview.app --output /private/tmp/gpui-standalone-release-50yijl/app.tar.gz --version 0.1.0
     Archive packaging rejected; no signing or verification performed.
-    
+
         at genericNodeError (node:internal/errors:986:15)
         at wrappedFn (node:internal/errors:540:14)
         at ChildProcess.exithandler (node:child_process:417:12)
