@@ -1,6 +1,7 @@
 import { test } from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, writeFile, rm, lstat, symlink } from "node:fs/promises";
+import { mkdtemp, realpath, writeFile, readFile, rm, lstat, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -18,6 +19,8 @@ test("strict preview metadata generates exact safe plist fields; development def
     "tmux-ide Preview",
     "14.2",
     "tmux-ide-launcher",
+    "CFBundleIconFile",
+    "AppIcon.icns",
   ])
     assert.ok(plist.includes(text));
   assert.match(bundlePlist(), /com\.tmux-ide\.gpui\.development/);
@@ -81,4 +84,31 @@ test("bounded metadata file rejects links/oversize; invalid explicit assembly me
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("packaged icon is bound to existing tmux-ide artwork and a complete ICNS container", async () => {
+  const provenance = JSON.parse(
+    await readFile(new URL("../assets/app-icon-source.json", import.meta.url), "utf8"),
+  );
+  assert.equal(provenance.source, "docs/app/icon.png");
+  assert.equal(provenance.output, "AppIcon.icns");
+  const source = await readFile(new URL("../../../docs/app/icon.png", import.meta.url));
+  const icon = await readFile(new URL("../assets/AppIcon.icns", import.meta.url));
+  const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
+  assert.equal(hash(source), provenance.sourceSha256);
+  assert.equal(hash(icon), provenance.outputSha256);
+  assert.equal(icon.toString("ascii", 0, 4), "icns");
+  assert.equal(icon.readUInt32BE(4), icon.length);
+  const representations = new Set();
+  let offset = 8;
+  while (offset < icon.length) {
+    assert.ok(offset + 8 <= icon.length);
+    const length = icon.readUInt32BE(offset + 4);
+    assert.ok(length >= 8 && offset + length <= icon.length);
+    representations.add(icon.toString("ascii", offset, offset + 4));
+    offset += length;
+  }
+  assert.equal(offset, icon.length);
+  for (const type of ["ic07", "ic08", "ic09", "ic10", "ic11", "ic12", "ic13", "ic14"])
+    assert.ok(representations.has(type), `Missing icon representation ${type}`);
 });

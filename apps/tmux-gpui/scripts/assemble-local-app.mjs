@@ -50,6 +50,7 @@ try {
     resources = join(output, "Contents/Resources");
   await mkdir(macos, { recursive: true });
   await mkdir(resources, { recursive: true });
+  await copyFile(join(project, "assets/AppIcon.icns"), join(resources, "AppIcon.icns"));
   await copyFile(native, join(macos, "tmux-ide-gpui"));
   await copyFile(receipt, join(resources, "native-build-receipt.json"));
   await verifyNativeBuildReceipt(
@@ -120,6 +121,7 @@ exec "$resources/node" "$resources/bridge/preview-launcher.bundle.mjs" "$app_mac
           sha256: await digest(join(resources, "native-build-receipt.json")),
           scope: "local source/binary consistency; not trusted build attestation",
         },
+        icon: { file: "AppIcon.icns", sha256: await digest(join(resources, "AppIcon.icns")) },
         nodeSha256: await digest(join(resources, "node")),
         nodeLicenseSha256: await digest(join(resources, "NODE-LICENSE")),
         rustNotices: {
