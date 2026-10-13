@@ -51,3 +51,37 @@ Commands were `cargo test --locked --workspace` and the same with
 CARGO_INCREMENTAL=0 and an empty HERDR_BUILD_PR_NUMBER. All 12 source hashes
 match the independent approved freeze. Native physical acceptance remains
 pending; this supersedes earlier broad-gate pending statements.
+
+## Native physical result
+
+Qualified release build for source commit `528c78cd` passed; see
+`native-build-receipt.json`. The first run exposed an invalid synthetic catalog:
+it supplied sessions from two servers, whereas production catalogs bind to the
+selected server scope. Original fixture, failed receipt and observation are
+preserved. Independent review approved the corrected fixture (A initially, B+C
+after server-two selection).
+
+The second run rendered the correct collapsed hierarchy but Raise plus mouse
+clicks did not dispatch preference actions. It exited cleanly with a failed
+acceptance receipt. Presence transition timing was not recorded. This remains
+an activation investigation, not a demonstrated sidebar projection defect.
+
+The third run used Raise then Ctrl-G before pointer interaction. Expand/collapse
+and keyboard selection of the second identically named session passed. Parent
+visually verified the second-server window and pane before Cmd-Q. The raw
+receipt deliberately leaves visual verification false; the separate observation
+records the physical inspection. No daemon or tmux was contacted.
+
+This supersedes physical-pending statements only for the active-window synthetic
+journey. Mouse-only activation, real remote admission, broader fleet agent trees
+and narrow-window checks remain separate. Existing alpha08 is unchanged.
+
+## Local alpha refresh
+
+Build2026101309 assembled from the qualified native receipt and current bridge.
+Ten packaged tests passed with no skips. All 22 regular archive files match
+the assembled app by SHA-256. Download folder: `/Users/thijs/Downloads/tmux-ide-alpha-2026101309`.
+The first packaging command rejected a missing destination parent; no archive
+was created. After explicitly creating the fresh parent, packaging succeeded.
+Unsigned/unnotarized, requires existing daemon, no clean-machine or remote
+qualification. Alpha08 remains available unchanged.
