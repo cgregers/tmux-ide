@@ -207,6 +207,8 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     preferenceSnapshot: preferences.preferences.snapshot,
     recordVisit: preferences.preferences.recordVisit,
     resolveCanonical: fleet.resolveCanonical,
+    retainedTarget: fleet.retainedTarget,
+    tabObservation: fleet.tabObservation,
     attachmentKey,
     isSelectedAgent(
       row: import("../../../packages/presentation/src/home-agent-roster.ts").HomeAgentRow,

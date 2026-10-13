@@ -1,3 +1,4 @@
+import { createSessionTabs, sessionTabCommandSchema } from "./session-tabs.ts";
 import {
   createWorkspaceFleetAgents,
   openWorkspaceFleetAgentSchema,
@@ -124,6 +125,7 @@ const machineRegistryCommand = z.discriminatedUnion("operation", [
 const commandSchema = z.union([
   fleetPreferenceCommand,
   sessionHistoryCommandSchema,
+  sessionTabCommandSchema,
   openWorkspaceFleetAgentSchema,
   attentionObserveSchema,
   openAttentionAgentSchema,
@@ -339,6 +341,16 @@ let attentionSelectionRejected: { request: number; fromRequest: number; scope: n
 const attention = createAttentionOwner(publish);
 let paletteSelectionRejected: { request: number; fromRequest: number; scope: number } | null = null;
 const palette = createPaletteOwner(publish);
+const sessionTabs = createSessionTabs();
+let sessionTabResult: {
+  request: number;
+  fromRequest: number;
+  revision: number;
+  action: string;
+  outcome: "closed" | "rejected";
+} | null = null;
+let observingTabs = false;
+let stopTabObservation: (() => void) | undefined;
 const workspaceFleetAgents = createWorkspaceFleetAgents(publish);
 let workspaceFleetAgentRejected: {
   request: number;
@@ -585,6 +597,7 @@ function launchFleetSelection(
       if (!current()) return;
       inputReady = false;
       sessionHistory.cancel();
+      sessionTabs.cancel();
       status = "Fleet session unavailable — return Home and select it again";
       publish();
     });
@@ -607,6 +620,27 @@ function publish() {
   if (preferenceState?.phase === "ready" && preferenceState.state)
     sessionHistory.seed(preferenceState.state.recent);
   acceptSessionVisit?.();
+  const wantTabs = !!fleet && foreground && !stopped && sessionTabs.keys().length > 0;
+  if (wantTabs && !observingTabs) {
+    observingTabs = true;
+    stopTabObservation = fleet!.observeAgents(() => {
+      let changed = false;
+      for (const key of sessionTabs.keys())
+        changed = sessionTabs.observe(key, fleet?.tabObservation(key) ?? null) || changed;
+      if (changed) publish();
+    });
+  } else if (!wantTabs && observingTabs) {
+    observingTabs = false;
+    const stop = stopTabObservation;
+    stopTabObservation = undefined;
+    stop?.();
+    for (const key of sessionTabs.keys()) sessionTabs.observe(key, null);
+  }
+  const tabPublication = sessionTabs.publication(
+    request,
+    !!fleet,
+    (key) => fleet?.retainedTarget(key) ?? null,
+  );
   const historyPublication = sessionHistory.publication(
     request,
     !!fleet && !!preferenceState?.state,
@@ -646,6 +680,8 @@ function publish() {
       attentionSupported: true,
       attentionAgents: attention.publication(),
       attentionSelectionRejected,
+      sessionTabs: tabPublication,
+      sessionTabResult,
       workspaceFleetAgents: workspaceFleetAgents.publication(),
       workspaceFleetAgentRejected,
       workspaceAgents:
@@ -725,6 +761,7 @@ async function retire() {
 function retireMachineRoute() {
   if (stopped) return;
   sessionHistory.cancel();
+  sessionTabs.cancel();
   machineRouteRevision++;
   retireAgents();
   catalog?.dispose();
@@ -747,8 +784,13 @@ function retireMachineRoute() {
 async function stop() {
   if (stopped) return;
   sessionHistory.cancel();
+  sessionTabs.cancel();
   acceptSessionVisit = null;
   stopped = true;
+  stopTabObservation?.();
+  stopTabObservation = undefined;
+  observingTabs = false;
+  sessionTabs.dispose();
   workspaceFleetAgents.cancel();
   hostSource?.dispose();
   machines?.dispose();
@@ -871,6 +913,7 @@ async function openPane(
         return;
       }
       sessionHistory.cancel();
+      sessionTabs.cancel();
       attention.cancel();
       palette.cancel();
       retireAgents();
@@ -988,8 +1031,10 @@ async function openPane(
               foreground && admissionPresence === presenceRevision
                 ? fleet?.attachmentKey(config)
                 : null;
-            if (historyKey)
+            if (historyKey) {
               sessionHistory.catalogReady(token, historyKey, owningCatalog, presenceRevision);
+              sessionTabs.catalogReady(token, historyKey, owningCatalog, presenceRevision);
+            }
             status = "Choose a pane or window";
             publish();
             void retire();
@@ -1419,6 +1464,8 @@ async function openPane(
                 return;
               const key = fleet?.attachmentKey(config);
               if (!key) return;
+              const tabTarget = fleet?.retainedTarget(key);
+              if (tabTarget) sessionTabs.accept(token, tabTarget);
               const visit = sessionHistory.accept(token, key),
                 owner = fleet;
               if (visit && owner)
@@ -1563,6 +1610,7 @@ async function command(value: unknown) {
     if (!foreground) {
       workspaceFleetAgents.cancel();
       sessionHistory.cancel();
+      sessionTabs.cancel();
       attention.cancel();
       palette.cancel();
       initialPane = null;
@@ -1814,6 +1862,8 @@ async function command(value: unknown) {
     retireAgents();
     request = cmd.request;
     sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
     sessionHistoryRejected = null;
     workspaceFleetAgentRejected = null;
     const token = request,
@@ -1835,6 +1885,75 @@ async function command(value: unknown) {
     await retire();
     if (!current()) return;
     launchFleetSelection(target.selection, token, target.row, current);
+    return;
+  }
+  if (cmd.type === "session-tab") {
+    if (!admitNavigationAttempt(cmd.request) || cmd.fromRequest !== request) return;
+    const admitted = sessionTabs.admit(
+      cmd,
+      request,
+      foreground && !stopped,
+      (key) => fleet?.retainedTarget(key) ?? null,
+    );
+    if (!admitted) {
+      sessionTabResult = {
+        request: cmd.request,
+        fromRequest: cmd.fromRequest,
+        revision: cmd.revision,
+        action: cmd.action,
+        outcome: "rejected",
+      };
+      status = "That tab is unavailable or has changed — try again.";
+      publish();
+      return;
+    }
+    if (admitted.kind === "close" && !admitted.home) {
+      sessionTabResult = {
+        request: cmd.request,
+        fromRequest: cmd.fromRequest,
+        revision: cmd.revision,
+        action: cmd.action,
+        outcome: "closed",
+      };
+      publish();
+      return;
+    }
+    attention.cancel();
+    palette.cancel();
+    workspaceFleetAgents.cancel();
+    retireAgents();
+    request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
+    sessionHistoryRejected = null;
+    workspaceFleetAgentRejected = null;
+    const token = request,
+      capturedPresence = presenceRevision;
+    const current = () =>
+      !stopped && request === token && foreground && presenceRevision === capturedPresence;
+    sessionCatalogComplete = false;
+    initialPane = null;
+    snapshot = null;
+    inputReady = false;
+    selectedPane = null;
+    paneActions = null;
+    selectedSession = null;
+    panes = [];
+    layouts = [];
+    surface = admitted.kind === "close" ? "home" : "workspace";
+    if (admitted.kind === "close") {
+      homePhase = "loading";
+      sessions = [];
+      selectedFleet = false;
+      fleet?.clearSelection();
+    }
+    status = admitted.kind === "close" ? "Loading sessions" : "Loading retained session";
+    publish();
+    await retire();
+    if (!current()) return;
+    if (admitted.kind === "close") launchRefresh(token);
+    else launchFleetSelection("", token, undefined, current, admitted.key);
     return;
   }
   if (cmd.type === "session-history") {
@@ -1860,6 +1979,8 @@ async function command(value: unknown) {
     retireAgents();
     request = cmd.request;
     sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
     sessionHistoryRejected = null;
     workspaceFleetAgentRejected = null;
     const token = request,
@@ -1903,6 +2024,8 @@ async function command(value: unknown) {
     palette.cancel();
     request = cmd.request;
     sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
     sessionHistoryRejected = null;
     workspaceFleetAgentRejected = null;
     const token = request;
@@ -1954,6 +2077,8 @@ async function command(value: unknown) {
     palette.cancel();
     request = cmd.request;
     sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
     sessionHistoryRejected = null;
     workspaceFleetAgentRejected = null;
     const token = request;
@@ -2007,6 +2132,8 @@ async function command(value: unknown) {
     palette.cancel();
     request = cmd.request;
     sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
     sessionHistoryRejected = null;
     workspaceFleetAgentRejected = null;
     sessionCatalogComplete = false;
@@ -2047,6 +2174,8 @@ async function command(value: unknown) {
     palette.cancel();
     request = cmd.request;
     sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
     sessionHistoryRejected = null;
     workspaceFleetAgentRejected = null;
     const token = request;
@@ -2092,6 +2221,8 @@ async function command(value: unknown) {
     palette.cancel();
     request = cmd.request;
     sessionHistory.navigation(request);
+    sessionTabs.navigation(request);
+    sessionTabResult = null;
     sessionHistoryRejected = null;
     workspaceFleetAgentRejected = null;
     sessionCatalogComplete = false;
@@ -2140,6 +2271,8 @@ async function command(value: unknown) {
   retireAgents();
   request = cmd.request;
   sessionHistory.navigation(request, historyContinuation);
+  sessionTabs.navigation(request, historyContinuation);
+  sessionTabResult = null;
   sessionHistoryRejected = null;
   workspaceFleetAgentRejected = null;
   sessionCatalogComplete = false;
@@ -2345,6 +2478,7 @@ try {
         await command(JSON.parse(line));
       } catch (error) {
         sessionHistory.cancel();
+        sessionTabs.cancel();
         sessionCatalogComplete = true;
         initialPane = null;
         snapshot = null;

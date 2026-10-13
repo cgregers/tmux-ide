@@ -1,3 +1,4 @@
+import type { MachineAgentGroup } from "../../../packages/daemon/src/lib/machine-agents.ts";
 import { createFleetPreferences } from "./fleet-preferences.ts";
 import { emptyFleetClientState } from "../../../packages/core/src/fleet-client-state.ts";
 import { assertFleetSelectionCurrent } from "./fleet-selection-current.ts";
@@ -63,6 +64,8 @@ async function fixture(count = 1, preferences?: ReturnType<typeof createFleetPre
       },
     ],
   };
+  let agentGroups: MachineAgentGroup[] = [];
+  let agentListener: ((groups: readonly MachineAgentGroup[]) => void) | undefined;
   let agentStarts = 0,
     agentStops = 0;
   let notifications = 0;
@@ -99,12 +102,15 @@ async function fixture(count = 1, preferences?: ReturnType<typeof createFleetPre
         },
       })),
     () => ({
-      getSnapshot: () => [],
+      getSnapshot: () => agentGroups,
       subscribe(listener) {
-        listener([]);
-        return () => {};
+        agentListener = listener;
+        listener(agentGroups);
+        return () => {
+          agentListener = undefined;
+        };
       },
-      isCurrentTarget: () => false,
+      isCurrentTarget: () => true,
       start() {
         agentStarts++;
       },
@@ -119,6 +125,10 @@ async function fixture(count = 1, preferences?: ReturnType<typeof createFleetPre
   fleet.start();
   return {
     fleet,
+    setAgentGroups(value: MachineAgentGroup[]) {
+      agentGroups = value;
+      agentListener?.(value);
+    },
     catalogSnapshot: () => catalog.getSnapshot(),
     manager,
     profiles,
@@ -721,4 +731,75 @@ test("persistent Workspace, F5 and F7 share one scanner through query changes an
   } finally {
     f.close();
   }
+});
+
+test("retained tab metadata reads uncapped exact scoped source and resets incomplete observations", async () => {
+  const f = await fixture();
+  const group = f.catalogSnapshot().groups.find((g) => g.id === f.profiles[0]!.id)!;
+  const session = group.sessions[0]!;
+  const stop = f.fleet.observeAgents(() => {});
+  const observation = {
+    phase: "live" as const,
+    rows: [],
+    observedSessions: 1,
+    totalSessions: 1,
+    loadingSessions: 0,
+    unavailableSessions: 0,
+    truncatedSessions: 0,
+    refreshingSessionKeys: [],
+    unavailableSessionKeys: [],
+    note: null,
+  };
+  const agents = Array.from({ length: 300 }, (_, i) => ({
+    id: `agent-${i}`,
+    key: `key-${i}`,
+    machineId: group.id,
+    sessionKey: session.sourceId,
+    sessionName: session.name,
+    liveSessionId: session.liveSessionId!,
+    server: session.server!,
+    daemonInstanceId: f.manager.getMachine(group.id)!.read()!.instanceId,
+    agentId: `agent-${i}`,
+    paneId: `pane-${i}`,
+    name: "Same",
+    harness: "codex",
+    activity: "running" as const,
+    attention: false,
+    projectName: "",
+    nativeIdentity: null,
+    interactionEndpoint: null,
+    disabled: false,
+  }));
+  const source = { machineId: group.id, available: true, agents, observation };
+  f.setAgentGroups([source]);
+  assert.equal(f.fleet.tabObservation(session.id)!.length, 300);
+  const target = f.fleet.retainedTarget(session.id)!;
+  assert.ok(target.identity);
+  assert.equal(target.label, session.name);
+  f.setAgentGroups([
+    {
+      ...source,
+      agents: [...agents, { ...agents[0]!, server: { ...session.server!, generation: "other" } }],
+    },
+  ]);
+  assert.equal(f.fleet.tabObservation(session.id)!.length, 300);
+  f.setAgentGroups([{ ...source, agents: [] }]);
+  assert.deepEqual(f.fleet.tabObservation(session.id), []);
+  f.setAgentGroups([
+    {
+      ...source,
+      agents: [],
+      observation: { ...observation, totalSessions: 0, observedSessions: 0 },
+    },
+  ]);
+  assert.equal(f.fleet.tabObservation(session.id), null);
+  f.setAgentGroups([
+    { ...source, agents: [], observation: { ...observation, observedSessions: 0 } },
+  ]);
+  assert.equal(f.fleet.tabObservation(session.id), null);
+  f.setAgentGroups([{ ...source, observation: { ...observation, truncatedSessions: 1 } }]);
+  assert.equal(f.fleet.tabObservation(session.id), null);
+  stop();
+  f.fleet.dispose();
+  f.manager.dispose();
 });

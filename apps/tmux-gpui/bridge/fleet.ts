@@ -389,6 +389,65 @@ export function createNativeFleet(
         },
       };
     },
+    retainedTarget(key: string) {
+      const route = canonicalRoute(key);
+      if (!route) return null;
+      return {
+        key,
+        identity: route.key,
+        label: route.session.name,
+        hostLabel: route.handle.label,
+        serverLabel: route.session.serverLabel ?? null,
+      };
+    },
+    tabObservation(key: string) {
+      const route = canonicalRoute(key);
+      if (!route || !agentRoster) return null;
+      const group = agentRoster
+        .sourceSnapshot()
+        .find((group) => group.machineId === route.handle.id);
+      const state = group?.observation;
+      const expectedSessions = catalog
+        .getSnapshot()
+        .groups.find((group) => group.id === route.handle.id)
+        ?.sessions.filter((session) => !session.disabled).length;
+      if (
+        !group?.available ||
+        !state ||
+        state.phase !== "live" ||
+        state.totalSessions !== expectedSessions ||
+        state.observedSessions !== state.totalSessions ||
+        state.unavailableSessionKeys.length > 0 ||
+        state.loadingSessions ||
+        state.unavailableSessions ||
+        state.truncatedSessions ||
+        state.refreshingSessionKeys.length
+      )
+        return null;
+      const rows = group.agents.filter(
+        (row) =>
+          row.sessionKey === route.session.sourceId &&
+          row.liveSessionId === route.session.liveSessionId &&
+          row.server?.serverId === route.session.server?.serverId &&
+          row.server?.generation === route.session.server?.generation,
+      );
+      if (
+        rows.some((row) => row.disabled || !agentRoster?.currentSourceTarget(route.handle.id, row))
+      )
+        return null;
+      return rows.map((row) => ({
+        identity: JSON.stringify([
+          row.agentId,
+          row.paneId,
+          row.daemonInstanceId,
+          row.server,
+          row.nativeIdentity,
+          row.interactionEndpoint,
+        ]),
+        activity: row.activity,
+        attention: row.attention,
+      }));
+    },
     resolveCanonical(key: string) {
       return canonicalRoute(key) !== null;
     },

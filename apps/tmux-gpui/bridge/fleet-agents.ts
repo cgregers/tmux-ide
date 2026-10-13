@@ -184,6 +184,8 @@ export function createFleetAgentRoster(
       source.start();
     },
     refresh,
+    sourceSnapshot: () => source.getSnapshot(),
+    currentSourceTarget: source.isCurrentTarget,
     homeSnapshot: () => homeSnapshot,
     workspaceSnapshot: () => workspaceSnapshot,
     recover(action: "retry" | "load-more") {
