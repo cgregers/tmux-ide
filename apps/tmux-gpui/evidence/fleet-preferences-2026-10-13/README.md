@@ -95,8 +95,37 @@ and private store, zero terminal/routing commands, exit0 and successful cleanup.
 The owned child was independently confirmed absent.
 
 This fixture uses synthetic fleet publications, not a canonical daemon or real
-tmux sessions. Full TUI/native reload, narrow physical layout, and resolving the
+tmux sessions. At that checkpoint, full TUI/native reload, narrow physical layout, and resolving the
 first-launch activation stall remain open. No production sessions, personal daemon,
 remote services or existing user previews were altered.
 
 Committed text logs have trailing whitespace normalized; original local logs remain in /tmp.
+
+## Real canonical-daemon and TUI round trip
+
+Fresh private CLI and TUI artifacts were built from f332c741 using the supported
+--outfile builders and pinned Bun1.4.2. The TUI reports current commit, darwin-arm64,
+stock renderer and dirty provenance (the protected generated CLI and existing
+workspace material remain). This is not a clean release-artifact claim.
+
+The independently reviewed `cross-client-driver.mjs.txt` used private HOME,
+canonical discovery/storage and two explicit tmux sockets. It launched the real
+canonical daemon, bundled browser, native app, and freshly compiled actual TUI.
+The second unchanged run passed: native star/collapse persisted exact canonical
+keys; TUI capture showed collapsed Local with only starred pref-a; actual TUI
+sidebar keys expanded and unstarred it; restarted TUI showed both unstarred rows;
+native Refresh displayed the same state. All captures and bounded command/wire
+evidence are in `cross-client-pass.json`. Native Cmd-Q exited0. Source pane
+name/id/pid/birth identities were checked unchanged before cleanup. Exact owned
+children and both sockets were retired and private storage removed.
+
+The first run loaded the catalog but controls remained disabled: only
+appearance and presence:false were emitted, even after AXRaise/clicks. Its
+cancelled receipt is preserved. Native controls intentionally require actual
+macOS key-window activation; AX visible/raised is not proof of that condition.
+Whether this is automation/OS activation or a missed callback remains unresolved.
+No foreground gate was bypassed and no product code changed between runs.
+
+This completes the local preference frontend reload check; it does not prove
+instant cross-client synchronization, physical narrow-window layout, remote
+platforms, signed installation, or resolve the activation observation.

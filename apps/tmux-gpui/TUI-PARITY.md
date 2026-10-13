@@ -617,3 +617,10 @@ and storage fixture, including exact writes and no input. See
 identical second launch passed. That activation failure, physical narrow layout,
 and full canonical-daemon/TUI reload acceptance remain open. This is local branch
 work, not a published or distribution-qualified alpha.
+
+The subsequent real canonical-daemon round trip also passed: native
+favorite/collapse → actual compiled TUI startup → TUI expand/unstar → TUI restart
+→ native explicit Refresh. Exact pane identities survived; owned cleanup passed.
+Fresh CLI/TUI artifacts and captured TUI screens are recorded in the same evidence
+folder. An initial inactive-presence run remains recorded and unresolved; no
+instant synchronization or physical narrow-window claim is made.
