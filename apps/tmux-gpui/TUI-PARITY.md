@@ -601,3 +601,19 @@ The downloadable local unsigned alpha build 2026101302 predates this increment.
 All development and runners currently remain local; no hosted CI, publication or
 Sfora update is authorized by the current local-only working preference. Session
 sidebar keyboard focus/navigation is the next bounded implementation slice.
+
+## Native Home fleet preferences checkpoint — 13 October
+
+Home now exposes persistent favorites and machine collapse using the existing
+local daemon resource. Duplicate labels use canonical IDs; collapsed machines
+retain favorite and active sessions. Commands are explicit, revision-scoped and
+acknowledged, with no selected-SSH persistence or terminal input.
+
+Bridge gate456pass/5optional skips; native default2945pass/10ignored and
+all-features2979pass/17ignored; formatting/file-size/bothClippy passed. Actual
+native star/collapse/expand clicks passed against a private authenticated resource
+and storage fixture, including exact writes and no input. See
+`evidence/fleet-preferences-2026-10-13/`. First launch remained inactive/Loading;
+identical second launch passed. That activation failure, physical narrow layout,
+and full canonical-daemon/TUI reload acceptance remain open. This is local branch
+work, not a published or distribution-qualified alpha.

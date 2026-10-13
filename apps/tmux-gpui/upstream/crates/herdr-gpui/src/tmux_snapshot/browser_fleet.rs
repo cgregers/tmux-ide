@@ -6,11 +6,15 @@ use std::collections::HashSet;
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(in crate::tmux_snapshot) struct Fleet {
     pub groups: Vec<Group>,
+    pub preferences: Option<Preferences>,
     pub omitted_groups: u64,
 }
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub(in crate::tmux_snapshot) struct Group {
+    #[serde(default)]
+    pub collapsed: bool,
+    pub collapse_action: Option<String>,
     pub id: String,
     pub label: String,
     pub state: Phase,
@@ -47,6 +51,11 @@ impl Phase {
 pub(in crate::tmux_snapshot) struct Session {
     #[serde(default)]
     pub server_id: Option<String>,
+    #[serde(default)]
+    pub favorite: bool,
+    pub favorite_action: Option<String>,
+    #[serde(default)]
+    pub active: bool,
     pub id: String,
     pub name: String,
     pub pane_count: u64,
@@ -100,14 +109,18 @@ impl Fleet {
     pub(super) fn valid(&self) -> bool {
         let mut groups = HashSet::new();
         let mut tokens = HashSet::new();
-        self.groups.len() <= 64
+        self.preferences.as_ref().is_none_or(Preferences::valid)
+            && self.groups.len() <= 64
             && self.omitted_groups <= 9_007_199_254_740_991
             && self.groups.iter().map(|g| g.sessions.len()).sum::<usize>() <= 512
             && self.groups.iter().map(|g| g.servers.len()).sum::<usize>() <= 128
             && self.groups.iter().all(|g| {
                 let mut ids = HashSet::new();
                 let mut server_ids = HashSet::new();
-                text(&g.id, 256)
+                g.collapse_action
+                    .as_ref()
+                    .is_none_or(|token| self.preference_token(token) && tokens.insert(token))
+                    && text(&g.id, 256)
                     && g.retry.as_ref().is_none_or(|token| {
                         g.state == Phase::Disconnected
                             && !g.conflict
@@ -147,7 +160,9 @@ impl Fleet {
                     && g.sessions.len() <= 128
                     && g.omitted_sessions <= 9_007_199_254_740_991
                     && g.sessions.iter().all(|s| {
-                        s.server_id.as_ref().is_none_or(|id| {
+                        s.favorite_action.as_ref().is_none_or(|token| {
+                            self.preference_token(token) && tokens.insert(token)
+                        }) && s.server_id.as_ref().is_none_or(|id| {
                             text(id, 512) && g.servers.iter().any(|server| &server.id == id)
                         }) && text(&s.id, 4096)
                             && ids.insert(&s.id)
@@ -180,3 +195,59 @@ impl Fleet {
             .find(|s| s.selection.as_deref() == Some(token))
     }
 }
+
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(in crate::tmux_snapshot) struct Preferences {
+    pub revision: u64,
+    pub phase: PreferencePhase,
+    pub error: Option<String>,
+}
+#[derive(Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub(in crate::tmux_snapshot) enum PreferencePhase {
+    Unavailable,
+    Loading,
+    Ready,
+    Saving,
+    Failed,
+}
+impl Preferences {
+    fn valid(&self) -> bool {
+        self.revision <= 9_007_199_254_740_991
+            && (self.phase != PreferencePhase::Ready || self.revision > 0)
+            && self
+                .error
+                .as_ref()
+                .is_none_or(|e| e.len() <= 256 && !e.chars().any(char::is_control))
+    }
+}
+impl Fleet {
+    fn preference_token(&self, token: &str) -> bool {
+        self.preferences
+            .as_ref()
+            .is_some_and(|p| p.phase == PreferencePhase::Ready)
+            && token.len() == 36
+            && uuid::Uuid::parse_str(token).is_ok()
+    }
+    pub fn preference_action(&self, revision: u64, action: &str, enabled: bool) -> bool {
+        self.preferences
+            .as_ref()
+            .is_some_and(|p| p.revision == revision && p.phase == PreferencePhase::Ready)
+            && self.groups.iter().any(|g| {
+                (g.collapse_action.as_deref() == Some(action) && enabled != g.collapsed)
+                    || g.sessions.iter().any(|s| {
+                        s.favorite_action.as_deref() == Some(action) && enabled != s.favorite
+                    })
+            })
+    }
+}
+impl Group {
+    pub fn shows(&self, session: &Session) -> bool {
+        !self.collapsed || session.favorite || session.active
+    }
+}
+
+#[cfg(test)]
+#[path = "browser_fleet/preferences_tests.rs"]
+mod preferences_tests;

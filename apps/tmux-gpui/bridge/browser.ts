@@ -1,3 +1,4 @@
+import { fleetPreferenceCommand } from "./fleet-preference-publication.ts";
 import { createDiagnosticChannel } from "./diagnostic-channel.ts";
 import { diagnosticStatus } from "./live-diagnostics.ts";
 import { closePane, confirmsClosedPane } from "./close-pane.ts";
@@ -112,6 +113,7 @@ const machineRegistryCommand = z.discriminatedUnion("operation", [
     .strict(),
 ]);
 const commandSchema = z.union([
+  fleetPreferenceCommand,
   attentionObserveSchema,
   openAttentionAgentSchema,
   machineRegistryCommand,
@@ -1349,6 +1351,14 @@ async function command(value: unknown) {
     publish();
     return;
   }
+  if (cmd.type === "fleet-preference") {
+    if (stopped || !foreground || cmd.request !== request || !fleet) return;
+    // Keep presence/navigation responsive while the local daemon acknowledges.
+    void fleet.preferenceCommand(cmd, { request, foreground }).finally(() => {
+      if (!stopped) publish();
+    });
+    return;
+  }
   if (cmd.type === "fleet-retry" || cmd.type === "fleet-disconnect") {
     if (stopped || !foreground || cmd.request !== request || !fleet) return;
     try {
@@ -1977,6 +1987,7 @@ async function command(value: unknown) {
     cmd.type === "refresh" ||
     cmd.type === "home"
   ) {
+    if (cmd.type === "refresh") void fleet?.refreshPreferences();
     launchRefresh(token);
     return;
   }

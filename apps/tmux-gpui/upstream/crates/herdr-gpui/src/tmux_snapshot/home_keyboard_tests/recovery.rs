@@ -5,6 +5,7 @@ fn prepare(view: &mut SnapshotView, window: &mut Window, cx: &mut Context<Snapsh
     view.browser_state.request = 7;
     view.browser_state.surface = browser::Surface::Home;
     view.browser_state.fleet = Some(browser::fleet::Fleet {
+        preferences: None,
         groups: vec![],
         omitted_groups: 0,
     });

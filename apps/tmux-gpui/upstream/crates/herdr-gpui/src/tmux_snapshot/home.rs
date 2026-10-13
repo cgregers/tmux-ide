@@ -4,6 +4,7 @@ use gpui::{prelude::*, *};
 pub(super) mod filters;
 mod fleet;
 pub(super) mod machine_filter;
+mod preferences;
 pub(super) mod recovery;
 mod selection;
 

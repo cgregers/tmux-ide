@@ -1,3 +1,5 @@
+import { createLocalFleetPreferenceOwner } from "./fleet-preferences-owner.ts";
+import { createFleetPreferenceLifecycle } from "./fleet-preference-lifecycle.ts";
 import { assertFleetSelectionCurrent } from "./fleet-selection-current.ts";
 import { createFleetConnectionOwner } from "./fleet-local-owner.ts";
 import { createMachineConnectionManager } from "../../../packages/daemon/src/lib/machine-connection-manager.ts";
@@ -16,8 +18,17 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
   let remote: RemotePreviewRoute | null = null;
   let attempt = new AbortController();
   let stopped = false;
+  let started = false;
+  const preferences = createFleetPreferenceLifecycle({
+    getLocalOwner: createLocalFleetPreferenceOwner(manager),
+    changed: () => {
+      if (!stopped) fleet.refreshPreferences();
+    },
+  });
+  let stopPreferences = () => {};
   const clear = () => {
     selected = null;
+    fleet.setActiveSession(null);
     host = null;
     attempt.abort();
     attempt = new AbortController();
@@ -29,16 +40,23 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     clear();
     retired();
   };
-  const fleet = createNativeFleet(manager, () => {
-    if (selected) {
-      try {
-        assertFleetSelectionCurrent(selected, selectedServer() !== null);
-      } catch {
-        invalidate();
+  const fleet = createNativeFleet(
+    manager,
+    () => {
+      if (stopped) return;
+      if (selected) {
+        try {
+          assertFleetSelectionCurrent(selected, selectedServer() !== null);
+        } catch {
+          invalidate();
+        }
       }
-    }
-    changed();
-  });
+      changed();
+    },
+    undefined,
+    undefined,
+    preferences.preferences,
+  );
   const selectedServer = () => {
     if (!selected) return null;
     try {
@@ -68,6 +86,7 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
   };
   const connect = async (selection: NonNullable<typeof selected>) => {
     selected = selection;
+    fleet.setActiveSession("session" in selection ? selection.session.id : null);
     const signal = attempt.signal;
     const check = () => {
       if (stopped || selected !== selection || signal.aborted) throw new FleetSelectionError();
@@ -129,7 +148,15 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
     }
   };
   return {
-    start: () => fleet.start(),
+    start: () => {
+      if (stopped || started) return;
+      started = true;
+      fleet.start();
+      stopPreferences = manager.subscribe(preferences.observe);
+      preferences.observe();
+    },
+    refreshPreferences: preferences.refresh,
+    preferenceCommand: fleet.preferenceCommand,
     publication: fleet.publication,
     observeAgents: fleet.observeAgents,
     observeHomeAgents: fleet.observeHomeAgents,
@@ -188,6 +215,8 @@ export function createNativeFleetRuntime(changed: () => void, retired: () => voi
       if (stopped) return;
       stopped = true;
       clear();
+      stopPreferences();
+      preferences.dispose();
       fleet.dispose();
       manager.dispose();
     },

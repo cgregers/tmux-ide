@@ -1,3 +1,5 @@
+import { createFleetPreferences } from "./fleet-preferences.ts";
+import { emptyFleetClientState } from "../../../packages/core/src/fleet-client-state.ts";
 import { assertFleetSelectionCurrent } from "./fleet-selection-current.ts";
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -8,7 +10,8 @@ import { createMachineCatalog } from "../../../packages/daemon/src/lib/machine-c
 import type { HomeCatalogSnapshot } from "../../../packages/daemon/src/lib/home-catalog.ts";
 import { createNativeFleet } from "./fleet.ts";
 
-async function fixture(count = 1) {
+async function fixture(count = 1, preferences?: ReturnType<typeof createFleetPreferences>) {
+  let catalog: ReturnType<typeof createMachineCatalog>;
   const info = {
     pid: 1,
     port: 4000,
@@ -69,7 +72,7 @@ async function fixture(count = 1) {
       notifications++;
     },
     (manager) =>
-      createMachineCatalog({
+      (catalog = createMachineCatalog({
         manager,
         createCatalog: (handle) => {
           let current = structuredClone(snapshot);
@@ -94,7 +97,7 @@ async function fixture(count = 1) {
             },
           };
         },
-      }),
+      })),
     () => ({
       getSnapshot: () => [],
       subscribe(listener) {
@@ -111,10 +114,12 @@ async function fixture(count = 1) {
         agentStops++;
       },
     }),
+    preferences,
   );
   fleet.start();
   return {
     fleet,
+    catalogSnapshot: () => catalog.getSnapshot(),
     manager,
     profiles,
     snapshot,
@@ -539,5 +544,52 @@ test("removing the selected saved profile retires only its route and leaves sibl
     f.fleet.select(remaining.sessions[0]!.selection!).assertCurrent();
   } finally {
     f.close();
+  }
+});
+test("favorite cap reprioritization resets displaced Home filter without restarting F7", async () => {
+  let state = emptyFleetClientState();
+  const daemon = {
+    protocolVersion: 1,
+    productVersion: "fixture",
+    instanceId: randomUUID(),
+    startedAt: "2026-10-13T00:00:00Z",
+  };
+  const owner = {
+    kind: "local" as const,
+    ...daemon,
+    assertCurrent() {},
+    async request() {
+      return Response.json({ daemon, state });
+    },
+  };
+  const preferences = createFleetPreferences({ getLocalOwner: () => owner });
+  await preferences.refresh();
+  const f = await fixture(64, preferences);
+  const home: (string | null)[] = [];
+  let attention = 0;
+  const stopHome = f.fleet.observeHomeAgents((value) => home.push(value.machineId));
+  const stopAttention = f.fleet.observeAgents(() => attention++);
+  try {
+    const visible = f.fleet.publication().groups;
+    const boundary = visible.at(-1)!;
+    const hidden = f
+      .catalogSnapshot()
+      .groups.find((group) => !visible.some((v) => v.id === group.id))!;
+    assert.ok(hidden);
+    assert.equal(f.fleet.filterHomeAgents(boundary.id), true);
+    assert.equal(home.at(-1), boundary.id);
+    const before = attention;
+    state = { ...state, favorites: [hidden.sessions[0]!.id] };
+    await preferences.refresh();
+    f.fleet.refreshPreferences();
+    assert.ok(!f.fleet.publication().groups.some((group) => group.id === boundary.id));
+    assert.equal(home.at(-1), null);
+    assert.equal(attention, before);
+    assert.deepEqual(f.agentCounts(), { starts: 1, stops: 0 });
+  } finally {
+    stopHome();
+    stopAttention();
+    f.close();
+    preferences.dispose();
   }
 });

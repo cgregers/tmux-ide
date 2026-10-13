@@ -143,6 +143,10 @@ impl AssetSource for Icons {
             return Ok(Some(Cow::Borrowed(icon.bytes())));
         }
         let bytes: &'static [u8] = match path {
+            "icons/fleet-star.svg" => include_bytes!("../../../assets/icons/fleet-star.svg"),
+            "icons/fleet-star-filled.svg" => {
+                include_bytes!("../../../assets/icons/fleet-star-filled.svg")
+            }
             "icons/tmux-home.svg" => include_bytes!("../../../assets/icons/tmux-home.svg"),
             "icons/devices.svg" => include_bytes!("../../../assets/icons/devices.svg"),
             "icons/sessions.svg" => include_bytes!("../../../assets/icons/sessions.svg"),
@@ -212,6 +216,8 @@ impl AssetSource for Icons {
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
         Ok([
+            "icons/fleet-star.svg",
+            "icons/fleet-star-filled.svg",
             "icons/tmux-home.svg",
             "icons/devices.svg",
             "icons/sessions.svg",
@@ -296,7 +302,7 @@ mod tests {
         assert!(Icons.load("unknown.svg").unwrap().is_none());
         assert_eq!(
             Icons.list("icons/").unwrap().len(),
-            47 + AgentIcon::ALL.len() + crate::usage::icon_paths().count()
+            49 + AgentIcon::ALL.len() + crate::usage::icon_paths().count()
         );
     }
 

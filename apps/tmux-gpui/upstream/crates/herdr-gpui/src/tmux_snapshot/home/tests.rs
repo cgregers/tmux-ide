@@ -163,3 +163,6 @@ mod filter_keys;
 
 #[path = "tests/context.rs"]
 mod context;
+
+#[path = "tests/preferences.rs"]
+mod preferences;

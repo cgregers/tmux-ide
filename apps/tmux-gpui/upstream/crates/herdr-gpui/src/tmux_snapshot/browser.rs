@@ -277,6 +277,13 @@ pub(super) enum Command {
     Theme {
         id: String,
     },
+    #[serde(rename = "fleet-preference")]
+    FleetPreference {
+        request: u64,
+        revision: u64,
+        action: String,
+        enabled: bool,
+    },
     Appearance {
         system: super::appearance::System,
     },

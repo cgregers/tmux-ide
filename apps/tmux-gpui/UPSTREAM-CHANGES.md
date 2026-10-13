@@ -108,3 +108,11 @@ as an additional reference for layering.
   signing, notarization, stapling and verification. It uses tmux-ide identities,
   explicit Node entitlement policy and the existing strict archive format; no
   Herdr endpoint, credential import, universal build or DMG configuration is used.
+
+- Native fleet preference controls add optional strict metadata and explicit
+  favorite/collapse commands in the tmux-only browser boundary. Home cards reuse
+  existing GPUI hover, tooltip, theme and chevron assets; new
+  `assets/icons/fleet-star.svg` and `fleet-star-filled.svg` are original tmux-ide
+  vector artwork. `icons.rs` embeds these assets. Preference state and persistence
+  remain owned by the existing local tmux-ide daemon resource. No Herdr protocol,
+  dependency versions, upstream source hashes or terminal painter are changed.

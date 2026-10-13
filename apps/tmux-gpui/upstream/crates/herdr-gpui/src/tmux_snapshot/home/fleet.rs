@@ -75,6 +75,22 @@ impl SnapshotView {
             .when(enabled, |d| {
                 d.cursor_pointer().hover(move |d| d.bg(rgb(theme.active)))
             })
+            .child(self.fleet_preference_button(
+                ("fleet-favorite", index * 128 + row),
+                session.favorite_action.as_deref(),
+                !session.favorite,
+                if session.favorite {
+                    "Remove favorite"
+                } else {
+                    "Add favorite"
+                },
+                if session.favorite {
+                    "icons/fleet-star-filled.svg"
+                } else {
+                    "icons/fleet-star.svg"
+                },
+                cx,
+            ))
             .child(
                 div()
                     .flex_1()
@@ -99,6 +115,9 @@ impl SnapshotView {
         let theme = self.theme();
         let request = self.browser_request;
         let mut body = div().mt_4().flex().flex_col().gap_3();
+        if let Some(status) = self.fleet_preference_status() {
+            body = body.child(div().text_color(rgb(theme.muted)).child(status.to_owned()));
+        }
         for (index, group) in fleet.groups.iter().enumerate() {
             let mut card = div()
                 .min_w_0()
@@ -111,6 +130,22 @@ impl SnapshotView {
                     div()
                         .flex()
                         .gap_2()
+                        .child(self.fleet_preference_button(
+                            ("fleet-collapse", index),
+                            group.collapse_action.as_deref(),
+                            !group.collapsed,
+                            if group.collapsed {
+                                "Expand machine"
+                            } else {
+                                "Collapse machine"
+                            },
+                            if group.collapsed {
+                                "icons/chevron-right.svg"
+                            } else {
+                                "icons/chevron-down.svg"
+                            },
+                            cx,
+                        ))
                         .child(
                             div()
                                 .flex_1()
@@ -167,6 +202,14 @@ impl SnapshotView {
                 );
             }
             for (server_index, server) in group.servers.iter().enumerate() {
+                if group.collapsed
+                    && !group
+                        .sessions
+                        .iter()
+                        .any(|s| s.server_id.as_ref() == Some(&server.id) && group.shows(s))
+                {
+                    continue;
+                }
                 let token = server.selection.clone();
                 let enabled = token.is_some() && self.browser_commands.is_some();
                 let selected =
@@ -214,7 +257,7 @@ impl SnapshotView {
                     .sessions
                     .iter()
                     .enumerate()
-                    .filter(|(_, s)| s.server_id.as_ref() == Some(&server.id))
+                    .filter(|(_, s)| s.server_id.as_ref() == Some(&server.id) && group.shows(s))
                 {
                     count += 1;
                     section = section.child(self.fleet_session_row(index, row, session, cx));
@@ -230,9 +273,10 @@ impl SnapshotView {
                 card = card.child(section);
             }
             for (row, session) in group.sessions.iter().enumerate().filter(|(_, s)| {
-                s.server_id
-                    .as_ref()
-                    .is_none_or(|id| !group.servers.iter().any(|server| &server.id == id))
+                group.shows(s)
+                    && s.server_id
+                        .as_ref()
+                        .is_none_or(|id| !group.servers.iter().any(|server| &server.id == id))
             }) {
                 card = card.child(self.fleet_session_row(index, row, session, cx));
             }

@@ -1,3 +1,7 @@
+import {
+  createFleetPreferencePublication,
+  type FleetPreferenceOwner,
+} from "./fleet-preference-publication.ts";
 import { createFleetServerRoutes } from "./fleet-server-routes.ts";
 import type { NativeFleetServer } from "./fleet-server-publication.ts";
 import type { HomeAgentSnapshot } from "../../../packages/presentation/src/home-agent-roster.ts";
@@ -16,6 +20,7 @@ import {
 
 type Catalog = ReturnType<typeof createMachineCatalog>;
 export interface NativeFleetPublication {
+  preferences?: ReturnType<ReturnType<typeof createFleetPreferencePublication>["metadata"]>;
   groups: {
     id: string;
     label: string;
@@ -23,10 +28,15 @@ export interface NativeFleetPublication {
     conflict: boolean;
     retry: string | null;
     disconnect: string | null;
+    collapsed: boolean;
+    collapseAction: string | null;
     omittedSessions: number;
     servers: NativeFleetServer[];
     omittedServers: number;
     sessions: {
+      favorite: boolean;
+      favoriteAction: string | null;
+      active: boolean;
       id: string;
       name: string;
       paneCount: number;
@@ -64,8 +74,11 @@ export function createNativeFleet(
   makeCatalog: (manager: MachineConnectionManager) => Catalog = (manager) =>
     createMachineCatalog({ manager }),
   makeAgents: typeof createMachineAgents = createMachineAgents,
+  preferences?: FleetPreferenceOwner,
 ) {
   const catalog = makeCatalog(manager);
+  const preferencePublication = createFleetPreferencePublication(preferences);
+  let activeSession: string | null = null;
   const serverRoutes = createFleetServerRoutes(manager);
   let homeMachineId: string | null = null;
   const homeListeners = new Set<
@@ -108,7 +121,7 @@ export function createNativeFleet(
       JSON.stringify([info.instanceId, info.startedAt]) === route.instance
     );
   };
-  const update = () => {
+  const update = (refreshAgents = true) => {
     if (stopped) return;
     const snapshot = catalog.getSnapshot();
     const previous = new Map([...routes].map(([token, route]) => [route.key, { token, route }]));
@@ -116,12 +129,11 @@ export function createNativeFleet(
     const nextRetries = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
     const nextDisconnects = new Map<string, { handle: MachineConnectionHandle; epoch: number }>();
     serverRoutes.begin();
-    let remaining = 512;
+    const projected = preferencePublication.begin(snapshot.groups, activeSession);
     publication = {
+      preferences: preferencePublication.metadata(),
       omittedGroups: Math.max(0, snapshot.groups.length - 64),
-      groups: snapshot.groups.slice(0, 64).map((group) => {
-        const visible = group.sessions.slice(0, Math.min(128, remaining));
-        remaining -= visible.length;
+      groups: projected.map(({ group, sessions: visible }) => {
         const handle = manager.getMachine(group.id);
         let retry: string | null = null;
         if (handle && group.state === "disconnected" && !group.identityConflict) {
@@ -152,6 +164,7 @@ export function createNativeFleet(
         );
         return {
           ...serverPublication,
+          ...preferencePublication.group(group),
           id: group.id,
           disconnect,
           retry,
@@ -191,6 +204,7 @@ export function createNativeFleet(
               }
             }
             return {
+              ...preferencePublication.session(session),
               id: session.id,
               name: session.name.slice(0, 512),
               paneCount: session.paneCount,
@@ -208,13 +222,18 @@ export function createNativeFleet(
         };
       }),
     };
-    if (homeMachineId !== null && !publication.groups.some((group) => group.id === homeMachineId))
-      homeMachineId = null;
+    const filterReset =
+      homeMachineId !== null && !publication.groups.some((group) => group.id === homeMachineId);
+    if (filterReset) homeMachineId = null;
     serverRoutes.finish();
     routes = next;
     retries = nextRetries;
     disconnects = nextDisconnects;
-    agentRoster?.refresh();
+    if (refreshAgents) agentRoster?.refresh();
+    else if (filterReset) {
+      agentRoster?.refresh(false);
+      publishHome();
+    }
     changed();
   };
   const observation = createSharedAgentObservation((publish) => {
@@ -245,10 +264,18 @@ export function createNativeFleet(
     };
   });
   return {
+    refreshPreferences: () => update(false),
+    preferenceCommand: preferencePublication.command,
+    setActiveSession(id: string | null) {
+      if (activeSession !== id) {
+        activeSession = id;
+        update(false);
+      }
+    },
     start() {
       if (stopped || started) return;
       started = true;
-      stop = catalog.subscribe(update);
+      stop = catalog.subscribe(() => update());
       catalog.start();
     },
     observeAgents: observation.subscribe,
