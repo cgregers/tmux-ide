@@ -2,6 +2,7 @@ import {
   FleetClientStateRequestSchema,
   FleetClientStateResponseSchema,
   FleetClientStateSchema,
+  FleetClientStateChangeSchema,
   type FleetClientState,
 } from "../../../packages/contracts/src/fleet-client-state.ts";
 
@@ -51,6 +52,17 @@ export function createFleetPreferences(dependencies: FleetPreferenceDependencies
   } | null = null;
   let pending = false;
   let disposed = false;
+  let drainingVisits = false;
+  const visits: {
+    key: string;
+    owner: VerifiedLocalFleetPreferenceOwner;
+    instanceId: string;
+    startedAt: string;
+    resolve: (accepted: boolean) => void;
+  }[] = [];
+  const rejectVisits = () => {
+    for (const visit of visits.splice(0)) visit.resolve(false);
+  };
   const lifetime = new AbortController();
   const publish = (
     phase: FleetPreferenceSnapshot["phase"],
@@ -96,7 +108,11 @@ export function createFleetPreferences(dependencies: FleetPreferenceDependencies
       }
     }
   };
-  const run = async (rawChange: unknown | undefined, signal?: AbortSignal): Promise<boolean> => {
+  const run = async (
+    rawChange: unknown | undefined,
+    signal?: AbortSignal,
+    visit = false,
+  ): Promise<boolean> => {
     if (disposed || pending) return false;
     current();
     let owner: VerifiedLocalFleetPreferenceOwner | null;
@@ -122,7 +138,12 @@ export function createFleetPreferences(dependencies: FleetPreferenceDependencies
           expectedInstanceId: instanceId,
           change: rawChange,
         });
-        if (request.change.type !== "favorite" && request.change.type !== "collapse") return false;
+        if (
+          visit
+            ? request.change.type !== "visit"
+            : request.change.type !== "favorite" && request.change.type !== "collapse"
+        )
+          return false;
         body = JSON.stringify(request);
       }
     } catch {
@@ -200,6 +221,40 @@ export function createFleetPreferences(dependencies: FleetPreferenceDependencies
     } finally {
       removeAbort();
       pending = false;
+      void drainVisits();
+    }
+  };
+  const drainVisits = async () => {
+    if (pending || drainingVisits || disposed) return;
+    drainingVisits = true;
+    try {
+      while (visits.length) {
+        const visit = visits.shift()!;
+        try {
+          assertOwner(visit.owner, visit.instanceId, visit.startedAt);
+          if (
+            publication.phase !== "ready" ||
+            acknowledgedOwner?.owner !== visit.owner ||
+            acknowledgedOwner.instanceId !== visit.instanceId ||
+            acknowledgedOwner.startedAt !== visit.startedAt
+          )
+            throw new Error("unacknowledged");
+        } catch {
+          visit.resolve(false);
+          rejectVisits();
+          return;
+        }
+        const accepted = await run({ type: "visit", key: visit.key }, undefined, true);
+        visit.resolve(accepted);
+        // A failed write may already have reached storage. Never retry it or
+        // silently continue queued changes against an unacknowledged owner.
+        if (!accepted) {
+          rejectVisits();
+          return;
+        }
+      }
+    } finally {
+      drainingVisits = false;
     }
   };
   return {
@@ -225,10 +280,42 @@ export function createFleetPreferences(dependencies: FleetPreferenceDependencies
         return Promise.resolve(false);
       return run(rawChange, signal);
     },
+    /** Internal accepted-session notification, never a native UI mutation route.
+     * The caller must establish a current coherent live attachment first. This
+     * returns false on uncertain persistence; it never replays accepted visits.
+     */
+    recordVisit(key: string): Promise<boolean> {
+      current();
+      if (disposed || visits.length >= 64 || (!pending && publication.phase !== "ready"))
+        return Promise.resolve(false);
+      const change = FleetClientStateChangeSchema.safeParse({ type: "visit", key });
+      if (!change.success || change.data.type !== "visit") return Promise.resolve(false);
+      const parsedKey = change.data.key;
+      let owner: VerifiedLocalFleetPreferenceOwner | null;
+      try {
+        owner = dependencies.getLocalOwner();
+        if (!owner) return Promise.resolve(false);
+        assertOwner(owner, owner.instanceId, owner.startedAt);
+      } catch {
+        return Promise.resolve(false);
+      }
+      const captured = owner;
+      return new Promise<boolean>((resolve) => {
+        visits.push({
+          key: parsedKey,
+          owner: captured,
+          instanceId: captured.instanceId,
+          startedAt: captured.startedAt,
+          resolve,
+        });
+        void drainVisits();
+      });
+    },
     dispose() {
       if (disposed) return;
       disposed = true;
       lifetime.abort();
+      rejectVisits();
       acknowledgedOwner = null;
       publication = {
         revision: publication.revision + 1,
