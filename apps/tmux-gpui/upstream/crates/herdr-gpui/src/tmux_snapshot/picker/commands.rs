@@ -69,6 +69,7 @@ pub(super) fn command_rows_with_sidebar(
         label: label.into(),
     })
     .collect();
+    rows.extend(super::navigation_commands::rows(state, &query));
     rows.extend(super::pane_commands::rows(state, &query));
     rows.extend(super::fleet_servers::rows(state, &query));
     if let Some(fleet) = &state.fleet {

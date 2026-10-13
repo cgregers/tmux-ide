@@ -6,6 +6,7 @@ mod fonts;
 mod machine;
 mod machine_edit;
 mod machine_remove;
+mod navigation_commands;
 mod new_agent;
 mod pane_close;
 mod pane_commands;
@@ -26,6 +27,7 @@ use nucleo_matcher::{
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum Target {
+    DirectNavigation(navigation_commands::Captured),
     Font(super::terminal_font::Choice),
     MachineEdit {
         id: String,
@@ -198,6 +200,7 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
 }
 fn current(state: &browser::State, target: &Target) -> bool {
     match target {
+        Target::DirectNavigation(captured) => captured.current(state),
         Target::Font(_) => true,
         Target::FleetDisconnect(token) => state.fleet.as_ref().is_some_and(|fleet| {
             fleet
@@ -451,6 +454,9 @@ impl SnapshotView {
             request: self.browser_request,
             scroll: ScrollHandle::new(),
         });
+        if let Some(picker) = &mut self.picker {
+            navigation_commands::bind(&mut picker.rows, picker.search.entity_id());
+        }
         cx.notify();
     }
     pub(super) fn refresh_picker(&mut self, cx: &mut Context<Self>) {
@@ -505,6 +511,7 @@ impl SnapshotView {
         } else {
             rows(&self.browser_state, picker.search.read(cx).text())
         };
+        navigation_commands::bind(&mut picker.rows, picker.search.entity_id());
         if picker.pane_scope.is_some() {
             picker.rows.retain(|row| matches!(&row.target, Target::PaneAction { action, .. }
                 if !matches!(action, pane_commands::Action::NewWindow | pane_commands::Action::NewAgent)));
@@ -550,6 +557,10 @@ impl SnapshotView {
             || self.browser_commands.is_none()
             || !current(&self.browser_state, &target)
         {
+            return;
+        }
+        if let Target::DirectNavigation(captured) = target {
+            self.choose_direct_navigation(captured, window, cx);
             return;
         }
         if let Target::Attention {
@@ -727,7 +738,8 @@ impl SnapshotView {
                     session_id,
                 },
                 Target::Pane(id) => Selection::Pane(id),
-                Target::Font(_)
+                Target::DirectNavigation(_)
+                | Target::Font(_)
                 | Target::FleetServer(_)
                 | Target::PaneAction { .. }
                 | Target::Attention { .. }

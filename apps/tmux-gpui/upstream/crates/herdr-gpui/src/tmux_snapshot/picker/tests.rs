@@ -2,6 +2,7 @@
 use super::*;
 mod attention;
 mod commands;
+mod direct_navigation;
 mod fleet;
 mod fleet_disconnect;
 mod fleet_retry;
