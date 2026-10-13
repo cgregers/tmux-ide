@@ -629,3 +629,77 @@ test("palette-only query replacement keeps its scanner until explicit dismissal"
     f.close();
   }
 });
+
+test("history resolves exact canonical sessions beyond publication caps without cached tokens", async () => {
+  const f = await fixture(0);
+  try {
+    const source = f.snapshot.sessions[0]!;
+    f.emitters.get("local")!({
+      ...f.snapshot,
+      sessions: Array.from({ length: 140 }, (_, i) => ({
+        ...source,
+        id: `source-${i}`,
+        liveSessionId: `$${i}`,
+        name: "Duplicate",
+      })),
+    });
+    const rows = f.catalogSnapshot().groups.find((g) => g.id === "local")!.sessions;
+    const target = rows.find((s) => s.liveSessionId === "$139")!;
+    assert.ok(target);
+    assert.equal(
+      f.fleet.publication().groups[0]!.sessions.some((s) => s.sessionId === "$139"),
+      false,
+    );
+    assert.equal(f.fleet.resolveCanonical(target.id), true);
+    assert.equal(
+      f.fleet.canonicalKey("local", target.server!.serverId, target.server!.generation, "$139"),
+      target.id,
+    );
+    const selected = f.fleet.selectCanonical(target.id);
+    assert.equal(selected.session.liveSessionId, "$139");
+    selected.assertCurrent();
+    f.emitters.get("local")!({
+      ...f.snapshot,
+      sessions: [
+        {
+          ...source,
+          id: "replacement",
+          liveSessionId: "$139",
+          server: { ...source.server!, generation: randomUUID() },
+        },
+      ],
+    });
+    assert.throws(selected.assertCurrent, /changed/);
+    assert.equal(f.fleet.resolveCanonical(target.id), false);
+    assert.throws(() => f.fleet.selectCanonical(target.id), /changed/);
+    assert.equal(
+      f.fleet.canonicalKey("local", target.server!.serverId, target.server!.generation, "$139"),
+      null,
+    );
+  } finally {
+    f.close();
+  }
+});
+
+test("history route distinguishes duplicate labels and live IDs by machine and fresh owner", async () => {
+  const f = await fixture();
+  try {
+    const groups = f.catalogSnapshot().groups;
+    const local = groups.find((g) => g.id === "local")!.sessions[0]!;
+    const remote = groups.find((g) => g.id !== "local")!.sessions[0]!;
+    assert.notEqual(local.id, remote.id);
+    assert.equal(f.fleet.selectCanonical(remote.id).handle.id, remote.machineId);
+    const selected = f.fleet.selectCanonical(local.id);
+    f.emitters.get("local")!({
+      ...f.snapshot,
+      phase: "unavailable",
+      sessions: [],
+      daemonInstanceId: null,
+    });
+    assert.throws(selected.assertCurrent, /changed/);
+    assert.equal(f.fleet.resolveCanonical(local.id), false);
+    assert.equal(f.fleet.resolveCanonical(remote.id), true);
+  } finally {
+    f.close();
+  }
+});

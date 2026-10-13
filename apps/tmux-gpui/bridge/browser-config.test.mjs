@@ -129,6 +129,8 @@ test("malformed private config stays recoverable without leaking its contents", 
         "homeAgentRecovery",
         "homeAgentFilter",
         "historyOffset",
+        "sessionHistory",
+        "sessionHistoryRejected",
       ].sort(),
     );
     assert.equal(event.homeAgentRecovery, null);
@@ -143,6 +145,27 @@ test("malformed private config stays recoverable without leaking its contents", 
     assert.match(event.status, /unavailable/);
     assert.ok(!line.includes("PRIVATE_TEST_SENTINEL"));
     assert.equal(event.machines, null);
+    // Unsupported private-host history rejects before changing the committed request.
+    const rejectedPublication = firstPublication(child, lines);
+    const historyCommand = {
+      type: "session-history",
+      request: 1,
+      fromRequest: 0,
+      revision: 1,
+      action: randomUUID(),
+    };
+    child.stdin.write(JSON.stringify(historyCommand) + "\n");
+    const rejected = JSON.parse(await rejectedPublication);
+    assert.equal(rejected.request, 0);
+    assert.equal(rejected.sessionHistory, null);
+    assert.deepEqual(rejected.sessionHistoryRejected, {
+      request: 1,
+      fromRequest: 0,
+      revision: 1,
+      action: historyCommand.action,
+    });
+    assert.equal(rejected.status, event.status);
+    child.stdin.write(JSON.stringify({ ...historyCommand, request: 2, fromRequest: 99 }) + "\n");
     // Machine management remains local and usable even when terminal discovery fails.
     const registryPublication = firstPublication(child, lines);
     child.stdin.write(JSON.stringify({ type: "machines", operation: "read", request: 0 }) + "\n");
@@ -164,11 +187,15 @@ test("malformed private config stays recoverable without leaking its contents", 
         "homeAgentRecovery",
         "homeAgentFilter",
         "historyOffset",
+        "sessionHistory",
+        "sessionHistoryRejected",
       ].sort(),
     );
     assert.equal(registryEvent.homeAgentRecovery, null);
     assert.equal(registryEvent.homeAgentFilter, null);
     assert.equal(registryEvent.historyOffset, 0);
+    assert.equal(registryEvent.sessionHistoryRejected.fromRequest, registryEvent.request);
+    assert.equal(registryEvent.sessionHistoryRejected.request, 1);
     assert.equal(registryEvent.attentionSupported, true);
     assert.equal(registryEvent.attentionAgents, null);
     assert.equal(registryEvent.attentionSelectionRejected, null);

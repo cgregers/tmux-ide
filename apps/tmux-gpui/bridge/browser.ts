@@ -1,3 +1,7 @@
+import {
+  createSessionHistoryController,
+  sessionHistoryCommandSchema,
+} from "./session-history-controller.ts";
 import { createPaletteOwner, paletteObserveSchema, openPaletteAgentSchema } from "./palette.ts";
 import { fleetPreferenceCommand } from "./fleet-preference-publication.ts";
 import { createDiagnosticChannel } from "./diagnostic-channel.ts";
@@ -115,6 +119,7 @@ const machineRegistryCommand = z.discriminatedUnion("operation", [
 ]);
 const commandSchema = z.union([
   fleetPreferenceCommand,
+  sessionHistoryCommandSchema,
   attentionObserveSchema,
   openAttentionAgentSchema,
   paletteObserveSchema,
@@ -329,6 +334,21 @@ let attentionSelectionRejected: { request: number; fromRequest: number; scope: n
 const attention = createAttentionOwner(publish);
 let paletteSelectionRejected: { request: number; fromRequest: number; scope: number } | null = null;
 const palette = createPaletteOwner(publish);
+const sessionHistory = createSessionHistoryController();
+let sessionHistoryRejected: {
+  request: number;
+  fromRequest: number;
+  revision: number;
+  action: string;
+} | null = null;
+let historySaveFailed = false;
+let acceptSessionVisit: (() => void) | null = null;
+let highestNavigationAttempt = 0;
+const admitNavigationAttempt = (attempt: number) => {
+  if (attempt <= request || attempt <= highestNavigationAttempt) return false;
+  highestNavigationAttempt = attempt;
+  return true;
+};
 let agentOwner: ReturnType<typeof createHomeAgentObserver> | undefined;
 const homeRecovery = createHomeAgentRecovery();
 let homeAgentFilter: { revision: number; machineId: string | null } | null = null;
@@ -447,6 +467,7 @@ function launchFleetSelection(
   token: number,
   agent?: HomeAgentRow,
   requiredCurrent: () => boolean = () => true,
+  canonicalKey?: string,
 ) {
   if (!fleet) throw new FleetSelectionError();
   selectedFleet = true;
@@ -468,8 +489,7 @@ function launchFleetSelection(
     routeRevision === machineRouteRevision &&
     (!agent || (foreground && capturedPresence === presenceRevision));
   // SSH identity/inventory work must not block Home or another selection.
-  void owner
-    .select(selection)
+  void (canonicalKey ? owner.selectCanonical(canonicalKey) : owner.select(selection))
     .then(async ({ host, sessionId, session }) => {
       if (!current()) return;
       const fresh = createPreviewCatalog(host);
@@ -551,12 +571,21 @@ function launchFleetSelection(
     .catch(() => {
       if (!current()) return;
       inputReady = false;
+      sessionHistory.cancel();
       status = "Fleet session unavailable — return Home and select it again";
       publish();
     });
 }
 
 function publish() {
+  const preferenceState = fleet?.preferenceSnapshot();
+  if (preferenceState?.phase === "ready" && preferenceState.state)
+    sessionHistory.seed(preferenceState.state.recent);
+  acceptSessionVisit?.();
+  const historyPublication = sessionHistory.publication(
+    request,
+    !!fleet && !!preferenceState?.state,
+  );
   // A session may remain selectable beyond the server display cap, but Home
   // must not offer creation without a visible exact destination.
   if (surface === "home" && homePhase === "live" && selectedFleet && !fleet?.selectedServer()) {
@@ -584,6 +613,8 @@ function publish() {
       homeAgentRecovery: surface === "home" && fleet ? homeRecovery.publication() : null,
       homeAgentFilter: surface === "home" && fleet ? homeAgentFilter : null,
       // Protocol support; private hosts publish an explicit unavailable roster.
+      sessionHistory: historyPublication,
+      sessionHistoryRejected,
       paletteSupported: !!fleet,
       paletteAgents: palette.publication(),
       paletteSelectionRejected,
@@ -602,8 +633,9 @@ function publish() {
       preferredPane: foreground && sessionCatalogComplete ? initialPane : null,
       selectedSession,
       selectedPane,
-      status:
-        inputReady && editorMessage?.request === request && editorMessage.id === selectedPane
+      status: historySaveFailed
+        ? `${status} — Session visit could not be saved; refresh local preferences.`
+        : inputReady && editorMessage?.request === request && editorMessage.id === selectedPane
           ? editorMessage.text
           : surface === "home" && machineMessage
             ? `${status} · ${machineMessage}`
@@ -665,6 +697,7 @@ async function retire() {
 }
 function retireMachineRoute() {
   if (stopped) return;
+  sessionHistory.cancel();
   machineRouteRevision++;
   retireAgents();
   catalog?.dispose();
@@ -686,6 +719,8 @@ function retireMachineRoute() {
 }
 async function stop() {
   if (stopped) return;
+  sessionHistory.cancel();
+  acceptSessionVisit = null;
   stopped = true;
   hostSource?.dispose();
   machines?.dispose();
@@ -737,6 +772,7 @@ async function openPane(
   closeConfirmation?: { killed: string; current: () => boolean },
   recoveryNotice?: string,
 ) {
+  const admissionPresence = presenceRevision;
   const owningCatalog = catalog;
   const directory = await mkdtemp(join(tmpdir(), "tmux-gpui-pane-"));
   let handedOff = false;
@@ -806,6 +842,7 @@ async function openPane(
         publish();
         return;
       }
+      sessionHistory.cancel();
       attention.cancel();
       palette.cancel();
       retireAgents();
@@ -919,6 +956,12 @@ async function openPane(
               panes.map((pane) => pane.semanticPaneId),
               layouts,
             );
+            const historyKey =
+              foreground && admissionPresence === presenceRevision
+                ? fleet?.attachmentKey(config)
+                : null;
+            if (historyKey)
+              sessionHistory.catalogReady(token, historyKey, owningCatalog, presenceRevision);
             status = "Choose a pane or window";
             publish();
             void retire();
@@ -1330,6 +1373,33 @@ async function openPane(
                     : diagnostics.fault
                       ? diagnosticStatus(diagnostics.fault)
                       : "Pane unavailable — select again or refresh";
+          if (!catalogOnly)
+            acceptSessionVisit = () => {
+              if (
+                !inputReady ||
+                !snapshot ||
+                scrollOffset !== 0 ||
+                !foreground ||
+                stopped ||
+                active?.child !== child ||
+                token !== request ||
+                catalog !== owningCatalog ||
+                admissionPresence !== presenceRevision ||
+                selectedPane !== config.semanticPaneId ||
+                selectedSession !== config.liveSessionId
+              )
+                return;
+              const key = fleet?.attachmentKey(config);
+              if (!key) return;
+              const visit = sessionHistory.accept(token, key),
+                owner = fleet;
+              if (visit && owner)
+                void owner.recordVisit(visit.key).then((saved) => {
+                  if (stopped || fleet !== owner) return;
+                  historySaveFailed = !saved;
+                  publish();
+                });
+            };
           publish();
         }
         if (buffer.length > MAX_FRAME) throw new Error("Oversized child publication");
@@ -1463,6 +1533,7 @@ async function command(value: unknown) {
     active?.presentation.update(undefined, [], false);
     foreground = cmd.active;
     if (!foreground) {
+      sessionHistory.cancel();
       attention.cancel();
       palette.cancel();
       initialPane = null;
@@ -1689,12 +1760,57 @@ async function command(value: unknown) {
     active.child.stdin.write(line);
     return;
   }
+  if (cmd.type === "session-history") {
+    if (!admitNavigationAttempt(cmd.request) || cmd.fromRequest !== request) return;
+    const key = sessionHistory.admit(
+      cmd,
+      request,
+      foreground && !stopped,
+      (key) => fleet?.resolveCanonical(key) ?? false,
+    );
+    if (!key) {
+      sessionHistoryRejected = {
+        request: cmd.request,
+        fromRequest: cmd.fromRequest,
+        revision: cmd.revision,
+        action: cmd.action,
+      };
+      publish();
+      return;
+    }
+    attention.cancel();
+    palette.cancel();
+    retireAgents();
+    request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionHistoryRejected = null;
+    const token = request,
+      capturedPresence = presenceRevision;
+    const current = () =>
+      !stopped && request === token && foreground && presenceRevision === capturedPresence;
+    sessionCatalogComplete = false;
+    initialPane = null;
+    snapshot = null;
+    inputReady = false;
+    selectedPane = null;
+    paneActions = null;
+    surface = "workspace";
+    selectedSession = null;
+    panes = [];
+    layouts = [];
+    status = "Loading visited session";
+    publish();
+    await retire();
+    if (!current()) return;
+    launchFleetSelection("", token, undefined, current, key);
+    return;
+  }
   if (cmd.type === "palette-observe") {
     palette.observe(cmd, request, foreground && !stopped, fleet);
     return;
   }
   if (cmd.type === "open-palette-agent") {
-    if (!palette.admitAttempt(cmd.request, request)) return;
+    if (!admitNavigationAttempt(cmd.request) || !palette.admitAttempt(cmd.request, request)) return;
     const target = palette.resolve(cmd, request, foreground && !stopped, fleet);
     if (!target) {
       paletteSelectionRejected = {
@@ -1708,6 +1824,8 @@ async function command(value: unknown) {
     attention.cancel();
     palette.cancel();
     request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionHistoryRejected = null;
     const token = request;
     const capturedPresence = presenceRevision;
     const current = () =>
@@ -1741,7 +1859,8 @@ async function command(value: unknown) {
     return;
   }
   if (cmd.type === "open-attention-agent") {
-    if (!attention.admitAttempt(cmd.request, request)) return;
+    if (!admitNavigationAttempt(cmd.request) || !attention.admitAttempt(cmd.request, request))
+      return;
     const target = attention.resolve(cmd, request, foreground && !stopped, fleet);
     if (!target) {
       attentionSelectionRejected = {
@@ -1755,6 +1874,8 @@ async function command(value: unknown) {
     attention.cancel();
     palette.cancel();
     request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionHistoryRejected = null;
     const token = request;
     const capturedPresence = presenceRevision;
     const current = () =>
@@ -1801,10 +1922,12 @@ async function command(value: unknown) {
       agentOwner?.isCurrentTarget(row) &&
       host &&
       workspace;
-    if (cmd.request <= request) throw new Error("Stale workspace agent command");
+    if (!admitNavigationAttempt(cmd.request)) throw new Error("Stale workspace agent command");
     attention.cancel();
     palette.cancel();
     request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionHistoryRejected = null;
     sessionCatalogComplete = false;
     initialPane = null;
     const token = request;
@@ -1831,7 +1954,7 @@ async function command(value: unknown) {
   }
   if (cmd.type === "open-agent" && fleet) {
     const target = fleet.resolveAgent(cmd.key);
-    if (cmd.request <= request) throw new Error("Stale agent command");
+    if (!admitNavigationAttempt(cmd.request)) throw new Error("Stale agent command");
     const valid =
       cmd.fromRequest === request &&
       surface === "home" &&
@@ -1842,6 +1965,8 @@ async function command(value: unknown) {
     attention.cancel();
     palette.cancel();
     request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionHistoryRejected = null;
     const token = request;
     const capturedPresence = presenceRevision;
     retireAgents();
@@ -1880,10 +2005,12 @@ async function command(value: unknown) {
       agentAvailable(row) &&
       owner?.isCurrentTarget(row) &&
       host;
-    if (cmd.request <= request) throw new Error("Stale agent command");
+    if (!admitNavigationAttempt(cmd.request)) throw new Error("Stale agent command");
     attention.cancel();
     palette.cancel();
     request = cmd.request;
+    sessionHistory.navigation(request);
+    sessionHistoryRejected = null;
     sessionCatalogComplete = false;
     initialPane = null;
     retireAgents();
@@ -1911,11 +2038,26 @@ async function command(value: unknown) {
     if (!stopped && request === token) startAgents();
     return;
   }
-  if (cmd.request <= request) throw new Error("Stale browser command");
+  if (!admitNavigationAttempt(cmd.request)) throw new Error("Stale browser command");
+  // The completed metadata helper has retired. Only its proved catalog and exact displayed pane may
+  // carry a pending traversal into the newer interactive-child request.
+  const continuationPane =
+    cmd.type === "pane" && catalog && sessionCatalogComplete
+      ? panes.find(
+          (pane) => pane.semanticPaneId === cmd.id && pane.liveSessionId === selectedSession,
+        )
+      : undefined;
+  const continuationKey =
+    continuationPane && foreground ? fleet?.attachmentKey(continuationPane) : null;
+  const historyContinuation = continuationKey
+    ? { fromRequest: request, key: continuationKey, catalog: catalog!, presence: presenceRevision }
+    : undefined;
   attention.cancel();
   palette.cancel();
   retireAgents();
   request = cmd.request;
+  sessionHistory.navigation(request, historyContinuation);
+  sessionHistoryRejected = null;
   sessionCatalogComplete = false;
   initialPane = null;
   const token = request;
@@ -2118,6 +2260,7 @@ try {
       try {
         await command(JSON.parse(line));
       } catch (error) {
+        sessionHistory.cancel();
         sessionCatalogComplete = true;
         initialPane = null;
         snapshot = null;

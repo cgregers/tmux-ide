@@ -122,6 +122,30 @@ export function createNativeFleet(
       JSON.stringify([info.instanceId, info.startedAt]) === route.instance
     );
   };
+  const canonicalRoute = (key: string): Route | null => {
+    const matches = catalog
+      .getSnapshot()
+      .groups.flatMap((group) =>
+        group.state === "ready" && !group.identityConflict
+          ? group.sessions
+              .filter((session) => session.id === key && !session.disabled)
+              .map((session) => ({ group, session }))
+          : [],
+      );
+    if (matches.length !== 1) return null;
+    const { session } = matches[0]!;
+    const handle = manager.getMachine(session.machineId),
+      info = handle?.read();
+    if (!handle || !info || !session.server || !session.liveSessionId) return null;
+    const route: Route = {
+      handle,
+      epoch: handle.endpoint().epoch,
+      instance: JSON.stringify([info.instanceId, info.startedAt]),
+      session: structuredClone(session),
+      key: JSON.stringify([handle.id, session.sourceId, session.server, session.liveSessionId]),
+    };
+    return current(route) ? route : null;
+  };
   const update = (refreshAgents = true) => {
     if (stopped) return;
     const snapshot = catalog.getSnapshot();
@@ -346,6 +370,45 @@ export function createNativeFleet(
           route.assertCurrent();
         },
       };
+    },
+    resolveCanonical(key: string) {
+      return canonicalRoute(key) !== null;
+    },
+    canonicalKey(machineId: string, serverId: string, generation: string, liveSessionId: string) {
+      const matches = catalog
+        .getSnapshot()
+        .groups.flatMap((group) => group.sessions)
+        .filter(
+          (session) =>
+            session.machineId === machineId &&
+            session.server?.serverId === serverId &&
+            session.server.generation === generation &&
+            session.liveSessionId === liveSessionId &&
+            !session.disabled,
+        );
+      return matches.length === 1 && canonicalRoute(matches[0]!.id) ? matches[0]!.id : null;
+    },
+    selectCanonical(key: string) {
+      const route = canonicalRoute(key);
+      if (!route || !manager.select(route.handle.id)) throw new FleetSelectionError();
+      const selectedEpoch = manager.endpoint().epoch,
+        revision = ++selectionRevision;
+      const assertCurrent = () => {
+        const fresh = canonicalRoute(key);
+        if (
+          selectionRevision !== revision ||
+          manager.endpoint().epoch !== selectedEpoch ||
+          manager.snapshot().selectedMachineId !== route.handle.id ||
+          !current(route) ||
+          !fresh ||
+          fresh.key !== route.key ||
+          fresh.handle !== route.handle ||
+          fresh.instance !== route.instance
+        )
+          throw new FleetSelectionError();
+      };
+      assertCurrent();
+      return { handle: route.handle, session: structuredClone(route.session), assertCurrent };
     },
     select(token: string) {
       const route = routes.get(token);
