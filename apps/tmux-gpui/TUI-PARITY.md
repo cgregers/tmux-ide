@@ -641,3 +641,24 @@ selected-session scoped, and Home still uses its existing machine filter. The
 follow-up must reuse the shared fleet observer with bounded target retention and
 request/scope/revision checks. Narrow-window acceptance and the earlier intermittent
 activation issue also remain open. The downloadable alpha has not been replaced.
+
+### 13 October: F5 observed-fleet search
+
+Local commit `b0df3146` adds query-scoped fleet agent search from Home and
+Workspace using the existing shared observer. Matching happens before the
+256-row cap; the UI exposes observation/omission counts. Query replacements
+retain a single subscription and invalidate stale targets immediately.
+Request/scope/roster/presence checks and existing daemon admission remain owners
+of navigation. Older helpers retain contextual agent fallback.
+
+Bridge gate: 468 passed / five optional skips, plus seven final query tests.
+Native: 2,960 default and 2,994 all-feature passes, both Clippy configurations,
+format and size checks. Real native F5 query replacement selected synthetic
+agent-299 beyond the initial cap, displayed the correlated destination, emitted
+no terminal input, and exited cleanly. Ten exact-package checks passed. See
+`evidence/f5-fleet-search-2026-10-13/`. This is observed-roster search, not proof
+of unobserved-session discovery or live remote fleet admission.
+
+Remaining parity includes the full Workspace fleet tree and visited-session
+history. Narrow layout, broader physical IME/remote checks, intermittent
+activation and signed clean-machine installation remain open.

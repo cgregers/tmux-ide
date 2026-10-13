@@ -1,4 +1,4 @@
-# Fleet-wide F5 agent search — local qualification draft
+# Fleet-wide F5 agent search — local qualification
 
 This slice adds fleet-wide F5 search over the **currently observed** shared agent roster from Home and Workspace. Query matching uses each term against command text, agent/session/machine/server/project/harness/team metadata before the 256-row publication cap. Source observation coverage and truncation remain explicit: this does not discover agents in sessions the shared observer has not observed. Private host-file previews retain their contextual agent fallback.
 
@@ -21,7 +21,7 @@ Independent review found that cancel/reopen on each query would tear down the sh
 
 - Initial native compile failed with test macro recursion (`native-focused-compile-before.log`), fixed by the explicit standard test import used by existing fixture modules.
 - The next focused run had **271 passed / 1 failed**, an `Option::unwrap()` in the new Workspace palette test (`native-focused-before.log`). The test had published request 0 against native request 7, so the scope guard correctly hid its row. The fixture was aligned to request 7. The later 280-test passing log supersedes this test run; the original failure is retained.
-- Broad native Clippy then stopped on two `field_reassign_with_default` findings in new tests (`native-clippy-style-before.log`). Initialization style was repaired without suppressions. The final source hashes are copied; both strict Clippy configurations subsequently passed; full workspace tests remain pending.
+- The preserved original Clippy failure is `native-clippy-collapsible-before.log`. A subsequent run reported two test-only `field_reassign_with_default` warnings, observed in the tool transcript. Its raw log was overwritten before preservation; the initial claim that it was saved was incorrect. The mistakenly labeled passing copy was renamed `native-clippy-all-passed.log`. Both style repairs used equivalent code without suppressions; final hashes and passing broad gate results are recorded below.
 
 `evidence-inputs.json` records the original `/tmp` file hashes and evidence-copy hashes. Copies either preserve bytes or normalize trailing whitespace as recorded per file. The input hashes describe the bytes actually copied, not historical contents of mutable `/tmp` paths.
 
@@ -54,3 +54,37 @@ Exact commands: `cargo test --locked --workspace` and
 Rust toolchain and single-job environment as the focused run. Full logs are
 `workspace-default.log` and `workspace-all.log`. This supersedes the draft
 pending-test statements above. Native physical qualification remains pending.
+
+## Native physical acceptance
+
+The cached optimized build at `b0df3146` produced SHA256
+`55e51283d6e42684c93b9aec38ab42579feec15d8715294c397b67d7e7ea0166`.
+In a private QA bundle, real F5 input and query replacement showed ordinary
+results followed by the single Zebra late agent. Enter emitted exact key
+`agent-299`, scope 3, roster revision 6, fromRequest 0, request 1. The parent
+visually verified the acknowledged Remote synthetic workspace title and Zebra
+pane header at 2000×1300 before Cmd-Q. The fixture recorded one subscription
+start, two updates, one stop, no input/resize commands, exit zero and no errors.
+
+See `native-build.json`, `native-pass.json`, and separate
+`native-visual-observation.json`. The raw receipt intentionally leaves automated
+visual verification false. Screenshots were inspected inline, not exported.
+`native-fixture.mjs.txt` preserves the reviewed harness, run from
+`.tasks/gpui-global-palette-native/run.mjs` for relative imports. No daemon or
+real terminal was connected. Normal activation on this run does not resolve
+the earlier intermittent activation observation. Narrow layout and physical
+IME qualification remain open. This supersedes the draft native-pending text.
+
+## Refreshed portable alpha
+
+Build `2026101308` was assembled from the exact qualified native executable and
+current bridge. All ten packaged checks passed with no skips. The new unsigned
+archive is in `/Users/thijs/Downloads/tmux-ide-alpha-2026101308/`; the old build
+2026101302 is untouched. All 22 regular archive files were compared by SHA256
+against the assembled app. `portable-preview.json` records file and archive
+hashes, and `archive-build.json` preserves the packager output.
+
+This Apple Silicon/macOS 14.2+ app bundles Node and expects an existing running
+tmux-ide daemon. It does not install/upgrade the daemon. No signed/notarized or
+clean-machine install/update acceptance is claimed. No remote publication was
+performed. The full mission and remaining parity work are still open.
