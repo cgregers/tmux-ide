@@ -97,16 +97,22 @@ test("fresh install and upgrade work with spaces and shell punctuation", (t) => 
   assert.ok(fs.existsSync(previous), "keep runtime files for existing processes");
   assert.ok(fs.existsSync(path.join(root, "postinstall")));
 });
+test("installer output stays concise and names a PATH entry that shadows the launcher", (t) => {
+  const { run } = fixture(t);
+  const installed = run();
+  assert.equal(installed.status, 0, installed.stderr);
+  assert.match(installed.stdout, /tmux-ide installer · tmux-ide\.com/);
+  assert.match(installed.stdout, /Installed successfully\. tmux-ide 2\.9\.0 is ready\./);
+  // The fixture puts a stale tmux-ide first on PATH.
+  assert.match(installed.stdout, /Another tmux-ide comes first on your PATH/);
+  assert.doesNotMatch(installed.stdout, /tmux-ide v2\.9\.0\n*$/, "no trailing version echo");
+});
 test("printed start and update commands execute with spaces and shell punctuation", (t) => {
   const { run, env } = fixture(t);
   const installed = run();
   assert.equal(installed.status, 0, installed.stderr);
-  for (const label of ["Start now", "Update later"]) {
-    const command =
-      installed.stdout.match(new RegExp(`${label}:\\n  ([^\\n]+)`))?.[1] ??
-      (label === "Start now"
-        ? installed.stdout.match(/Installed\. Start with: ([^\n]+)/)?.[1]
-        : undefined);
+  for (const label of ["Start", "Update"]) {
+    const command = installed.stdout.match(new RegExp(`  ${label}: +([^\\n]+)`))?.[1];
     assert.ok(command, `${label} must provide a copyable command`);
     const result = spawnSync("/bin/sh", ["-c", command], { env, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
