@@ -651,8 +651,20 @@ function publish() {
     homePhase = "unavailable";
     status = "Selected server is not available in this fleet view — select a server again.";
   }
-  // Home has no terminal helper or authority to await; its presence applies locally.
-  if (surface === "home" && !active) appliedPresenceRevision = presenceRevision;
+  // Terminal-free navigation surfaces apply presence locally. Interactive helpers
+  // retain ACK ownership even while their snapshot or input grant is unavailable.
+  if (
+    !active &&
+    (surface === "home" ||
+      (surface === "workspace" &&
+        catalog &&
+        selectedSession !== null &&
+        sessionCatalogComplete &&
+        selectedPane === null &&
+        snapshot === null &&
+        !inputReady))
+  )
+    appliedPresenceRevision = presenceRevision;
   if (stopped) return;
   const line =
     JSON.stringify({
@@ -1036,8 +1048,10 @@ async function openPane(
               sessionTabs.catalogReady(token, historyKey, owningCatalog, presenceRevision);
             }
             status = "Choose a pane or window";
-            publish();
+            // retire clears active synchronously; publish only after this metadata
+            // helper releases ACK ownership, without waiting for process reaping.
             void retire();
+            publish();
             return;
           }
           if (event.closePaneReady && pendingClose && !pendingClose.submitted) {
