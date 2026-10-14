@@ -15,6 +15,7 @@ mod reference;
 mod render;
 mod saved_machines;
 mod sidebar_visibility;
+mod theme_style;
 use super::{SnapshotView, browser, browser_ui::Selection};
 use crate::search_input::{Changed, SearchInput};
 use commands::Action;
@@ -194,7 +195,7 @@ fn theme_rows(state: &browser::State, query: &str) -> Vec<Row> {
             })
             .map(|o| Row {
                 target: Target::Theme(o.id.clone()),
-                label: format!("{}{}", if o.id == a.selected { "✓ " } else { "" }, o.name),
+                label: o.name.clone(),
             })
             .collect()
     })
@@ -915,11 +916,6 @@ impl SnapshotView {
         cx.stop_propagation();
         window.prevent_default();
         cx.notify();
-    }
-    pub(super) fn picker_in_sidebar(&self) -> bool {
-        self.picker
-            .as_ref()
-            .is_some_and(|picker| picker.mode == Mode::Theme)
     }
 }
 #[cfg(test)]

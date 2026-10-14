@@ -664,7 +664,7 @@ impl SnapshotView {
         }
         let theme = self.theme();
         let is_home = self.browser_state.surface == browser::Surface::Home;
-        let show_sidebar = (!is_home && !self.sidebar_hidden) || self.picker_in_sidebar();
+        let show_sidebar = !is_home && !self.sidebar_hidden;
         let viewport = window.viewport_size();
         let chrome_height =
             super::workspace_chrome::APPLICATION_TABS_HEIGHT + self.retained_session_height();
@@ -846,16 +846,6 @@ impl SnapshotView {
                 .on_scroll_wheel(cx.listener(Self::terminal_wheel))
                 .child(self.terminal_render(window, cx))
         });
-        if self.picker_in_sidebar() && !self.machine_dialog_open() {
-            sidebar = div()
-                .id("picker-sidebar")
-                .w(px(224.))
-                .h_full()
-                .flex_shrink_0()
-                .p_2()
-                .overflow_hidden()
-                .child(self.picker_render(cx));
-        }
         let home = is_home.then(|| self.home_render(window, cx));
         let context = div()
             .id("workspace-context")

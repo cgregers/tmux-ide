@@ -43,7 +43,6 @@ impl SnapshotView {
         if self.browser_state.surface == browser::Surface::Workspace
             && self.browser_state.request == self.browser_request
             && !self.sidebar_hidden
-            && !self.picker_in_sidebar()
         {
             self.sidebar_keyboard.reveal.update(
                 &rows(&self.browser_state),

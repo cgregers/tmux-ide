@@ -18,6 +18,7 @@ impl SnapshotView {
                     | Mode::Help
                     | Mode::WhatsNew
                     | Mode::Font
+                    | Mode::Theme
             )
         })?;
         let theme = self.theme();
@@ -98,6 +99,9 @@ impl SnapshotView {
             .flex()
             .flex_col()
             .gap_1()
+            .when(picker.mode == Mode::Theme, |panel| {
+                panel.child(theme_style::heading(self))
+            })
             .when(picker.mode == Mode::Font, |panel| {
                 panel
                     .child(div().px_2().py_1().child(format!(
@@ -137,22 +141,9 @@ impl SnapshotView {
             .child(picker.search.clone());
         if picker.mode == Mode::Theme
             && let Some(a) = &self.browser_state.appearance
+            && let Some(error) = &a.error
         {
-            panel = panel.child(div().child(format!(
-                "Applied: {}{}",
-                a.selected,
-                if a.selected == "system" {
-                    match a.system {
-                        crate::tmux_snapshot::appearance::System::Dark => " (dark)",
-                        crate::tmux_snapshot::appearance::System::Light => " (light)",
-                    }
-                } else {
-                    ""
-                }
-            )));
-            if let Some(error) = &a.error {
-                panel = panel.child(div().id("theme-picker-error").child(error.clone()));
-            }
+            panel = panel.child(div().id("theme-picker-error").child(error.clone()));
         }
         if let Some(error) = picker.error {
             panel = panel.child(div().id("theme-command-error").child(error));
@@ -172,6 +163,10 @@ impl SnapshotView {
                     _ => true,
                 }
                 && current(&self.browser_state, &target);
+            if picker.mode == Mode::Theme {
+                list = list.child(theme_style::row(self, index, row, enabled, cx));
+                continue;
+            }
             list = list.child(
                 div()
                     .id(("picker-row", index))
@@ -208,7 +203,15 @@ impl SnapshotView {
                     }),
             );
         }
-        panel = panel.child(list);
+        panel = panel.child(list).when(picker.mode == Mode::Theme, |panel| {
+            panel.child(
+                div()
+                    .pt_2()
+                    .text_sm()
+                    .text_color(rgb(theme.muted))
+                    .child("↑ ↓ Browse   ·   Enter Apply   ·   Esc Close"),
+            )
+        });
         panel.into_any_element()
     }
 }

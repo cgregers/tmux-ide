@@ -9,11 +9,15 @@ fn machine_form_is_local_until_submit_and_escape_does_not_type(cx: &mut TestAppC
     cx.simulate_keystrokes("f5");
     cx.simulate_input("connect to machine");
     cx.simulate_keystrokes("enter");
-    assert!(view.read_with(cx, |view, _| view.machine_dialog_open()));
+    assert!(view.read_with(cx, |view, _| {
+        view.picker
+            .as_ref()
+            .is_some_and(|p| p.mode == Mode::Machine)
+    }));
     cx.simulate_input("spark");
     assert!(receiver.try_recv().is_err());
     cx.simulate_keystrokes("escape");
-    assert!(view.read_with(cx, |view, _| !view.machine_dialog_open()));
+    assert!(view.read_with(cx, |view, _| view.picker.is_none()));
     assert!(receiver.try_recv().is_err());
 }
 
