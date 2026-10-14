@@ -55,7 +55,7 @@ const FULL_PREFS: NotificationPrefs = {
 function pd(
   over: Pick<PaneDetail, "sessionName" | "paneId" | "agent" | "status"> & Partial<PaneDetail>,
 ): PaneDetail {
-  return { windowIndex: 1, pid: 0, dir: "/", sessionId: null, ...over };
+  return { windowIndex: 1, pid: 0, dir: "/", sessionId: null, authorityRaw: null, ...over };
 }
 
 function project(name: string, overrides: Partial<TeamProject> = {}): TeamProject {
@@ -927,5 +927,60 @@ describe("runUpdaterTick — session-id capture", () => {
         writeStatus: () => {},
       }),
     ).not.toThrow();
+  });
+
+  it("bridges the tick's same pane details immediately after session-id capture", () => {
+    const panes = [
+      pd({
+        sessionName: "web",
+        paneId: "%7",
+        agent: "copilot",
+        status: "working",
+        authorityRaw: "working:100",
+      }),
+    ];
+    const order: string[] = [];
+    let captured: PaneDetail[] | undefined;
+    let bridged: PaneDetail[] | undefined;
+    runUpdaterTick({
+      listAdopted: () => ["web"],
+      computeProjects: (onPane) => {
+        for (const pane of panes) onPane(pane);
+        return [project("web")];
+      },
+      writeStatus: () => {},
+      captureSessionIds: (value) => {
+        captured = value;
+        order.push("capture");
+      },
+      bridgeAgentStates: (value) => {
+        bridged = value;
+        order.push("bridge");
+      },
+    });
+    expect(order).toEqual(["capture", "bridge"]);
+    expect(bridged).toBe(captured);
+    expect(bridged).toEqual(panes);
+  });
+
+  it("continues the tick's event processing when the bridge throws", () => {
+    const appendEvents = vi.fn();
+    const prevState = new Map<string, AgentStatus>([["web", "working"]]);
+    expect(() =>
+      runUpdaterTick({
+        listAdopted: () => ["web"],
+        computeProjects: () => [project("web")],
+        writeStatus: () => {},
+        bridgeAgentStates: () => {
+          throw new Error("synthetic bridge failure");
+        },
+        prevState,
+        appendEvents,
+      }),
+    ).not.toThrow();
+    expect(appendEvents).toHaveBeenCalledExactlyOnceWith([
+      { session: "web", from: "working", to: "idle" },
+    ]);
+    expect(prevState.get("web")).toBe("idle");
   });
 });

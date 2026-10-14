@@ -268,6 +268,144 @@ describe("manifest corpus — aider (source-tuned, v0.86.2)", () => {
   });
 });
 
+// ── Copilot CLI screens (source-tuned, v1.0.96) ─────────────────────────────
+// Markers are VERBATIM from the installed Copilot CLI 1.0.96 bundle
+// (cli-main.js). The panel layout around them is RECONSTRUCTED from its
+// components (no Copilot pane was captured live); replace with live captures.
+
+// RECONSTRUCTED (copilot, working) — the ThinkingAnimation status line,
+// "<intent> · <size> (Esc to cancel)", above the input box.
+const COPILOT_WORKING = `
+● Read packages/daemon/src/tui/detect/manifest.ts
+Exploring codebase · 1.2 KiB (Esc to cancel)
+╭──────────────────────────────────────────────╮
+│ ❯                                            │
+╰──────────────────────────────────────────────╯
+`;
+
+// RECONSTRUCTED (copilot, working) — the same line while a shell tool runs.
+const COPILOT_EXECUTING = `
+Executing (Esc to cancel)
+`;
+
+// RECONSTRUCTED (copilot, blocked) — the command-approval panel: the
+// question plus the numbered approve/reject menu.
+const COPILOT_BLOCKED_COMMAND = `
+╭──────────────────────────────────────────────────────────╮
+│ ╭──────────────────────────────────────────────────────╮ │
+│ │ rm -rf ./dist                                        │ │
+│ ╰──────────────────────────────────────────────────────╯ │
+│ Do you want to run this command?                         │
+│ ❯ 1. Yes                                                 │
+│   2. No, and tell Copilot what to do differently         │
+╰──────────────────────────────────────────────────────────╯
+`;
+
+// RECONSTRUCTED (copilot, blocked) — an MCP tool approval, whose reject row
+// takes a typed reason.
+const COPILOT_BLOCKED_TOOL = `
+│ Do you want to use this tool?                            │
+│ ❯ 1. Yes                                                 │
+│   2. No, and tell Copilot why...                         │
+╰──────────────────────────────────────────────────────────╯
+`;
+
+// RECONSTRUCTED (copilot, blocked) — the startup folder-trust dialog.
+const COPILOT_TRUST = `
+│ Copilot can read files in this folder and, with your permission, edit them │
+│ or run code and shell commands.                                            │
+│ Do you trust the files in this folder?                                     │
+│ ❯ 1. Yes                                                                   │
+│   2. Yes, and remember this folder for future sessions                     │
+│   3. No                                                                    │
+`;
+
+// RECONSTRUCTED (copilot, blocked) — an ask_user question with the freeform
+// row, and the same question once that row is selected.
+const COPILOT_ASK_USER = `
+│ Question                                     │
+│ Which database should I use?                 │
+│ ❯ 1. PostgreSQL                              │
+│   2. SQLite                                  │
+│   3. Other (type your answer)                │
+`;
+const COPILOT_ASK_USER_TYPING = `
+│ Which database should I use?                 │
+│   1. PostgreSQL                              │
+│   2. SQLite                                  │
+│ ❯ 3. Type your answer...                     │
+`;
+
+// RECONSTRUCTED (copilot, blocked) — a narrow pane wraps the reject row's
+// label; only the row's head stays on the numbered line.
+const COPILOT_BLOCKED_NARROW = `
+│ Do you want to run this command?   │
+│ ❯ 1. Yes                           │
+│   2. No, and tell Copilot what to  │
+│      do differently                │
+`;
+
+// SOURCE-VERBATIM (copilot, blocked) — the plain readline prompt printed
+// during sign-in when the system keychain is unavailable.
+const COPILOT_KEYCHAIN_PROMPT = `
+System keychain unavailable. Store token in plaintext config file? (y/N)
+`;
+
+// RECONSTRUCTED (copilot, idle) — a finished turn above the empty input box.
+const COPILOT_IDLE = `
+● The tests pass. I updated the manifest and its corpus.
+╭──────────────────────────────────────────────╮
+│ ❯                                            │
+╰──────────────────────────────────────────────╯
+`;
+
+// Prose that QUOTES the markers mid-line must stay idle, as must a settings
+// picker's unparenthesized "Esc to cancel." and a plain "Allow" (which the
+// conservative manifest used to read as an approval prompt).
+const COPILOT_PROSE = `
+● Allow-listed registry.npmjs.org in the proxy config.
+● Its reject row reads "No, and tell Copilot what to do differently" and its
+  status line shows "(Esc to cancel)" while a turn runs.
+│ ~/.copilot/settings.json · Pick a value. Esc to cancel.  │
+╭──────────────────────────────────────────────╮
+│ ❯                                            │
+╰──────────────────────────────────────────────╯
+`;
+
+describe("manifest corpus — Copilot CLI (source-tuned, v1.0.96)", () => {
+  const copilot = byId("copilot");
+  const cases: Array<[string, string, "blocked" | "working" | null]> = [
+    ["status line (Esc to cancel)", COPILOT_WORKING, "working"],
+    ["executing status line", COPILOT_EXECUTING, "working"],
+    [
+      "command approval (No, and tell Copilot what to do differently)",
+      COPILOT_BLOCKED_COMMAND,
+      "blocked",
+    ],
+    ["tool approval (No, and tell Copilot why...)", COPILOT_BLOCKED_TOOL, "blocked"],
+    ["folder-trust dialog", COPILOT_TRUST, "blocked"],
+    ["ask_user question (Other (type your answer))", COPILOT_ASK_USER, "blocked"],
+    ["ask_user freeform input (Type your answer...)", COPILOT_ASK_USER_TYPING, "blocked"],
+    ["reject row wrapped in a narrow pane", COPILOT_BLOCKED_NARROW, "blocked"],
+    ["sign-in keychain prompt ((y/N))", COPILOT_KEYCHAIN_PROMPT, "blocked"],
+    ["finished turn + empty input box", COPILOT_IDLE, null],
+    ["prose quoting the markers + settings picker hint", COPILOT_PROSE, null],
+  ];
+  for (const [label, screen, expected] of cases) {
+    it(`${label} → ${expected ?? "idle"}`, () => {
+      const snap = parseSnapshot(screen);
+      expect(evaluateManifest(snap, copilot).state).toBe(expected);
+      expect(classifyInstant(snap, copilot)).toBe(expected ?? "idle");
+    });
+  }
+
+  it("does not read Claude's or Codex's reject rows as its own", () => {
+    for (const screen of [CLAUDE_BLOCKED, CODEX_BLOCKED_LIVE]) {
+      expect(evaluateManifest(parseSnapshot(screen), copilot).state).toBe(null);
+    }
+  });
+});
+
 // ── cursor-agent (conservative; real pre-auth screen must read idle) ────────
 
 // REAL (cursor-agent) — the pre-auth splash captured live (no account). This
@@ -463,6 +601,7 @@ const IDLE_SCREENS: Array<[string, string]> = [
   ["codex idle", CODEX_IDLE],
   ["codex idle (live)", CODEX_IDLE_LIVE],
   ["aider idle", AIDER_IDLE],
+  ["copilot idle", COPILOT_IDLE],
   ["cursor pre-auth", CURSOR_PREAUTH],
   ["droid login", DROID_LOGIN],
   ["kilo idle", KILO_IDLE],
@@ -495,6 +634,15 @@ describe("cross-check — M25.4 manifests never fire on any idle screen", () => 
   }
 });
 
+describe("cross-check — the copilot manifest never fires on any idle screen", () => {
+  const copilot = byId("copilot");
+  for (const [label, screen] of IDLE_SCREENS) {
+    it(`copilot on "${label}" → no state`, () => {
+      expect(evaluateManifest(parseSnapshot(screen), copilot).state).toBe(null);
+    });
+  }
+});
+
 // ── False-positive guard (table-driven, EVERY manifest) ────────────────────
 
 // A realistic idle shell prompt (oh-my-zsh powerline style) + a plain one.
@@ -515,7 +663,7 @@ describe("false-positive guard — no manifest fires on a plain shell prompt", (
 
 describe("manifest confidence metadata", () => {
   // The manifests built from real captures / verbatim source strings.
-  const TUNED = new Set(["claude", "codex", "aider"]);
+  const TUNED = new Set(["claude", "codex", "aider", "copilot"]);
 
   for (const manifest of BUNDLED_MANIFESTS) {
     it(`${manifest.id}: confidence is set and matches its provenance`, () => {

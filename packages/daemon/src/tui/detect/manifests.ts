@@ -10,13 +10,15 @@
  *
  * EVIDENCE PROVENANCE (per-manifest `confidence`):
  *   - `tuned` — built from REAL captured screens or the agent's own source
- *     strings. `claude`, `codex`, and `aider` are tuned: codex from live
- *     `tmux capture-pane` frames driven through a real turn (idle / working /
- *     command-approval / trust prompt), aider from the verbatim prompt strings
- *     in its installed source (`io.py` confirm_ask, `waiting.py` spinner).
- *     Each matcher cites the invariant it was built from ("seen: …").
+ *     strings. `claude`, `codex`, `aider`, and `copilot` are tuned: codex from
+ *     live `tmux capture-pane` frames driven through a real turn (idle /
+ *     working / command-approval / trust prompt), aider from the verbatim
+ *     prompt strings in its installed source (`io.py` confirm_ask,
+ *     `waiting.py` spinner), copilot from the verbatim strings in its
+ *     installed CLI bundle. Each matcher cites the invariant it was built from
+ *     ("seen: …").
  *   - `conservative` — best-effort from public docs/common knowledge
- *     (`opencode`, `gemini`, `copilot`, `cursor`, `goose`, `amp`, and the
+ *     (`opencode`, `gemini`, `cursor`, `goose`, `amp`, and the
  *     M25.4 breadth set: `devin`, `kimi`, `pi`, `grok`, `kiro`, `cline`,
  *     `droid`, `kilo`). Every matcher is HIGH-PRECISION (esc-to-interrupt /
  *     spinner / explicit y-n / "Do you want") so it can never false-positive
@@ -215,25 +217,59 @@ const AIDER: AgentManifest = {
   },
 };
 
+// Copilot draws dialogs in bordered panels ("│ ❯ 1. Yes") while its
+// conversation shares the same bottom region, so its markers are anchored to a
+// line edge: menu rows at line start (after up to 8 border/pointer characters)
+// and the working hint at line end. Prose that merely quotes a marker stays
+// silent.
+const COPILOT_LINE_START = "(?:^|\\n)[^\\n\\w]{0,8}";
+
 const COPILOT: AgentManifest = {
   id: "copilot",
   commands: ["copilot", "github-copilot", "github-copilot-cli"],
-  confidence: "conservative",
+  confidence: "tuned",
   states: {
-    // conservative — github-copilot-cli needs a GitHub account, so no live
-    // capture was taken. High-precision only.
+    // tuned — every marker is VERBATIM from the installed Copilot CLI 1.0.96
+    // bundle (`~/.copilot/pkg/<platform>/1.0.96/cli-main.js`); the layout
+    // around them is reconstructed from its components, pending a live
+    // capture. Structured elicitation forms have no distinctive chrome and
+    // are left to the authority layer.
     blocked: {
       any: [
-        { region: "bottom", contains: "(y/n)", caseInsensitive: true },
-        { region: "bottom", contains: "Select an option", caseInsensitive: true },
-        { region: "bottom", contains: "Allow", caseInsensitive: false },
+        // seen (source): every approval menu ends in a numbered reject row —
+        // "No, and tell Copilot what to do differently" (commands, edits,
+        // URLs) or "No, and tell Copilot why..." (MCP tools, memory,
+        // extensions). Only the row's head is required: a narrow pane wraps
+        // the rest of the label onto the next line.
+        {
+          region: "bottom",
+          regex: `${COPILOT_LINE_START}\\d+\\. No, and tell Copilot\\b`,
+        },
+        // seen (source): the startup folder-trust dialog question.
+        {
+          region: "bottom",
+          regex: `${COPILOT_LINE_START}Do you trust the files in this folder\\?`,
+        },
+        // seen (source): ask_user questions add a numbered freeform row,
+        // "Other (type your answer)", which becomes a "Type your answer..."
+        // input when selected.
+        {
+          region: "bottom",
+          regex: `${COPILOT_LINE_START}\\d+\\. (?:Other \\(type your answer\\)|Type your answer\\.\\.\\.)`,
+        },
+        // seen (source): the plain readline prompt shown during sign-in when
+        // the system keychain is unavailable.
+        { region: "bottom", contains: "Store token in plaintext config file? (y/N)" },
       ],
     },
     working: {
       any: [
-        { region: "bottom", contains: "esc to interrupt", caseInsensitive: true },
+        // seen (source): the turn's status line, "<intent> · <size> (Esc to
+        // cancel)". Settings pickers say "Esc to cancel." without the
+        // parentheses; the `hideToggleHelp` setting hides this hint.
+        { region: "bottom", regex: "\\(Esc to cancel\\)[^\\n\\w]{0,8}(?:\\n|$)" },
+        // Shared spinner convention; Copilot itself renders no braille frames.
         { region: "bottom", regex: BRAILLE_SPINNER },
-        { region: "title", regex: BRAILLE_SPINNER },
       ],
     },
   },

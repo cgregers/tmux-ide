@@ -1,15 +1,63 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { execFileSync } from "node:child_process";
 import {
   agentMetadataFor,
   agentManifestNeedsSnapshot,
   buildAgentEntry,
   excludeSidebarPanes,
   isListableSession,
+  listTeamSessions,
   rollupStatus,
   rollupWindows,
+  type PaneDetail,
 } from "./sessions.ts";
-import type { AgentStatus } from "../detect/classify.ts";
+import { createStatusTracker, type AgentStatus } from "../detect/classify.ts";
 import type { AgentManifest } from "../detect/manifest.ts";
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  execFileSync: vi.fn(() => ""),
+}));
+afterEach(() => vi.mocked(execFileSync).mockReset());
+
+describe("listTeamSessions pane detail", () => {
+  it.each(["", "working:100", "blocked:9999999999", "malformed"])(
+    "forwards raw authority without parsing it away (%j)",
+    (authority) => {
+      vi.mocked(execFileSync).mockImplementation((bin, args) => {
+        if (bin !== "tmux") return ""; // No real ps or tmux, even for fallback panes.
+        if (args?.[0] === "list-sessions") return "fixture\t0\t1";
+        if (args?.[0] === "list-panes")
+          return [
+            "fixture",
+            "%7",
+            "101",
+            "copilot",
+            authority,
+            "copilot",
+            "",
+            "",
+            "",
+            "",
+            "0",
+            "main",
+            "1",
+            "/fixture/project",
+            "Copilot",
+          ].join("\t");
+        return "";
+      });
+      const panes: PaneDetail[] = [];
+      listTeamSessions(createStatusTracker(), { onPane: (pane) => panes.push(pane) });
+      expect(panes).toHaveLength(1);
+      expect(panes[0]).toMatchObject({
+        paneId: "%7",
+        agent: "copilot",
+        authorityRaw: authority || null,
+      });
+    },
+  );
+});
 
 describe("excludeSidebarPanes", () => {
   it("drops panes marked as the app sidebar", () => {

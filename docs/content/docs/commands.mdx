@@ -74,8 +74,10 @@ See [Agent detection](/docs/agent-detection) for how agent states are decided.
 | --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
 | `tmux-ide integration install claude`                                             | Install Claude Code lifecycle hooks and refresh the bundled Claude skill        |
 | `tmux-ide integration install opencode`                                           | Install session-ID capture for future opencode sessions                         |
-| `tmux-ide integration uninstall <claude\|opencode>`                               | Remove only tmux-ide's integration entries                                      |
+| `tmux-ide integration install copilot`                                            | Install Copilot CLI lifecycle hooks; prints the cplt grant for sandboxed status |
+| `tmux-ide integration uninstall <claude\|opencode\|copilot>`                      | Remove only tmux-ide's integration entries                                      |
 | `tmux-ide integration status [--json]`                                            | Show discovered agents, integration state, and resume-ID capture                |
+| `tmux-ide integration status copilot [--json]`                                    | Show Copilot hook readiness; delivery is not verified                           |
 | `tmux-ide integration agent-teams [enable\|disable\|status] [--json]`             | Turn Claude Code agent teams on or off in `~/.claude/settings.json`             |
 | `tmux-ide agent explain <pane\|session> [--json]`                                 | Explain exactly how an agent state was classified                               |
 | `tmux-ide send <target> <message> [--no-enter] [--json]`                          | Type into a pane selected by ID, title, semantic name, or supported legacy role |
