@@ -119,10 +119,11 @@ const SAFE_SESSION_ID = /^[A-Za-z0-9_-]+$/;
  *  - opencode — the plugin integration (`integration install opencode`).
  *  - codex, cursor — automatic: the chrome updater probes the agent's own
  *    on-disk session state ({@link ./tui/detect/session-id.ts}).
- *  - copilot — no automatic capture (skipped with evidence — see the
- *    session-id module header); fires only for panes whose agent self-reported
- *    the id per the agent contract
- *    (`tmux set-option -p @agent_session_id <id>`), which any kind may do.
+ *  - copilot — the hooks integration (`integration install copilot`) records
+ *    ids for unsandboxed sessions. Sandboxed hooks send status-only drop
+ *    records; their bridge never stamps ids or hints, so it does not enable
+ *    this plain Copilot resume invocation for sandboxed conversations.
+ *    Sandbox-aware restore is future work. Any kind can also self-report an id.
  */
 export const AGENT_RESUME_COMMANDS: Record<string, (id: string) => string> = {
   claude: (id) => `claude --resume ${id}`,

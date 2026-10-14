@@ -18,12 +18,13 @@
 import { execFileSync } from "node:child_process";
 import { claudeIntegrationStatus } from "../tui/integrations/claude.ts";
 import { opencodeIntegrationStatus } from "../tui/integrations/opencode.ts";
+import { copilotIntegrationStatus } from "./copilot-integration.ts";
 
 /**
  * How a kind's `@agent_session_id` (the `restore --resume-agents` key) gets
  * captured:
- *  - `"hooks"`  — the agent's own lifecycle hooks stamp it (claude; needs
- *    `integration install`).
+ *  - `"hooks"`  — lifecycle hooks stamp it (claude, unsandboxed copilot; needs
+ *    `integration install`). Sandboxed Copilot deliberately does not capture ids.
  *  - `"plugin"` — an in-process plugin stamps it (opencode; needs
  *    `integration install`).
  *  - `"probe"`  — the chrome updater discovers it from the agent's own on-disk
@@ -47,7 +48,7 @@ export interface KnownAgent {
 
 /**
  * The agents tmux-ide recognizes. `integration: true` means we HAVE an installer
- * (claude's lifecycle hooks, opencode's plugin); the rest are detected via
+ * (claude/copilot lifecycle hooks, opencode's plugin); the rest are detected via
  * screen-manifest scraping only. `capture` records each kind's session-id
  * story ({@link CaptureMechanism}).
  */
@@ -58,7 +59,7 @@ export const KNOWN_AGENTS: readonly KnownAgent[] = [
   { id: "gemini", bin: "gemini", integration: false, capture: null },
   { id: "aider", bin: "aider", integration: false, capture: null },
   { id: "cursor", bin: "cursor-agent", integration: false, capture: "probe" },
-  { id: "copilot", bin: "copilot", integration: false, capture: null },
+  { id: "copilot", bin: "copilot", integration: true, capture: "hooks" },
 ];
 
 /** One probed agent: its registry facts plus what the PATH/integration probe found. */
@@ -82,7 +83,8 @@ export interface DiscoveredAgent {
    * (this does not verify hook delivery or project/managed settings overrides):
    * `"probe"` capture is automatic whenever the binary is present; hook/plugin
    * capture requires the integration to be installed; `null` capture is never
-   * active.
+   * active. Copilot's configured capture applies only to unsandboxed sessions;
+   * its sandbox drop bridge never records resumable ids.
    */
   captureActive: boolean;
 }
@@ -114,14 +116,15 @@ const defaultWhich: WhichRunner = (bin) => {
 };
 
 /**
- * Default integration probe: claude's hooks and opencode's plugin are the two
- * shipped installers. Reads the real settings/plugin file; any failure degrades
+ * Default integration probe: claude/copilot hooks and opencode's plugin.
+ * Reads user registration files; any failure degrades
  * to false so discovery never throws.
  */
 const defaultIntegrationProbe: IntegrationProbe = (agentId) => {
   try {
     if (agentId === "claude") return claudeIntegrationStatus().installed;
     if (agentId === "opencode") return opencodeIntegrationStatus().installed;
+    if (agentId === "copilot") return copilotIntegrationStatus().installed;
     return false;
   } catch {
     return false;

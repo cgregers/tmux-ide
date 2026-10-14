@@ -39,6 +39,9 @@ export interface RuntimeNamespace {
   readonly claudeSettingsPath: string;
   readonly claudeHookPath: string;
   readonly opencodeDir: string;
+  readonly copilotHookPath: string;
+  readonly copilotHooksDir: string;
+  readonly agentStateDir: string;
   readonly stateHome: string;
   readonly registryDir: string;
   readonly daemonInfoDir: string;
@@ -263,6 +266,19 @@ export function resolveRuntimeNamespace(
       ? join(integrationRoot, "opencode", "plugin")
       : join(nonEmpty(env, "XDG_CONFIG_HOME") ?? join(userHome, ".config"), "opencode", "plugin"),
   );
+  const copilotHookPath = scoped(
+    "TMUX_IDE_COPILOT_HOOK_PATH",
+    development
+      ? join(stateHome, "hooks", "copilot-state.sh")
+      : join(userHome, ".tmux-ide", "hooks", "copilot-state.sh"),
+  );
+  const copilotHooksDir = scoped(
+    "TMUX_IDE_COPILOT_HOOKS_DIR",
+    development
+      ? join(integrationRoot, ".copilot", "hooks")
+      : join(nonEmpty(env, "COPILOT_HOME") ?? join(userHome, ".copilot"), "hooks"),
+  );
+  const agentStateDir = scoped("TMUX_IDE_AGENT_STATE_DIR", join(stateHome, "agent-state"));
   if (development) {
     for (const key of [
       "TMUX_IDE_TUI_LOG",
@@ -291,6 +307,9 @@ export function resolveRuntimeNamespace(
     claudeSettingsPath,
     claudeHookPath,
     opencodeDir,
+    copilotHookPath,
+    copilotHooksDir,
+    agentStateDir,
     stateHome,
     registryDir,
     daemonInfoDir,
@@ -322,6 +341,9 @@ export function runtimeNamespaceEnvironment(
           TMUX_IDE_CLAUDE_DIR: namespace.claudeDir,
           TMUX_IDE_CLAUDE_SETTINGS: namespace.claudeSettingsPath,
           TMUX_IDE_OPENCODE_DIR: namespace.opencodeDir,
+          TMUX_IDE_COPILOT_HOOK_PATH: namespace.copilotHookPath,
+          TMUX_IDE_COPILOT_HOOKS_DIR: namespace.copilotHooksDir,
+          TMUX_IDE_AGENT_STATE_DIR: namespace.agentStateDir,
         }
       : {}),
     [STATE_HOME_ENV]: namespace.stateHome,

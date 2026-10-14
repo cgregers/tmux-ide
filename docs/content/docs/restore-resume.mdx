@@ -73,14 +73,14 @@ You can make this the default in `~/.tmux-ide/config.json`:
 A pane resumes only when tmux-ide knows that agent's **resume command** and
 captured the pane's **session id** while the agent ran. Support differs by agent:
 
-| Agent                     | Resume invocation            | Session-id capture                                                           |
-| ------------------------- | ---------------------------- | ---------------------------------------------------------------------------- |
-| Claude Code               | `claude --resume <id>`       | automatic once `tmux-ide integration install claude` is set up (hooks)       |
-| Codex CLI                 | `codex resume <id>`          | **automatic** — the updater reads the session's own rollout file             |
-| Cursor CLI                | `cursor-agent --resume <id>` | **automatic** — the updater reads the CLI's chat store                       |
-| opencode                  | `opencode --session <id>`    | automatic once `tmux-ide integration install opencode` is set up (plugin)    |
-| Copilot CLI               | `copilot --resume=<id>`      | not automatic (no stable capture surface yet) — self-report works, see below |
-| gemini, aider, goose, amp | —                            | no verified native resume invocation                                         |
+| Agent                     | Resume invocation            | Session-id capture                                                              |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------------------- |
+| Claude Code               | `claude --resume <id>`       | automatic once `tmux-ide integration install claude` is set up (hooks)          |
+| Codex CLI                 | `codex resume <id>`          | **automatic** — the updater reads the session's own rollout file                |
+| Cursor CLI                | `cursor-agent --resume <id>` | **automatic** — the updater reads the CLI's chat store                          |
+| opencode                  | `opencode --session <id>`    | automatic once `tmux-ide integration install opencode` is set up (plugin)       |
+| Copilot CLI               | `copilot --resume=<id>`      | hooks via `tmux-ide integration install copilot`, **unsandboxed sessions only** |
+| gemini, aider, goose, amp | —                            | no verified native resume invocation                                            |
 
 Check what's active on your machine:
 
@@ -88,8 +88,18 @@ Check what's active on your machine:
 tmux-ide integration status
 ```
 
-For an agent in the table whose id isn't captured automatically, such as
-Copilot CLI, the agent can record its own id; it then resumes like the rest:
+Unsandboxed Copilot hooks capture `@agent_session_id` directly. Copilot inside
+Nav's cplt sandbox reports state through a [status-only drop bridge](/docs/agent-detection#copilot-cli-hooks-integration),
+which deliberately never stamps a session id or agent hint. Sandbox-aware
+restore is future work: do not self-report a sandboxed Copilot session id into
+this plain resume path, which would relaunch it outside cplt.
+This guarantee holds only while cplt withholds the tmux socket. If the socket is
+granted through cplt `allow.socket` ("Unix socket paths to allow access to"), the
+hook stamps the session id and agent hint directly, and `restore --resume-agents`
+would relaunch that conversation outside cplt — so do not grant the tmux socket.
+
+An agent can also record its own id; restore uses it only when a verified
+resume invocation exists in the table:
 
 ```bash
 tmux set-option -p @agent_session_id <its-session-id>

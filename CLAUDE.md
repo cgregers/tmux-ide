@@ -9,6 +9,7 @@ Positioning: other tools rebuild the terminal to understand agents; tmux-ide tea
 ```bash
 tmux-ide adopt <session>            # add the dock to a session you already have
 tmux-ide integration install claude # ground-truth agent status via Claude Code hooks (+ skill sync)
+tmux-ide integration install copilot # Copilot CLI hooks; cplt uses a status-only host bridge
 tmux-ide                            # the app (Home + Terminals) — or launches project config if present
 tmux-ide restore --resume-agents    # after a tmux server death: rebuild everything, revive claudes
 tmux-ide app [session]              # the app explicitly; installed releases ship the compiled runtime (retry: update --tui-binary)
@@ -35,7 +36,7 @@ Full-screen OpenTUI app (production entry `tui/mirror/runtime/application-entry.
 
 ## The agent contract (two-layer detection)
 
-1. **Authority** (ground truth): lifecycle hooks stamp pane-local options. `tmux-ide integration install claude` wires Claude Code's hooks (UserPromptSubmit/PreToolUse→working, Notification→blocked, Stop→done, SessionEnd→idle; also records `@agent_session_id` — the `claude --resume` key restore uses). ANY agent can self-report the same way, no integration needed:
+1. **Authority** (ground truth): lifecycle hooks stamp pane-local options. `tmux-ide integration install claude` wires Claude Code's hooks (UserPromptSubmit/PreToolUse→working, Notification→blocked, Stop→done, SessionEnd→idle; also records `@agent_session_id` — the `claude --resume` key restore uses). `tmux-ide integration install copilot` registers Copilot CLI user hooks: unsandboxed sessions stamp state/hint/id directly; cplt sessions send status-only drop records to the host updater, never resume ids or hints. Grant only the printed `agentStateDir`, never `~/.tmux-ide`; grant holders can read, forge or hide another Copilot pane's status (including notifications and wait automation). ANY agent can self-report the same way, no integration needed:
    ```bash
    tmux set-option -p @agent_state "working:$(date +%s)"   # working|blocked|done|idle
    ```
@@ -46,7 +47,7 @@ Full-screen OpenTUI app (production entry `tui/mirror/runtime/application-entry.
 
 - Fleet: `team --json` · `events [--follow]` · `wait agent-status <s> --status <x>` · `wait output <pane> --match <re>` · `send <target> <msg>` · `agent explain <pane>`
 - Chrome: `adopt <s>` / `adopt --all` / `unadopt <s>` · `statusline` · `menu` · `cheatsheet` · `sidebar-toggle` · `popup <widget>` · `welcome`
-- Lifecycle: `restore [--dry-run] [--run-commands] [--resume-agents]` · `worktree create|open|list|remove <branch>` · `update [--dry-run]` · `skill-sync` · `integration install|uninstall|status claude` · `doctor`
+- Lifecycle: `restore [--dry-run] [--run-commands] [--resume-agents]` · `worktree create|open|list|remove <branch>` · `update [--dry-run]` · `skill-sync` · `integration install|uninstall|status <claude|opencode|copilot>` · `doctor`
 - Projects: launch (bare `tmux-ide`), `init`, `stop`, `restart`, `attach`, `ls`, `status`, `inspect`, `validate`, `detect [--write]`, `config` (get/set/add-pane/…)
 - Mission runtime wiring is future work; do not present task/mission orchestration as a current surface.
 
@@ -76,11 +77,11 @@ Always `tmux-ide validate --json` after config mutations. When helping a user de
   - `tui/chrome/` — the dock: statusline (bar builder, adopt/unadopt, ALL key/mouse binds incl. prefix twins + kitty user-keys fallbacks + LEGACY_BINDS cleanup), updater (the `_tmux-ide-chrome` background tick: status vars, chips, events, notifications, snapshots, update checks), menu, cheatsheet, panels, sidebar, chip, notify, events, snapshot, welcome, kitty-keys.
   - `tui/detect/` — two-layer detection: classify (authority parse + tracker), process-tree, manifest(+loader/corpus), snapshot.
   - `tui/team/` — the cockpit app (index.tsx: standalone home screen / picker / popup modes), sessions/projects data layer, home, tree/fuzzy/nav/mouse/keymap, report (fleet JSON), CONTROL.md.
-  - `tui/integrations/` — claude.ts (hooks install/uninstall, settings merge; `TMUX_IDE_CLAUDE_SETTINGS` override).
+  - `tui/integrations/` — claude.ts (hooks install/uninstall, settings merge; `TMUX_IDE_CLAUDE_SETTINGS` override), opencode.ts (session-id plugin).
   - `tui/mirror/` — the app (`tmux-ide app`); production code is `runtime/` + `workspace/` (see the app section above). The tmux protocol library it and `terminal/mirror` share now lives in the engine at `terminal/protocol/` (see its README); imports flow adapter → core only, enforced by `src/__tests__/engine-import-dag.test.ts`.
   - `tui/main.ts` + `tui/compiled.ts` + `scripts/build-tui.mjs` — the single-binary TUI (`bun build --compile` → dist/tui/tmux-ide-tui; resolution order: dev checkout → compiled binary → honest error).
   - `widgets/` — OpenTUI/Solid panels (explorer/changes/preview/config/setup/sidebar) + lib (theme mapped to app-config tokens, grammar, help-overlay); resolve.ts maps workspace `type:` panes (bundle-safe paths, spawns from REPO root for the bunfig preload).
-  - `lib/` — app-config (THE typed config: keys/theme/updater/notifications/restore/updates/integrations; `TMUX_IDE_CONFIG` path override), restore, worktree, update(+check), agent-discovery, skill-sync, project-registry.
+  - `lib/` — app-config (THE typed config: keys/theme/updater/notifications/restore/updates/integrations; `TMUX_IDE_CONFIG` path override), restore, worktree, update(+check), agent-discovery, copilot-integration (Copilot CLI user hooks + status-only cplt drop delivery), skill-sync, project-registry.
   - `command-center/` — HTTP API (secondary surface).
 - `packages/tmux-bridge` (process helpers) · `packages/contracts` (workspace + compatibility schemas) · `skill/SKILL.md` (the agent-facing manual, version-marked, synced to `~/.claude/skills/tmux-ide/` by postinstall / `tmux-ide update` / `tmux-ide skill-sync` / `integration install`).
 - `docs/` — the website (Next/fumadocs). Gate: `pnpm docs:build`.

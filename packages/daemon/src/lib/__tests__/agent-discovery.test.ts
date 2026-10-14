@@ -1,23 +1,29 @@
 /**
  * Unit tests for agent auto-discovery — the pure registry and the injectable
  * PATH/integration probe. No test shells out or reads the real settings: the
- * which-runner and the integration probe are both injected.
+ * which-runner is injected; integration probes are injected or use explicit
+ * temporary fixture paths.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   KNOWN_AGENTS,
   discoverAgents,
   presentAgents,
   type WhichRunner,
 } from "../agent-discovery.ts";
+import { installCopilotIntegration } from "../copilot-integration.ts";
 
 describe("KNOWN_AGENTS", () => {
-  it("ships installers for exactly claude (hooks) and opencode (plugin)", () => {
+  it("ships installers for claude/copilot hooks and the opencode plugin", () => {
     const claude = KNOWN_AGENTS.find((a) => a.id === "claude");
     expect(claude).toEqual({ id: "claude", bin: "claude", integration: true, capture: "hooks" });
     expect(KNOWN_AGENTS.filter((a) => a.integration).map((a) => a.id)).toEqual([
       "claude",
       "opencode",
+      "copilot",
     ]);
     expect(KNOWN_AGENTS.map((a) => a.id)).toEqual([
       "claude",
@@ -46,7 +52,7 @@ describe("KNOWN_AGENTS", () => {
       gemini: null,
       aider: null,
       cursor: "probe",
-      copilot: null,
+      copilot: "hooks",
     });
   });
 });
@@ -110,10 +116,48 @@ describe("discoverAgents", () => {
   });
 
   it("never marks capture-less kinds active", () => {
-    const which = foundAt({ copilot: "/usr/bin/copilot", gemini: "/usr/bin/gemini" });
+    const which = foundAt({ aider: "/usr/bin/aider", gemini: "/usr/bin/gemini" });
     const agents = discoverAgents(which, () => true);
-    expect(agents.find((a) => a.id === "copilot")!.captureActive).toBe(false);
+    expect(agents.find((a) => a.id === "aider")!.captureActive).toBe(false);
     expect(agents.find((a) => a.id === "gemini")!.captureActive).toBe(false);
+  });
+
+  it("reports Copilot hooks configured for unsandboxed capture only when installed", () => {
+    const which = foundAt({ copilot: "/fixture/bin/copilot" });
+    expect(discoverAgents(which, () => false).find((a) => a.id === "copilot")).toMatchObject({
+      integration: true,
+      installed: false,
+      capture: "hooks",
+      captureActive: false,
+    });
+    // This flag is configuration readiness, not proof of delivery or sandboxed resume capture.
+    expect(discoverAgents(which, () => true).find((a) => a.id === "copilot")).toMatchObject({
+      integration: true,
+      installed: true,
+      capture: "hooks",
+      captureActive: true,
+    });
+  });
+
+  it("uses Copilot integration readiness in the default probe without reading other agents' state", () => {
+    const root = mkdtempSync(join(tmpdir(), "copilot-discovery-"));
+    const paths = {
+      scriptPath: join(root, "host-hooks", "copilot.sh"),
+      hooksDir: join(root, "user-hooks"),
+      agentStateDir: join(root, "drop"),
+    };
+    try {
+      vi.stubEnv("TMUX_IDE_COPILOT_HOOK_PATH", paths.scriptPath);
+      vi.stubEnv("TMUX_IDE_COPILOT_HOOKS_DIR", paths.hooksDir);
+      vi.stubEnv("TMUX_IDE_AGENT_STATE_DIR", paths.agentStateDir);
+      const which = foundAt({ copilot: "/fixture/bin/copilot" });
+      expect(discoverAgents(which).find((a) => a.id === "copilot")!.installed).toBe(false);
+      installCopilotIntegration(paths);
+      expect(discoverAgents(which).find((a) => a.id === "copilot")!.installed).toBe(true);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("leaves installed false when claude is present but the integration is not installed", () => {

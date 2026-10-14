@@ -6,9 +6,10 @@ import { resolveRuntimeNamespace } from "../../lib/runtime-namespace.ts";
  * WHY: `tmux-ide restore --resume-agents` revives a pane's conversation via its
  * kind's verified resume invocation ({@link ../../restore.ts AGENT_RESUME_COMMANDS}),
  * keyed on the pane-local `@agent_session_id` option. Claude's integration
- * records it from lifecycle hooks; opencode's integration records it from a
- * plugin. codex and cursor-agent expose NO hook surface, but both keep their
- * session's identity ON DISK in a deterministic place — the exact layout their
+ * records it from lifecycle hooks, as does unsandboxed Copilot; opencode's
+ * integration records it from a plugin. codex and cursor-agent expose NO hook
+ * surface, but both keep their session's identity ON DISK in a deterministic
+ * place — the exact layout their
  * own `resume` pickers read. This module probes that, per pane, and stamps the
  * option so restore needs no changes.
  *
@@ -42,23 +43,17 @@ import { resolveRuntimeNamespace } from "../../lib/runtime-namespace.ts";
  *    notes), so the cursor probes are exercised against fixtures shaped from
  *    the real on-disk layout.
  *
- *  - `claude` / `opencode`: captured by their integrations (hooks / plugin) —
+ *  - `claude` / `opencode` / unsandboxed `copilot`: captured by their
+ *    integrations (hooks / plugin) —
  *    deliberately NOT probed here; an integration-stamped id always wins
  *    because capture only ever fills EMPTY stamps.
  *
- *  - `copilot`: SKIPPED (documented, revisit with a real install). Two known
- *    surfaces, neither shippable blind: (1) Copilot CLI has Claude-style
- *    lifecycle hooks (docs.github.com/en/copilot/reference/hooks-configuration)
- *    whose payloads carry the session id + cwd — the RIGHT future path, an
- *    `integration install copilot` — but the payload key casing is known to
- *    flip (sessionId vs session_id) and the hooks-config schema couldn't be
- *    verified against a real install (the CLI isn't installed here); a wrong
- *    hook config risks breaking the user's copilot startup. (2) Disk probing
- *    `~/.copilot/session-state/<uuid>/workspace.yaml` (id/cwd/created_at) is
- *    viable in principle but the field shape is confirmed only by secondary
- *    sources, `--resume` currently spawns phantom EMPTY session dirs
- *    (github/copilot-cli#3908) that break newest-dir heuristics, and the
- *    legacy `history-session-state/` rename shows the layout still moves.
+ *  - `copilot` (CLI 1.0.96): `integration install copilot` registers documented
+ *    camelCase user-level hooks, whose `sessionId` is captured when the hook
+ *    can reach its tmux server. Inside cplt, the status-only drop bridge
+ *    deliberately captures NO id or hint: restore must not relaunch a
+ *    sandboxed conversation as unsandboxed `copilot --resume=<id>`.
+ *    Sandbox-aware restore is future work; no Copilot disk probing here.
  *
  *  - `gemini` / `aider` / `goose` / `amp`: SKIPPED — no verified native resume
  *    invocation in {@link ../../restore.ts AGENT_RESUME_COMMANDS}, so a
@@ -320,8 +315,8 @@ function probeKind(pane: CapturePane, kind: "codex" | "cursor", io: ProbeIo): st
 }
 
 /**
- * The kinds this module captures for, with their probes. claude/opencode are
- * integration-captured (hooks/plugin); the rest of the resume table has no
+ * The kinds this module captures for, with their probes. claude/opencode and
+ * unsandboxed copilot are integration-captured (hooks/plugin); the rest has no
  * defensible disk surface (see the header verdicts).
  */
 export const CAPTURE_PROBES: Record<string, (pane: CapturePane, io: ProbeIo) => string | null> = {

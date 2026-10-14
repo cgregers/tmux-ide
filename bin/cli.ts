@@ -36,6 +36,8 @@ import {
 import { IdeError } from "../packages/daemon/src/lib/errors.ts";
 import { printCommandError } from "../packages/daemon/src/lib/output.ts";
 import { stateHome } from "../packages/daemon/src/lib/state-home.ts";
+import { resolveRuntimeNamespace } from "../packages/daemon/src/lib/runtime-namespace.ts";
+import { shellEscape } from "../packages/daemon/src/lib/shell.ts";
 import {
   wantsHostedApp,
   hostedEnvVars,
@@ -271,8 +273,9 @@ ${bold("Usage:")}
   ${cyan("tmux-ide unadopt")} <session>  ${dim("Remove the status bar")}
   ${cyan("tmux-ide integration install claude")}  ${dim("Claude Code lifecycle hooks + managed tmux-ide skill")}
   ${cyan("tmux-ide integration install opencode")} ${dim("Capture opencode session ids for restore --resume-agents")}
-  ${cyan("tmux-ide integration uninstall")} <claude|opencode> ${dim("Remove tmux-ide's integration entries")}
-  ${cyan("tmux-ide integration status")} [--json]  ${dim("Show discovered agents, integration state, and resume-id capture")}
+  ${cyan("tmux-ide integration install copilot")} ${dim("Copilot CLI lifecycle hooks, including status-only cplt delivery")}
+  ${cyan("tmux-ide integration uninstall")} <claude|opencode|copilot> ${dim("Remove tmux-ide's integration entries")}
+  ${cyan("tmux-ide integration status")} [copilot] [--json]  ${dim("Show integration readiness and resume-id capture")}
   ${cyan("tmux-ide integration agent-teams")} [enable|disable|status] [--json] ${dim("Claude Code agent teams (installer enables; opt-out respected)")}
   ${cyan("tmux-ide agent explain")} <pane> [--json]  ${dim("Debug how a pane's agent state is detected")}
   ${cyan("tmux-ide cheatsheet")}         ${dim("Print the key cheat sheet (⌥k / [ ? keys ] popup)")}
@@ -1548,14 +1551,15 @@ try {
       const sub = positionals[1];
       const agent = positionals[2];
       // `status` and `offer` need no agent arg; install/uninstall take a kind
-      // we ship an integration for (claude hooks, opencode plugin).
+      // we ship an integration for (claude/copilot hooks, opencode plugin).
       const needsAgent = sub === "install" || sub === "uninstall";
-      const installable = agent === "claude" || agent === "opencode";
+      const installable = agent === "claude" || agent === "opencode" || agent === "copilot";
       if (!sub || (needsAgent && !installable)) {
         console.error(
-          "Usage: tmux-ide integration <install|uninstall|status|offer|agent-teams> [claude|opencode]\n" +
+          "Usage: tmux-ide integration <install|uninstall|status|offer|agent-teams> [claude|opencode|copilot]\n" +
             "  install    claude: hook lifecycle events into tmux pane state\n" +
             "             opencode: plugin that records the session id for restore --resume-agents\n" +
+            "             copilot: lifecycle hooks with a status-only cplt drop bridge\n" +
             "  uninstall  remove exactly the tmux-ide entries for that agent\n" +
             "  status     list discovered agents + integration/capture state\n" +
             "  offer      one-time first-adopt install prompt (used by the popup)\n" +
@@ -1599,6 +1603,75 @@ try {
         if (json) console.log(JSON.stringify(result, null, 2));
         else console.log(tilde(result.message));
         if (result.action === "invalid") process.exit(1);
+        break;
+      }
+      if ((needsAgent || sub === "status") && agent === "copilot") {
+        const cp = await import("../packages/daemon/src/lib/copilot-integration.ts");
+        if (sub === "install") {
+          const result = cp.installCopilotIntegration();
+          const dirArg = /^[A-Za-z0-9_./-]+$/u.test(result.agentStateDir)
+            ? result.agentStateDir
+            : shellEscape(result.agentStateDir);
+          const cpltGrantCommand = `cplt config set -g allow.write ${dirArg}`;
+          const warning =
+            "Grant exactly this folder, never ~/.tmux-ide itself: hooks there run on the host for unsandboxed agents, and cplt skips granting scripts under writable trees.";
+          if (json)
+            console.log(
+              JSON.stringify(
+                { ...result, cpltGrantCommand, warning, deliveryVerified: false },
+                null,
+                2,
+              ),
+            );
+          else {
+            console.log(`hook script: ${result.scriptPath}`);
+            console.log(`hooks file:  ${result.hooksFilePath}`);
+            console.log(cpltGrantCommand);
+            console.log(`Warning: ${warning}`);
+            console.log(
+              "configured — runtime hook delivery unverified; sandboxed sessions report state only, not resume ids.",
+            );
+          }
+        } else if (sub === "uninstall") {
+          const result = cp.uninstallCopilotIntegration();
+          const { agentStateDir } = resolveRuntimeNamespace();
+          const dirArg = /^[A-Za-z0-9_./-]+$/u.test(agentStateDir)
+            ? agentStateDir
+            : shellEscape(agentStateDir);
+          const cpltRevokeCommand = `cplt config set -g allow.write ${dirArg} --unset`;
+          if (json) console.log(JSON.stringify({ ...result, cpltRevokeCommand }, null, 2));
+          else {
+            console.log(
+              result.wasInstalled
+                ? "uninstalled — hooks file removed (script and drop folder retained)"
+                : result.issues.length
+                  ? `not uninstalled — foreign, edited or unsafe hooks file left untouched (${result.issues.join(", ")})`
+                  : "was not installed",
+            );
+            console.log(cpltRevokeCommand);
+          }
+        } else {
+          const status = cp.copilotIntegrationStatus();
+          if (json) console.log(JSON.stringify(status, null, 2));
+          else {
+            console.log(`hooks file: ${status.hooksFilePath}`);
+            for (const key of [
+              "installed",
+              "scriptExists",
+              "scriptCurrent",
+              "scriptExecutable",
+              "hooksFileOwned",
+              "registrationComplete",
+              "dropDirExists",
+              "deliveryVerified",
+            ] as const)
+              console.log(`${key}: ${status[key]}`);
+            console.log(`issues: ${status.issues.join(", ") || "none"}`);
+            console.log(
+              "Session-id capture applies only to unsandboxed Copilot; sandboxed resume is not supported by this integration.",
+            );
+          }
+        }
         break;
       }
       if (needsAgent && agent === "opencode") {
@@ -1732,8 +1805,11 @@ try {
         const { discoverAgents } = await import("../packages/daemon/src/lib/agent-discovery.ts");
         const agents = discoverAgents();
         const claude = mod.claudeIntegrationStatus();
+        const { copilotIntegrationStatus } =
+          await import("../packages/daemon/src/lib/copilot-integration.ts");
+        const copilot = copilotIntegrationStatus();
         if (json) {
-          console.log(JSON.stringify({ agents, claude }, null, 2));
+          console.log(JSON.stringify({ agents, claude, copilot }, null, 2));
           break;
         }
         for (const a of agents) {
@@ -1752,6 +1828,7 @@ try {
                 ? ` · session-id capture: ${a.capture} ✓`
                 : ` · session-id capture: ${a.capture} (install to enable)`;
             else capture = " · session-id capture: none";
+            if (a.id === "copilot") capture += " (unsandboxed only; sandboxed sessions: none)";
           }
           console.log(`  ${a.id.padEnd(10)} ${state}${capture}`);
           if (a.id === "claude") {
@@ -1762,6 +1839,10 @@ try {
               console.log(`    repair: ${claude.repairCommand}`);
             console.log(`    ${claude.guidance}`);
           }
+          if (a.id === "copilot")
+            console.log(
+              `    user-hooks readiness: ${copilot.issues.join(", ") || "ready"}; runtime delivery unverified`,
+            );
         }
       }
       break;
