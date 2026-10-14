@@ -44,7 +44,7 @@ function fixture(t) {
     entry,
     source
       .replace("# Native alpha is explicit;", override + "# Native alpha is explicit;")
-      .replace("f867f6c1e881e3a821fdcb555a4b4c1b4291549a68a3e78b362577a6d8a71f6e", digest),
+      .replace("586cdd1b094169bbc07373bc36974a234893f3221fa85e3cc1584591857b20f4", digest),
   );
   const paths = {
     TEST_NATIVE_ARGS: join(root, "native-args"),
