@@ -2,7 +2,9 @@
 
 - Alpha polish (2026-10-14): Home/Terminals share the native titlebar beside
   the macOS traffic lights, using Herdr titlebar move/double-click behavior and
-  existing SVG assets. Interactive tabs and sidebar toggle stop drag propagation;
+  existing SVG assets. Follow-up styling directly adapts Herdr `window/tab_strip.rs`
+  full-height cells, one-pixel dividers, primary wash and `text_on` contrast.
+  Home/Terminals remain fixed destinations. Interactive tabs and sidebar toggle stop drag propagation;
   retained session and daemon-owned tmux window strips remain separate.
   Selected sidebar rows use measured, one-time reveal inspired by Herdr sidebar
   scrolling, while manual scrolling and keyboard navigation retain ownership.

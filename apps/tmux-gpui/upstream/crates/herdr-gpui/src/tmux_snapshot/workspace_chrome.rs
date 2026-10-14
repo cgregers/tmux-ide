@@ -96,8 +96,8 @@ impl SnapshotView {
             .h(px(APPLICATION_TABS_HEIGHT))
             .flex_shrink_0()
             .flex()
-            .items_end()
-            .gap_1()
+            .items_center()
+            .bg(rgb(theme.surface))
             .pr_2();
         for (id, label, tab, selected) in [
             (

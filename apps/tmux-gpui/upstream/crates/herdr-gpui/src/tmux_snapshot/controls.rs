@@ -133,7 +133,8 @@ pub(super) fn tab(
         .child(div().min_w_0().truncate().child(label.into()))
 }
 
-/// Fixed application destinations sit inside the draggable native titlebar.
+/// Adapt Herdr window/tab_strip.rs: contiguous full-height cells, a single
+/// divider and primary wash for selection. These destinations are not closable.
 pub(super) fn titlebar_tab(
     id: &'static str,
     label: &'static str,
@@ -141,26 +142,33 @@ pub(super) fn titlebar_tab(
     selected: bool,
     theme: &Theme,
 ) -> Stateful<Div> {
+    let background = if selected {
+        theme.primary_wash()
+    } else {
+        theme.surface
+    };
     let foreground = if selected {
-        theme.foreground
+        theme.text_on(background)
     } else {
         theme.muted
     };
-    let hover = theme.active;
+    // Keep selection unmistakable while hovering the current destination.
+    let hover = if selected { background } else { theme.active };
     div()
         .id(id)
-        .h(px(30.))
+        .h_full()
         .min_w(px(108.))
         .flex_none()
         .flex()
         .items_center()
         .gap(px(CONTENT_GAP))
         .px(px(14.))
-        .rounded_t(px(8.))
+        .border_r_1()
+        .border_color(rgb(theme.active))
         .text_size(px(LABEL_SIZE))
         .font_weight(FontWeight::MEDIUM)
         .text_color(rgb(foreground))
-        .when(selected, |tab| tab.bg(rgb(theme.surface)))
+        .bg(rgb(background))
         .cursor_pointer()
         .hover(move |tab| tab.bg(rgb(hover)))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
