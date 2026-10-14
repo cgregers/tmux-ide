@@ -72,6 +72,7 @@ fn make_view(
         wheel: crate::terminal::WheelRemainder::default(),
         browser_request: 7,
         browser_state: browser::State {
+            request: 7,
             surface: browser::Surface::Home,
             home_phase: browser::HomePhase::Live,
             input_ready: true,
@@ -170,3 +171,6 @@ mod context;
 
 #[path = "tests/preferences.rs"]
 mod preferences;
+
+#[path = "tests/fleet_admission.rs"]
+mod fleet_admission;

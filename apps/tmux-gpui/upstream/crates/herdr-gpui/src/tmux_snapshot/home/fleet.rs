@@ -30,7 +30,11 @@ impl SnapshotView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.browser_commands.is_none() || request != self.browser_request {
+        if self.browser_commands.is_none()
+            || request != self.browser_request
+            || !self.presence.ready()
+            || self.browser_state.request != request
+        {
             return;
         }
         let Some(session) = self
@@ -63,7 +67,10 @@ impl SnapshotView {
         let theme = self.theme();
         let request = self.browser_request;
         let token = session.selection.clone();
-        let enabled = token.is_some() && self.browser_commands.is_some();
+        let enabled = token.is_some()
+            && self.browser_commands.is_some()
+            && self.presence.ready()
+            && self.browser_state.request == request;
         div()
             .id(("fleet-session", index * 128 + row))
             .debug_selector(move || format!("fleet-session-{index}-{row}"))
@@ -211,7 +218,10 @@ impl SnapshotView {
                     continue;
                 }
                 let token = server.selection.clone();
-                let enabled = token.is_some() && self.browser_commands.is_some();
+                let enabled = token.is_some()
+                    && self.browser_commands.is_some()
+                    && self.presence.ready()
+                    && self.browser_state.request == request;
                 let selected =
                     self.browser_state
                         .selected_server
