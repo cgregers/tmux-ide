@@ -12107,7 +12107,6 @@ var init_tui_binary = __esm({
     MAX_CHECKSUM_MANIFEST_BYTES = 4 * 1024;
     SUPPORTED = {
       "darwin-arm64": "darwin-arm64",
-      "darwin-x64": "darwin-x64",
       "linux-x64": "linux-x64",
       "linux-arm64": "linux-arm64"
     };

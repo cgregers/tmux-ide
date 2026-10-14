@@ -127,6 +127,7 @@ for (const [label, failure] of [
   ["archive extraction failure", { MOCK_TAR_FAIL: "1" }],
   ["unsupported operating system", { MOCK_OS: "FreeBSD" }],
   ["unsupported architecture", { MOCK_ARCH: "riscv64" }],
+  ["unsupported Intel Mac", { MOCK_OS: "Darwin", MOCK_ARCH: "x86_64" }],
   ["unsupported libc", { MOCK_OS: "Linux", MOCK_MUSL: "1" }],
   ["mismatched CLI version", { MOCK_BAD_VERSION: "1" }],
   ["TUI download failure", { MOCK_TUI_FAIL: "1" }],
