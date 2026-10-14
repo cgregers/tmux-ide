@@ -354,8 +354,13 @@ export async function installApp({
         ]);
         if (await exists(destination)) {
           const existing = await versionRecord(versions, version, token);
-          if (prior?.version !== version || existing.digest !== digest)
+          if ((prior && prior.version !== version) || existing.digest !== digest)
             throw new Error("Version ID is already used");
+          // Detach deliberately retains versions. Re-admit the exact owned bytes,
+          // including a fresh signature check of the retained app, before relinking.
+          const retainedIdentity = await lstat(destination);
+          const retainedAppIdentity = await lstat(existing.app);
+          if (!prior) await verified(existing.app, verify, existing.digest);
           if (beforeActivate) await beforeActivate();
           await assertDirectories([
             [root, rootIdentity],
@@ -368,6 +373,17 @@ export async function installApp({
             throw new Error("Install owner changed");
           if ((await digestTree(app)) !== digest)
             throw new Error("Staged app changed before activation");
+          await assertDirectories([
+            [destination, retainedIdentity],
+            [existing.app, retainedAppIdentity],
+          ]);
+          const retained = await versionRecord(versions, version, token);
+          if (
+            retained.digest !== existing.digest ||
+            retained.previous !== existing.previous ||
+            retained.bundle !== existing.bundle
+          )
+            throw new Error("Retained version changed before activation");
           await activate(root, version, prior, versions, token);
           return {
             version,
@@ -489,7 +505,7 @@ function deadProcess(pid) {
     process.kill(pid, 0);
   } catch (error) {
     if (error.code === "ESRCH") return;
-    throw new Error("Transaction process ownership unknown");
+    throw new Error("Transaction process ownership unknown", { cause: error });
   }
   throw new Error("Transaction process is still live");
 }

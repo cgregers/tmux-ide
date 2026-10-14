@@ -1,6 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync } from "node:fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  readdirSync,
+  symlinkSync,
+  readlinkSync,
+  existsSync,
+  lstatSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -81,7 +92,7 @@ case "$url" in *.tar.gz) [ -z "\${TEST_CORRUPT_ARCHIVE:-}" ] || printf bad >> "$
 test("pins the reviewed alpha assets and requires HTTPS redirects", () => {
   assert.match(
     source,
-    /installer_sha=17cf01adb3d2d46f2b8f9d56c603d4942974b3ec097edd022b621cbb0c0c21c1/,
+    /installer_sha=a3819360478f4231cdb68cfb7ce0802659ac94e3bc9b8722c06d260050759ccc/,
   );
   assert.match(
     source,
@@ -148,4 +159,66 @@ test("checksum/network/verifier failures propagate and remove staging", (t) => {
     assert.notEqual(result.status, 0);
     assert.deepEqual(readdirSync(f.temp), []);
   }
+});
+
+function entry(f) {
+  return join(f.home, "Applications/Tmux IDE Alpha.app");
+}
+function target(f) {
+  return join(f.home, "Library/Application Support/tmux-ide/native-alpha/TmuxIDE.app");
+}
+test("install update and rollback retain one exact Applications link", (t) => {
+  const f = fixture(t);
+  for (const args of [[], ["--update"], ["--rollback"]]) {
+    const result = f.run(args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readlinkSync(entry(f)), target(f));
+  }
+});
+for (const kind of ["file", "directory", "foreign-link"]) {
+  test(`refuses foreign Applications ${kind} before installer mutation`, (t) => {
+    const f = fixture(t);
+    mkdirSync(join(f.home, "Applications"));
+    if (kind === "file") writeFileSync(entry(f), "foreign");
+    else if (kind === "directory") mkdirSync(entry(f));
+    else symlinkSync("/foreign/app", entry(f));
+    for (const args of [[], ["--update"], ["--rollback"], ["--uninstall"]]) {
+      assert.notEqual(f.run(args).status, 0);
+      assert.ok(!existsSync(f.receipt));
+      assert.ok(!existsSync(f.downloads));
+      assert.ok(lstatSync(entry(f)));
+    }
+    if (kind === "foreign-link") assert.equal(readlinkSync(entry(f)), "/foreign/app");
+    if (kind === "file") assert.equal(readFileSync(entry(f), "utf8"), "foreign");
+  });
+}
+test("uninstall removes only owned link and preserves managed version files", (t) => {
+  const f = fixture(t);
+  assert.equal(f.run().status, 0);
+  const marker = join(
+    f.home,
+    "Library/Application Support/tmux-ide/native-alpha/versions/retained",
+  );
+  mkdirSync(join(marker, ".."), { recursive: true });
+  writeFileSync(marker, "retained");
+  assert.equal(f.run(["--uninstall"]).status, 0);
+  assert.throws(() => lstatSync(entry(f)), { code: "ENOENT" });
+  assert.equal(readFileSync(marker, "utf8"), "retained");
+});
+test("failed installer does not create Applications entry; custom prefix cannot claim another installation", (t) => {
+  const f = fixture(t);
+  assert.notEqual(f.run([], { TEST_INSTALL_EXIT: "9" }).status, 0);
+  assert.throws(() => lstatSync(entry(f)), { code: "ENOENT" });
+  assert.equal(f.run().status, 0);
+  assert.notEqual(f.run(["--prefix", join(f.home, "another installation")]).status, 0);
+  assert.equal(readlinkSync(entry(f)), target(f));
+});
+test("redirected Applications directory is refused without touching its destination", (t) => {
+  const f = fixture(t);
+  const elsewhere = join(f.home, "elsewhere");
+  mkdirSync(elsewhere);
+  symlinkSync(elsewhere, join(f.home, "Applications"));
+  assert.notEqual(f.run().status, 0);
+  assert.deepEqual(readdirSync(elsewhere), []);
+  assert.ok(!existsSync(f.downloads));
 });

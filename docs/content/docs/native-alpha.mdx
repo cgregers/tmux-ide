@@ -48,14 +48,17 @@ not open the app or start the daemon. Start or update the daemon explicitly:
 ~/.local/bin/tmux-ide update --daemon --json
 ```
 
-In Finder, choose **Go → Go to Folder**, paste this path, and open the app:
+Open **Tmux IDE Alpha** from your user **Applications** folder in Finder:
 
 ```text
-~/Library/Application Support/tmux-ide/native-alpha/TmuxIDE.app
+~/Applications/Tmux IDE Alpha.app
 ```
 
-You can keep the app in the Dock after opening it. Keep the managed installation
-in place so update and rollback use the same installation history.
+You can keep it in the Dock after opening it. This entry points to the managed
+installation under `~/Library/Application Support/tmux-ide/native-alpha`, where
+versions are retained for update and rollback. Leave that managed directory in
+place. The installer preserves any unrelated app or link already using the
+Applications name; follow its message if that name is occupied.
 
 If macOS rejects the app's signature or says it is damaged, stop and report the
 build and message. Do not remove quarantine attributes or disable Gatekeeper to

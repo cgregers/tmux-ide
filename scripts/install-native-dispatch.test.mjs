@@ -44,7 +44,7 @@ function fixture(t) {
     entry,
     source
       .replace("# Native alpha is explicit;", override + "# Native alpha is explicit;")
-      .replace("83b20635c1fef2ce4b218093b8396940f78424431b61c6a472d9dee87368ff77", digest),
+      .replace("f867f6c1e881e3a821fdcb555a4b4c1b4291549a68a3e78b362577a6d8a71f6e", digest),
   );
   const paths = {
     TEST_NATIVE_ARGS: join(root, "native-args"),
@@ -179,3 +179,13 @@ test("old CLI bootstrap failure prevents native installation", (t) => {
   assert.equal(f.run([], { TEST_CLI_FAIL: "1" }).status, 19);
   assert.ok(!existsSync(f.paths.TEST_FETCHED));
 });
+
+for (const args of [[], ["--update"]]) {
+  test(`qualified CLI 2.9.6 is preserved before native ${args[0] || "install"}`, (t) => {
+    const f = fixture(t);
+    f.runtime("2.9.6");
+    assert.equal(f.run(args).status, 0);
+    assert.ok(!existsSync(f.paths.TEST_CLI_ARGS));
+    assert.ok(existsSync(f.paths.TEST_NATIVE_ARGS));
+  });
+}
