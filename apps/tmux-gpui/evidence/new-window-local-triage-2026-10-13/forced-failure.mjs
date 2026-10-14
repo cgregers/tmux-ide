@@ -385,7 +385,10 @@ try {
 } catch (error) {
   failures.push(error);
   failureEvidence(error);
-  await writeFile('/Users/thijs/.codex/worktrees/retire-web-desktop/tmux-ide/.tasks/gpui-new-window-ci38358/forced-root.txt', fleet.root);
+  await writeFile(
+    "/Users/thijs/.codex/worktrees/retire-web-desktop/tmux-ide/.tasks/gpui-new-window-ci38358/forced-root.txt",
+    fleet.root,
+  );
 } finally {
   for (const cleanup of [
     () => stopFixtureChild(browser),
@@ -399,7 +402,9 @@ try {
     }
   }
 }
-console.error(JSON.stringify({stage:"private-cleanup-control", failures:failures.length, root:fleet.root}));
+console.error(
+  JSON.stringify({ stage: "private-cleanup-control", failures: failures.length, root: fleet.root }),
+);
 if (fatal) failures.push(fatal);
 if (failures.length) throw new AggregateError(failures, "New-window fixture failed");
 console.log(JSON.stringify({ ...result, cleanup: true }));

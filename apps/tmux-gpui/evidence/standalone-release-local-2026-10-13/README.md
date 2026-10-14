@@ -12,7 +12,7 @@ A third invocation used the untouched relocated installer without the observer. 
 
 The synthetic prior was created using the test-only injected verifier solely to establish a rollback-preservation sentinel. This is not a successful Apple-signed installation. The tested release candidate always used the real verifier. No Gatekeeper/signing policy was weakened.
 
-The initial packaging preflight used an invalid output filename and was rejected before archive/network work; preflight-failure.* retains that failure. first-pass.log used a synthetic partial body for cancellation; final.log supersedes it with the real archive prefix. Final receipt covers independent child/server/root cleanup. No external service, GUI, container, native build, production daemon, root CLI rebuild, commit or push occurred.
+The initial packaging preflight used an invalid output filename and was rejected before archive/network work; preflight-failure.\* retains that failure. first-pass.log used a synthetic partial body for cancellation; final.log supersedes it with the real archive prefix. Final receipt covers independent child/server/root cleanup. No external service, GUI, container, native build, production daemon, root CLI rebuild, commit or push occurred.
 
 Run from the original private harness .tasks/gpui-standalone-release-local/run.mjs; this evidence copy records exact source and is not relocatable because its module imports are repository-relative. Signing/notarization, trusted publisher distribution and clean-machine positive install/update/rollback remain unqualified.
 

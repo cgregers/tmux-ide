@@ -732,7 +732,6 @@ missing-palette claims above are superseded. The native shortcut reference still
 needs F8/Shift-F8 plus sidebar collapse/favorite guidance. Physical/remote checks
 remain acceptance gaps even where implementation exists.
 
-
 ### Workspace fleet-agent implementation — 13 October
 
 Bridge commit `1ec81f6f` adds persistent cross-session Workspace agent publication
@@ -753,7 +752,6 @@ See `evidence/workspace-fleet-agents-2026-10-13/` for the exact evidence and lim
 Retained session tabs, combined native/remote validation, activation and signed
 clean-machine install/update acceptance remain open.
 
-
 ### Local alpha1311 qualified — 13 October
 
 Native sidebar commit `33109b26` now has a qualified optimized build and physical
@@ -768,7 +766,6 @@ bridge's real isolated canonical-daemon switching fixture, without source fallba
 All 22 regular archived files match the assembled app. Native and daemon checks
 remain separate; combined remote, signed/clean-Mac install/update acceptance and
 retained session tabs remain open. See the Workspace fleet evidence directory.
-
 
 ### Retained session tabs in validation — 13 October
 
@@ -798,7 +795,6 @@ in Opening. A diagnostic-only rerun confirmed this seam. Alpha1312 is therefore
 not qualified for distribution; alpha1311 does not include retained tabs.
 Evidence: retained-session-tabs-2026-10-13. No full-parity, remote or signed
 clean-Mac acceptance claim is made.
-
 
 ### Session admission continuation repair — 13 October
 

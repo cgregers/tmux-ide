@@ -432,14 +432,12 @@ test("Workspace grouped cap retains later team rows independently of Home and F5
   const f = fixture(300);
   const team = { id: "team.abcdefghijklmnop", name: "Same", source: "manual" as const };
   f.setRows(
-    f
-      .groups()
-      .map((group, index) => ({
-        ...group,
-        agents: group.agents.map((agent, i) =>
-          index === 0 && i === 299 ? { ...agent, team } : agent,
-        ),
-      })),
+    f.groups().map((group, index) => ({
+      ...group,
+      agents: group.agents.map((agent, i) =>
+        index === 0 && i === 299 ? { ...agent, team } : agent,
+      ),
+    })),
   );
   f.emit();
   f.filter("remote");

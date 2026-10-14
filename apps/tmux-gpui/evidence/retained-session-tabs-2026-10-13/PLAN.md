@@ -29,7 +29,6 @@ both implementations; do not silently call a different behavior exact parity.
 
 Implement only after current Workspace fleet sidebar acceptance and packaging.
 
-
 ## Prepared acceptance fixtures
 
 `run.mjs`: reviewed private canonical-daemon journey, two sessions, explicit CLI,

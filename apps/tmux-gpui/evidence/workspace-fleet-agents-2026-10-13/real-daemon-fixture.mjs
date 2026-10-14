@@ -97,7 +97,16 @@ const traceState = (event) => {
           forward: !!latest.sessionHistory.forward,
         }
       : null,
-    workspaceAgents: latest?.workspaceFleetAgents ? {request:latest.workspaceFleetAgents.request,scope:latest.workspaceFleetAgents.scope,revision:latest.workspaceFleetAgents.revision,phase:latest.workspaceFleetAgents.phase,rows:latest.workspaceFleetAgents.rows.length,selected:!!latest.workspaceFleetAgents.selectedKey}:null,
+    workspaceAgents: latest?.workspaceFleetAgents
+      ? {
+          request: latest.workspaceFleetAgents.request,
+          scope: latest.workspaceFleetAgents.scope,
+          revision: latest.workspaceFleetAgents.revision,
+          phase: latest.workspaceFleetAgents.phase,
+          rows: latest.workspaceFleetAgents.rows.length,
+          selected: !!latest.workspaceFleetAgents.selectedKey,
+        }
+      : null,
     preferences: latest?.fleet?.preferences?.phase,
     status: latest?.status,
   };
@@ -202,7 +211,14 @@ try {
   before = source();
   for (const [index, pane] of fleet.initialPanes.entries()) {
     tmux("set-option", "-p", "-t", pane.paneId, "@agent_display_name", "Duplicate agent");
-    tmux("set-option", "-p", "-t", pane.paneId, "@agent_state", `${index ? "blocked" : "working"}:${Math.floor(Date.now()/1000)}`);
+    tmux(
+      "set-option",
+      "-p",
+      "-t",
+      pane.paneId,
+      "@agent_state",
+      `${index ? "blocked" : "working"}:${Math.floor(Date.now() / 1000)}`,
+    );
   }
   daemon = own(
     spawn(process.execPath, [cli, "--headless"], {
@@ -272,46 +288,80 @@ try {
       latest.sessions.length === 2,
   );
   const group = latest.fleet.groups.find((g) => g.id === "local");
-  const a = group.sessions.find(s => s.name === fleet.sessionNames[0]);
-  const b = group.sessions.find(s => s.name === fleet.sessionNames[1]);
+  const a = group.sessions.find((s) => s.name === fleet.sessionNames[0]);
+  const b = group.sessions.find((s) => s.name === fleet.sessionNames[1]);
   assert.ok(a && b && a.selection && b.selection);
   assert.deepEqual(await recent(), []);
   phase = "initial-workspace";
-  send({type:"session",request:++request,id:a.sessionId});
+  send({ type: "session", request: ++request, id: a.sessionId });
   await completeCatalog(a, []);
-  await until(() => latest.workspaceFleetAgents?.request === request &&
-    latest.workspaceFleetAgents.rows.some(r => r.sessionId === b.sessionId && r.available));
+  await until(
+    () =>
+      latest.workspaceFleetAgents?.request === request &&
+      latest.workspaceFleetAgents.rows.some((r) => r.sessionId === b.sessionId && r.available),
+  );
   const roster = latest.workspaceFleetAgents;
-  const target = roster.rows.find(r => r.sessionId === b.sessionId && r.available);
-  assert.equal(target.name,"Duplicate agent");
-  assert.equal(target.status,"BLOCKED");
-  assert.ok(roster.rows.some(r => r.sessionId === a.sessionId));
+  const target = roster.rows.find((r) => r.sessionId === b.sessionId && r.available);
+  assert.equal(target.name, "Duplicate agent");
+  assert.equal(target.status, "BLOCKED");
+  assert.ok(roster.rows.some((r) => r.sessionId === a.sessionId));
   const selectedPane = latest.selectedPane;
   phase = "palette-overlap";
-  send({type:"palette-observe",request,scope:1,active:true,query:"fixture-no-match-731"});
+  send({ type: "palette-observe", request, scope: 1, active: true, query: "fixture-no-match-731" });
   await until(() => latest.paletteAgents?.scope === 1 && latest.paletteAgents.rows.length === 0);
-  assert.ok(latest.workspaceFleetAgents.rows.some(r=>r.key === target.key && r.available));
-  send({type:"palette-observe",request,scope:1,active:false});
+  assert.ok(latest.workspaceFleetAgents.rows.some((r) => r.key === target.key && r.available));
+  send({ type: "palette-observe", request, scope: 1, active: false });
   await until(() => latest.paletteAgents === null);
-  assert.ok(latest.workspaceFleetAgents.rows.some(r=>r.key === target.key && r.available));
+  assert.ok(latest.workspaceFleetAgents.rows.some((r) => r.key === target.key && r.available));
   phase = "stale-scope";
   const current = latest.request;
-  const stale = {type:"open-workspace-fleet-agent",request:++request,fromRequest:current,
-    scope:latest.workspaceFleetAgents.scope+1,rosterRevision:latest.workspaceFleetAgents.revision,key:target.key};
+  const stale = {
+    type: "open-workspace-fleet-agent",
+    request: ++request,
+    fromRequest: current,
+    scope: latest.workspaceFleetAgents.scope + 1,
+    rosterRevision: latest.workspaceFleetAgents.revision,
+    key: target.key,
+  };
   send(stale);
-  await until(()=>latest.workspaceFleetAgentRejected?.request === stale.request);
-  assert.equal(latest.request,current);
-  assert.equal(latest.selectedPane,selectedPane);
+  await until(() => latest.workspaceFleetAgentRejected?.request === stale.request);
+  assert.equal(latest.request, current);
+  assert.equal(latest.selectedPane, selectedPane);
   assert.ok(latest.snapshot && latest.inputReady);
   phase = "cross-session-admission";
-  send({type:"open-workspace-fleet-agent",request:++request,fromRequest:current,
-    scope:latest.workspaceFleetAgents.scope,rosterRevision:latest.workspaceFleetAgents.revision,key:target.key});
-  await until(()=>latest.request===request && latest.selectedSession===b.sessionId && latest.snapshot && latest.inputReady);
-  const expected = tmux("display-message","-p","-t",fleet.initialPanes[1].paneId,"#{@tmux_ide_pane_id}").trim();
+  send({
+    type: "open-workspace-fleet-agent",
+    request: ++request,
+    fromRequest: current,
+    scope: latest.workspaceFleetAgents.scope,
+    rosterRevision: latest.workspaceFleetAgents.revision,
+    key: target.key,
+  });
+  await until(
+    () =>
+      latest.request === request &&
+      latest.selectedSession === b.sessionId &&
+      latest.snapshot &&
+      latest.inputReady,
+  );
+  const expected = tmux(
+    "display-message",
+    "-p",
+    "-t",
+    fleet.initialPanes[1].paneId,
+    "#{@tmux_ide_pane_id}",
+  ).trim();
   assert.ok(expected);
-  assert.equal(latest.selectedPane,expected);
-  await until(()=>latest.workspaceFleetAgents?.request===request && latest.workspaceFleetAgents.selectedKey);
-  assert.equal(latest.workspaceFleetAgents.rows.find(r=>r.key===latest.workspaceFleetAgents.selectedKey)?.sessionId,b.sessionId);
+  assert.equal(latest.selectedPane, expected);
+  await until(
+    () =>
+      latest.workspaceFleetAgents?.request === request && latest.workspaceFleetAgents.selectedKey,
+  );
+  assert.equal(
+    latest.workspaceFleetAgents.rows.find((r) => r.key === latest.workspaceFleetAgents.selectedKey)
+      ?.sessionId,
+    b.sessionId,
+  );
   assert.deepEqual(source(), before, "Native pane births and processes survive history navigation");
 } catch (error) {
   failures.push(error);
@@ -343,7 +393,20 @@ if (failures.length) {
   console.error(JSON.stringify({ historyPhaseTrace: trace }));
   throw new AggregateError(failures, "Session history fixture failed");
 }
-console.log(JSON.stringify({passed:true,sourceBrowser:app===undefined,packagedBrowser:app!==undefined,
- canonicalDaemon:true,crossSessionAgents:true,paletteIndependent:true,staleScopePreservedTerminal:true,
- exactSecondSessionPane:true,selectedKeyVerified:true,sourceBirthsPreserved:true,inputSent:false,
- nativeUi:false,ownedCleanup:true}));
+console.log(
+  JSON.stringify({
+    passed: true,
+    sourceBrowser: app === undefined,
+    packagedBrowser: app !== undefined,
+    canonicalDaemon: true,
+    crossSessionAgents: true,
+    paletteIndependent: true,
+    staleScopePreservedTerminal: true,
+    exactSecondSessionPane: true,
+    selectedKeyVerified: true,
+    sourceBirthsPreserved: true,
+    inputSent: false,
+    nativeUi: false,
+    ownedCleanup: true,
+  }),
+);

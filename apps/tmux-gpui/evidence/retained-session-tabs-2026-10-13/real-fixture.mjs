@@ -85,9 +85,9 @@ const traceState = (event) => {
   const value = {
     phase,
     event,
-    tabCount:latest?.sessionTabs?.rows.length,
-    hasActiveTab:!!latest?.sessionTabs?.active,
-    tabResult:latest?.sessionTabResult?.outcome,
+    tabCount: latest?.sessionTabs?.rows.length,
+    hasActiveTab: !!latest?.sessionTabs?.active,
+    tabResult: latest?.sessionTabResult?.outcome,
     request: latest?.request,
     sequence: latest?.sequence,
     catalog: latest?.sessionCatalogComplete,
@@ -100,7 +100,16 @@ const traceState = (event) => {
           forward: !!latest.sessionHistory.forward,
         }
       : null,
-    workspaceAgents: latest?.workspaceFleetAgents ? {request:latest.workspaceFleetAgents.request,scope:latest.workspaceFleetAgents.scope,revision:latest.workspaceFleetAgents.revision,phase:latest.workspaceFleetAgents.phase,rows:latest.workspaceFleetAgents.rows.length,selected:!!latest.workspaceFleetAgents.selectedKey}:null,
+    workspaceAgents: latest?.workspaceFleetAgents
+      ? {
+          request: latest.workspaceFleetAgents.request,
+          scope: latest.workspaceFleetAgents.scope,
+          revision: latest.workspaceFleetAgents.revision,
+          phase: latest.workspaceFleetAgents.phase,
+          rows: latest.workspaceFleetAgents.rows.length,
+          selected: !!latest.workspaceFleetAgents.selectedKey,
+        }
+      : null,
     preferences: latest?.fleet?.preferences?.phase,
     status: latest?.status,
   };
@@ -183,7 +192,11 @@ async function completeCatalog(expected, prior, retainedIds) {
   assert.equal(latest.snapshot, null);
   assert.equal(latest.inputReady, false);
   assert.deepEqual(await recent(), prior, "Catalog-only must not record a visit");
-  assert.deepEqual(latest.sessionTabs.rows.map(r=>r.id),retainedIds,"Catalog-only must not remember a tab");
+  assert.deepEqual(
+    latest.sessionTabs.rows.map((r) => r.id),
+    retainedIds,
+    "Catalog-only must not remember a tab",
+  );
   const pane = latest.preferredPane;
   assert.ok(latest.panes.some((p) => p.id === pane));
   send({ type: "pane", request: ++request, id: pane });
@@ -206,7 +219,14 @@ try {
   before = source();
   for (const [index, pane] of fleet.initialPanes.entries()) {
     tmux("set-option", "-p", "-t", pane.paneId, "@agent_display_name", "Duplicate agent");
-    tmux("set-option", "-p", "-t", pane.paneId, "@agent_state", `${index ? "blocked" : "working"}:${Math.floor(Date.now()/1000)}`);
+    tmux(
+      "set-option",
+      "-p",
+      "-t",
+      pane.paneId,
+      "@agent_state",
+      `${index ? "blocked" : "working"}:${Math.floor(Date.now() / 1000)}`,
+    );
   }
   daemon = own(
     spawn(process.execPath, [cli, "--headless"], {
@@ -276,56 +296,79 @@ try {
       latest.sessions.length === 2,
   );
   const group = latest.fleet.groups.find((g) => g.id === "local");
-  const a = group.sessions.find(s => s.name === fleet.sessionNames[0]);
-  const b = group.sessions.find(s => s.name === fleet.sessionNames[1]);
+  const a = group.sessions.find((s) => s.name === fleet.sessionNames[0]);
+  const b = group.sessions.find((s) => s.name === fleet.sessionNames[1]);
   assert.ok(a && b && a.selection && b.selection);
   assert.deepEqual(await recent(), []);
   phase = "first-accepted-tab";
-  assert.equal(latest.sessionTabs?.rows.length,0);
-  send({type:"session",request:++request,id:a.sessionId});
+  assert.equal(latest.sessionTabs?.rows.length, 0);
+  send({ type: "session", request: ++request, id: a.sessionId });
   await completeCatalog(a, [], []);
-  await until(()=>latest.sessionTabs?.rows.length===1 && latest.sessionTabs.active);
-  const aTab=latest.sessionTabs.active;
+  await until(() => latest.sessionTabs?.rows.length === 1 && latest.sessionTabs.active);
+  const aTab = latest.sessionTabs.active;
   phase = "second-accepted-tab";
-  send({type:"session",request:++request,id:b.sessionId});
+  send({ type: "session", request: ++request, id: b.sessionId });
   await completeCatalog(b, [a.id], [aTab]);
-  await until(()=>latest.sessionTabs?.rows.length===2 && latest.sessionTabs.active && latest.sessionTabs.active!==aTab && latest.sessionTabs.rows.some(r=>r.id===latest.sessionTabs.active));
-  const bTab=latest.sessionTabs.active;
-  assert.ok(latest.sessionTabs.rows.some(r=>r.id===aTab));
-  const activePane=latest.selectedPane, activeRequest=latest.request;
-  const issue=(action,revision=latest.sessionTabs.revision)=>{
-    const cmd={type:"session-tab",request:++request,fromRequest:latest.request,revision,action};
-    send(cmd);return cmd;
+  await until(
+    () =>
+      latest.sessionTabs?.rows.length === 2 &&
+      latest.sessionTabs.active &&
+      latest.sessionTabs.active !== aTab &&
+      latest.sessionTabs.rows.some((r) => r.id === latest.sessionTabs.active),
+  );
+  const bTab = latest.sessionTabs.active;
+  assert.ok(latest.sessionTabs.rows.some((r) => r.id === aTab));
+  const activePane = latest.selectedPane,
+    activeRequest = latest.request;
+  const issue = (action, revision = latest.sessionTabs.revision) => {
+    const cmd = {
+      type: "session-tab",
+      request: ++request,
+      fromRequest: latest.request,
+      revision,
+      action,
+    };
+    send(cmd);
+    return cmd;
   };
   phase = "stale-tab-refusal";
-  const stale=issue(latest.sessionTabs.rows.find(r=>r.id===aTab).activate,latest.sessionTabs.revision+1);
-  await until(()=>latest.sessionTabResult?.request===stale.request);
-  assert.equal(latest.sessionTabResult.outcome,"rejected");
-  assert.equal(latest.request,activeRequest);
-  assert.equal(latest.selectedPane,activePane);
+  const stale = issue(
+    latest.sessionTabs.rows.find((r) => r.id === aTab).activate,
+    latest.sessionTabs.revision + 1,
+  );
+  await until(() => latest.sessionTabResult?.request === stale.request);
+  assert.equal(latest.sessionTabResult.outcome, "rejected");
+  assert.equal(latest.request, activeRequest);
+  assert.equal(latest.selectedPane, activePane);
   assert.ok(latest.snapshot && latest.inputReady);
   phase = "retained-tab-activation";
-  const prior=await recent();
-  issue(latest.sessionTabs.rows.find(r=>r.id===aTab).activate);
-  await completeCatalog(a,prior,[aTab,bTab]);
-  await until(()=>latest.sessionTabs.active===aTab);
-  assert.equal(latest.sessionTabs.rows.length,2);
+  const prior = await recent();
+  issue(latest.sessionTabs.rows.find((r) => r.id === aTab).activate);
+  await completeCatalog(a, prior, [aTab, bTab]);
+  await until(() => latest.sessionTabs.active === aTab);
+  assert.equal(latest.sessionTabs.rows.length, 2);
   phase = "inactive-tab-close";
-  const preservedPane=latest.selectedPane,preservedRequest=latest.request;
-  const closed=issue(latest.sessionTabs.rows.find(r=>r.id===bTab).close);
-  await until(()=>latest.sessionTabResult?.request===closed.request);
-  assert.equal(latest.sessionTabResult.outcome,"closed");
-  assert.equal(latest.request,preservedRequest);
-  assert.equal(latest.selectedPane,preservedPane);
+  const preservedPane = latest.selectedPane,
+    preservedRequest = latest.request;
+  const closed = issue(latest.sessionTabs.rows.find((r) => r.id === bTab).close);
+  await until(() => latest.sessionTabResult?.request === closed.request);
+  assert.equal(latest.sessionTabResult.outcome, "closed");
+  assert.equal(latest.request, preservedRequest);
+  assert.equal(latest.selectedPane, preservedPane);
   assert.ok(latest.snapshot && latest.inputReady);
-  assert.equal(latest.sessionTabs.rows.length,1);
-  assert.equal(latest.sessionTabs.active,aTab);
+  assert.equal(latest.sessionTabs.rows.length, 1);
+  assert.equal(latest.sessionTabs.active, aTab);
   phase = "active-tab-close";
-  issue(latest.sessionTabs.rows.find(r=>r.id===aTab).close);
-  await until(()=>latest.request===request && latest.surface==="home" && latest.sessionTabs.rows.length===0);
-  assert.equal(latest.sessionTabs.active,null);
-  assert.equal(latest.snapshot,null);
-  assert.equal(latest.inputReady,false);
+  issue(latest.sessionTabs.rows.find((r) => r.id === aTab).close);
+  await until(
+    () =>
+      latest.request === request &&
+      latest.surface === "home" &&
+      latest.sessionTabs.rows.length === 0,
+  );
+  assert.equal(latest.sessionTabs.active, null);
+  assert.equal(latest.snapshot, null);
+  assert.equal(latest.inputReady, false);
   assert.deepEqual(source(), before, "Closing tabs must preserve tmux panes and processes");
 } catch (error) {
   failures.push(error);
@@ -357,7 +400,20 @@ if (failures.length) {
   console.error(JSON.stringify({ historyPhaseTrace: trace }));
   throw new AggregateError(failures, "Session history fixture failed");
 }
-console.log(JSON.stringify({passed:true,sourceBrowser:app===undefined,packagedBrowser:app!==undefined,
- canonicalDaemon:true,acceptedTabs:true,staleTabPreservedTerminal:true,retainedTabActivation:true,
- inactiveClosePreservedTerminal:true,activeCloseReturnedHome:true,sourceBirthsPreserved:true,
- inputSent:false,nativeUi:false,ownedCleanup:true}));
+console.log(
+  JSON.stringify({
+    passed: true,
+    sourceBrowser: app === undefined,
+    packagedBrowser: app !== undefined,
+    canonicalDaemon: true,
+    acceptedTabs: true,
+    staleTabPreservedTerminal: true,
+    retainedTabActivation: true,
+    inactiveClosePreservedTerminal: true,
+    activeCloseReturnedHome: true,
+    sourceBirthsPreserved: true,
+    inputSent: false,
+    nativeUi: false,
+    ownedCleanup: true,
+  }),
+);
