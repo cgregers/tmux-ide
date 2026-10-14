@@ -1,5 +1,6 @@
 // Same browser and daemon: remove a selected tmux pane, then explicitly select its replacement.
 import assert from "node:assert/strict";
+import { diagnosticStatus, parseDiagnosticLine } from "./live-diagnostics.ts";
 import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import process from "node:process";
@@ -199,6 +200,7 @@ try {
         .split("\n")
         .some((line) => line.trim() === "BEFORE_PANE_REPLACEMENT"),
     );
+  assert.equal(stderr, "", "Healthy selected pane must not emit diagnostics before removal");
   const replacement = tmux("split-window", "-d", "-P", "-F", "#{pane_id}", "-t", original, "sh -i");
   assert.notEqual(replacement, original);
   awaitingObservation = !!pipeDir;
@@ -206,7 +208,15 @@ try {
   await until(
     () =>
       latest?.request === originalRequest &&
-      latest.status.includes("unavailable") &&
+      (latest.status.includes("unavailable") ||
+        stderr.split("\n").some((line) => {
+          const diagnostic = parseDiagnosticLine(line);
+          return (
+            diagnostic &&
+            ["source-closed", "runtime-failure"].includes(diagnostic.code) &&
+            latest.status === diagnosticStatus(diagnostic)
+          );
+        })) &&
       !latest.snapshot,
   );
   assert.equal(latest.inputReady, false);
