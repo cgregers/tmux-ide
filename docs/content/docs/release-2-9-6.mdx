@@ -1,13 +1,18 @@
 ---
-title: tmux-ide 2.9.6 candidate
-metaTitle: "What's planned for 2.9.6"
-description: "tmux-ide 2.9.6 candidate: terminal delivery, guarded resizing, shared discovery and separate native alpha integration."
+title: tmux-ide 2.9.6
+metaTitle: "What's new in 2.9.6"
+description: "tmux-ide 2.9.6: terminal delivery, guarded resizing, shared discovery and separate native alpha integration."
 ---
 
-**Release candidate — not yet published.** These notes describe the changes
-prepared for `2.9.6`. Release qualification and publication must finish before
-this version is available through the installer or npm. The published terminal
-release remains [2.9.5](/docs/release-2-9-5).
+Version `2.9.6` focuses on shared terminal delivery, resizing and discovery
+between the terminal app and the native client.
+
+## Platform support
+
+Intel Macs are no longer supported. `2.9.6` ships bundled tmux and the compiled
+app runtime for macOS on Apple Silicon and glibc Linux on x64 and ARM64. The
+installer refuses Intel Macs. Existing Intel installations keep working on
+`2.9.5`; stay on that version rather than updating.
 
 ## Terminal and daemon changes
 
@@ -33,9 +38,8 @@ supported.
 
 ## Before updating
 
-Wait for publication and the final release notes. Existing tmux sessions are
-preserved; do not kill servers as an upgrade step. Native and CLI versions have
-separate installation and rollback paths.
+Existing tmux sessions are preserved; do not kill servers as an upgrade step.
+Native and CLI versions have separate installation and rollback paths.
 
-Full candidate change list:
+Full change list:
 [CHANGELOG.md](https://github.com/wavyrai/tmux-ide/blob/main/CHANGELOG.md).

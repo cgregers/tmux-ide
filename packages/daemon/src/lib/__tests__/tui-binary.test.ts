@@ -24,7 +24,7 @@ import {
   type TuiPlatformTag,
 } from "../tui-binary.ts";
 
-const TAGS: TuiPlatformTag[] = ["darwin-arm64", "darwin-x64", "linux-x64", "linux-arm64"];
+const TAGS: TuiPlatformTag[] = ["darwin-arm64", "linux-x64", "linux-arm64"];
 const VERSION = "2.9.0-beta.1";
 const TAG: TuiPlatformTag = "linux-x64";
 const COMMIT = "0123456789abcdef0123456789abcdef01234567";
@@ -82,13 +82,13 @@ function fixtureFetch(fixture: ReturnType<typeof releaseFixture>): ReturnType<ty
 describe("tuiPlatformTag — Node platform/arch → release tag", () => {
   it("maps each published platform", () => {
     expect(tuiPlatformTag("darwin", "arm64")).toBe("darwin-arm64");
-    expect(tuiPlatformTag("darwin", "x64")).toBe("darwin-x64");
     expect(tuiPlatformTag("linux", "x64")).toBe("linux-x64");
     expect(tuiPlatformTag("linux", "arm64")).toBe("linux-arm64");
   });
 
   it("returns null for platforms we do not publish", () => {
     expect(tuiPlatformTag("win32", "x64")).toBeNull();
+    expect(tuiPlatformTag("darwin", "x64")).toBeNull();
     expect(tuiPlatformTag("linux", "ia32")).toBeNull();
     expect(tuiPlatformTag("freebsd", "arm64")).toBeNull();
   });

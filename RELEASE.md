@@ -59,7 +59,7 @@ survive viewer shutdown.
 ## Publish
 
 1. Commit the release changes and merge the reviewed branch to `main` after its required checks pass.
-2. Push the matching `vX.Y.Z` tag at that commit. The release workflows build and qualify all four bundled tmux/TUI platforms.
+2. Push the matching `vX.Y.Z` tag at that commit. The release workflows build and qualify the three supported bundled tmux/TUI platforms (macOS Apple Silicon, Linux x64 and Linux ARM64; Intel macOS is unsupported as of 2.9.6).
 3. Let the Release workflow publish npm through its trusted-publishing environment. It verifies matching runtime assets and provenance before publishing; do not publish a second copy manually.
 4. Stable versions use npm `latest`; prereleases use `beta`. Verify the matching GitHub release notes and assets.
 
@@ -94,7 +94,7 @@ service journey. This proves real-manager ownership protection, not backward
 compatibility with a historical published binary.
 
 Qualification-only dispatches additionally run
-`node scripts/qualify-installer-service.mjs <new-evidence-directory>` on all four
+`node scripts/qualify-installer-service.mjs <new-evidence-directory>` on all three supported
 platforms. This uses the reviewed installer in an isolated HOME and a prefix
 containing spaces, with only `/usr/bin:/bin` on the installer's PATH. Apple Silicon
 uses published `2.9.0-beta.50` → `2.9.2` for cross-version coverage. The older

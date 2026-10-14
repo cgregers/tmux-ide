@@ -116,6 +116,7 @@ JS
     *) fail 'Supported systems: macOS and glibc Linux, including supported WSL distributions' ;;
   esac
   case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=x64 ;; *) fail 'Supported architectures: ARM64 and x64' ;; esac
+  [ "$os-$arch" != darwin-x64 ] || fail 'Intel Macs are not supported; tmux-ide on macOS requires Apple Silicon'
   for tool in curl tar gzip awk mktemp grep; do command -v "$tool" >/dev/null 2>&1 || fail "Missing required tool: $tool"; done
   command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail 'A SHA-256 tool is required'
   stage=$(mktemp -d "$root/releases/.install.XXXXXX")

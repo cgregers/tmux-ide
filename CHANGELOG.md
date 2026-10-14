@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 ## 2.9.6
 
+- Drop Intel macOS (darwin-x64) support: no bundled tmux or compiled app runtime is published for Intel Macs, and the installer refuses them. Apple Silicon macOS and glibc Linux x64/ARM64 remain supported.
 - Preserve terminal delivery order and public workspace identity while controllers disconnect or runtimes change.
 - Authorize pane resizing against current tmux layout and ownership, including guarded native split resizing.
 - Share Home and machine discovery between the terminal and native clients, with polling and subscription fixes that avoid starving pending observations.
