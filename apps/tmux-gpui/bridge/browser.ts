@@ -78,6 +78,7 @@ import { CatalogStageError } from "./catalog-errors.ts";
 import { createAppearanceOwner } from "./appearance.ts";
 import { DaemonCompatibilityError, DaemonDiscoveryError } from "./discovery.ts";
 import { scrollSchema } from "./history.ts";
+import { wheelSchema } from "./wheel.ts";
 import { surfacesSchema } from "./window-canvas.ts";
 import { createWindowPresentation } from "./window-presentation.ts";
 import { paneChoices, preferredPane, topologySchema, type Layout } from "./topology.ts";
@@ -199,7 +200,7 @@ const commandSchema = z.union([
       type: z.literal("input"),
       request: z.number().int().positive().safe(),
       id: z.string().min(1).max(512),
-      input: z.union([previewInputSchema, resizeSchema, scrollSchema]),
+      input: z.union([previewInputSchema, resizeSchema, scrollSchema, wheelSchema]),
     })
     .strict(),
   z.object({ type: z.literal("home"), request: z.number().int().positive().safe() }).strict(),
@@ -1835,13 +1836,16 @@ async function command(value: unknown) {
     if (
       cmd.request !== request ||
       cmd.id !== selectedPane ||
-      (!inputReady && cmd.input.kind !== "scroll") ||
+      (!inputReady &&
+        cmd.input.kind !== "scroll" &&
+        !(cmd.input.kind === "wheel" && historyOffset > 0)) ||
       !foreground ||
       !snapshot ||
       !active?.child.stdin
     )
       return; // Discard stale/focus-lost input, never reinterpret it for another pane.
-    if (cmd.input.kind === "scroll") active.presentation.update(undefined, [], false);
+    if (cmd.input.kind === "scroll" || cmd.input.kind === "wheel")
+      active.presentation.update(undefined, [], false);
     const line = JSON.stringify(cmd.input) + "\n";
     if (
       Buffer.byteLength(line) > MAX_INPUT_LINE ||

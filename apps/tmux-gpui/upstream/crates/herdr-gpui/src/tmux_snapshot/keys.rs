@@ -8,8 +8,19 @@ pub(super) enum Input {
     Paste(String),
     Key(String),
     Bytes(String),
-    Resize { cols: u16, rows: u16 },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
     Scroll(i16),
+    Wheel {
+        lines: i16,
+        row: u16,
+        col: u16,
+        shift: bool,
+        alt: bool,
+        control: bool,
+    },
 }
 pub(super) fn translate(key: &Keystroke) -> Option<Input> {
     let m = key.modifiers;

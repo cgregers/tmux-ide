@@ -29,6 +29,7 @@ fn prepare(view: &mut SnapshotView) {
     view.browser_state.selected_pane = Some("pane-a".into());
     // Historical output intentionally denies command input, not local scroll.
     view.browser_state.input_ready = false;
+    view.browser_state.history_offset = 30;
     view.browser_state.regions = serde_json::from_str(r#"[{"id":"pane-a","left":0,"top":0,"width":5,"height":9},{"id":"pane-b","left":6,"top":0,"width":5,"height":9}]"#).unwrap();
     view.browser_state.panes = ["pane-a", "pane-b"]
         .into_iter()
@@ -51,7 +52,7 @@ fn event(position: Point<Pixels>, fraction: f32) -> ScrollWheelEvent {
 }
 fn assert_scroll(receiver: &mpsc::Receiver<browser::Command>, request: u64, lines: i16) {
     assert!(
-        matches!(receiver.try_recv().unwrap(), browser::Command::Input { request:r, id, input:Input::Scroll(n) } if r == request && id == "pane-a" && n == lines)
+        matches!(receiver.try_recv().unwrap(), browser::Command::Input { request:r, id, input:Input::Wheel { lines:n, row:2, col:2, shift:false, alt:false, control:false } } if r == request && id == "pane-a" && n == lines)
     );
     assert!(
         receiver.try_recv().is_err(),
@@ -165,4 +166,70 @@ fn actual_request_selection_does_not_carry_wheel_fraction_into_new_view(cx: &mut
     assert!(receiver.try_recv().is_err());
     cx.simulate_event(event(position, 0.5));
     assert_scroll(&receiver, 8, 1);
+}
+
+#[gpui::test]
+fn wheel_preserves_pane_local_position_modifiers_and_live_input_gate(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(64);
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        let mut view = make_view(window, cx, sender);
+        prepare(&mut view);
+        view.browser_state.selected_pane = Some("pane-b".into());
+        view.browser_state.history_offset = 0;
+        view.browser_state.input_ready = true;
+        view.input_interrupted = true;
+        view
+    });
+    cx.simulate_resize(size(px(640.), px(400.)));
+    cx.update(|window, cx| {
+        window.draw(cx).clear(cx);
+    });
+    receiver.try_iter().for_each(drop);
+    let position = view.read_with(cx, |view, _| {
+        view.input_geometry.unwrap().0.origin
+            + point(
+                px(view.input_cell_width.unwrap() * 7.5),
+                px(crate::terminal::CELL_HEIGHT * 3.5),
+            )
+    });
+    cx.simulate_event(event(position, 1.));
+    assert!(
+        receiver.try_recv().is_err(),
+        "interrupted input must stay blocked"
+    );
+    view.update(cx, |view, _| view.input_interrupted = false);
+    cx.simulate_event(ScrollWheelEvent {
+        modifiers: Modifiers {
+            control: true,
+            alt: true,
+            ..Default::default()
+        },
+        delta: ScrollDelta::Lines(point(0., 3.)),
+        ..event(position, 3.)
+    });
+    let actual = receiver.try_recv().unwrap();
+    eprintln!("wheel command: {}", serde_json::to_string(&actual).unwrap());
+    assert!(matches!(actual, browser::Command::Input {
+        request: 7, id, input: Input::Wheel { lines: 3, row: 3, col: 1,
+        shift: false, alt: true, control: true }
+    } if id == "pane-b"));
+    assert!(receiver.try_recv().is_err());
+    view.update(cx, |view, _| view.input_interrupted = true);
+    cx.simulate_event(ScrollWheelEvent {
+        modifiers: Modifiers {
+            shift: true,
+            ..Default::default()
+        },
+        ..event(position, 1.)
+    });
+    assert!(
+        matches!(
+            receiver.try_recv().unwrap(),
+            browser::Command::Input {
+                input: Input::Wheel { shift: true, .. },
+                ..
+            }
+        ),
+        "explicit local-history override stays available"
+    );
 }

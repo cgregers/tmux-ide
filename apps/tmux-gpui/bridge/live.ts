@@ -15,10 +15,11 @@ import {
 import { contentRect } from "./window-canvas.ts";
 import { createPaneResizeFence, paneResizeSchema, resizePane } from "./pane-resize.ts";
 import { createHistoryViewport, scrollSchema } from "./history.ts";
+import { routeWheel, wheelSchema } from "./wheel.ts";
 import type { Layout } from "./topology.ts";
 import { applyPresence, presenceSchema } from "./presence.ts";
 import { resizeSchema, resizeWindow, windowForLayout } from "./geometry.ts";
-import { deliverPreviewInput, MAX_INPUT_LINE } from "./input.ts";
+import { deliverInput, deliverPreviewInput, MAX_INPUT_LINE } from "./input.ts";
 import { connectionSchema, readPrivateConfig, paneStreamSocketUrl } from "./config.ts";
 import { randomUUID } from "node:crypto";
 import { WebSocket } from "ws";
@@ -703,6 +704,23 @@ try {
             resizeBlocked = true;
           }
           output(latest.snapshot);
+          continue;
+        }
+        const wheel = wheelSchema.safeParse(value);
+        if (wheel.success) {
+          resizeGesture.retire();
+          if (!latest.snapshot) continue;
+          const route = routeWheel(latest.snapshot, viewport.offset, wheel.data);
+          if (!route) continue;
+          if (route.kind === "application") {
+            for (const input of route.inputs) {
+              await deliverInput(runtime, config.workspaceName, config.semanticPaneId, input);
+            }
+          } else {
+            const view = viewport.scroll(route.lines);
+            if (view) surfaces.set(config.semanticPaneId, view);
+            output(view);
+          }
           continue;
         }
         const scroll = scrollSchema.safeParse(value);

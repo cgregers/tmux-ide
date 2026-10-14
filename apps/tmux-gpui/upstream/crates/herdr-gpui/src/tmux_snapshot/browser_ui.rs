@@ -213,6 +213,22 @@ impl SnapshotView {
             self.wheel = Default::default();
             return;
         }
+        if self.browser_state.history_offset == 0
+            && !event.modifiers.shift
+            && !self.offer_terminal_input(cx)
+        {
+            self.wheel = Default::default();
+            return;
+        }
+        let Some(region) =
+            self.browser_state.regions.iter().find(|region| {
+                Some(region.id.as_str()) == self.browser_state.selected_pane.as_deref()
+            })
+        else {
+            return;
+        };
+        let col = (f32::from(point.x) / width).floor() as u16 - region.left;
+        let row = (f32::from(point.y) / self.terminal_height()).floor() as u16 - region.top;
         if matches!(event.touch_phase, TouchPhase::Started) {
             self.wheel = Default::default();
         }
@@ -223,7 +239,17 @@ impl SnapshotView {
         let lines = self.wheel.add(delta);
         if lines != 0 {
             self.discard_composition(cx);
-            self.queue_input(super::keys::Input::Scroll(lines), cx);
+            self.queue_input(
+                super::keys::Input::Wheel {
+                    lines,
+                    row,
+                    col,
+                    shift: event.modifiers.shift,
+                    alt: event.modifiers.alt,
+                    control: event.modifiers.control,
+                },
+                cx,
+            );
         }
         cx.stop_propagation();
     }
