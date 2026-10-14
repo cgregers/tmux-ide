@@ -2,7 +2,7 @@
 use super::{SnapshotView, browser, browser_ui::Selection, controls, navigation};
 use gpui::{prelude::*, *};
 
-pub(super) const APPLICATION_TABS_HEIGHT: f32 = 36.;
+pub(super) const APPLICATION_TABS_HEIGHT: f32 = crate::titlebar::HEIGHT;
 
 #[derive(Default)]
 pub(super) struct WindowReveal {
@@ -91,14 +91,14 @@ impl SnapshotView {
         let request = self.browser_request;
         let mut tabs = div()
             .id("application-tabs")
-            .w_full()
+            .flex_1()
+            .min_w_0()
             .h(px(APPLICATION_TABS_HEIGHT))
             .flex_shrink_0()
             .flex()
-            .items_center()
+            .items_end()
             .gap_1()
-            .px_2()
-            .bg(rgb(theme.surface));
+            .pr_2();
         for (id, label, tab, selected) in [
             (
                 "application-home",
@@ -114,7 +114,7 @@ impl SnapshotView {
             ),
         ] {
             tabs = tabs.child(
-                controls::tab(
+                controls::titlebar_tab(
                     id,
                     label,
                     match tab {
@@ -123,34 +123,40 @@ impl SnapshotView {
                     },
                     selected,
                     &theme,
-                    self.accent(),
                 )
-                .h_full()
                 .debug_selector(move || id.to_owned())
                 .on_click(cx.listener(move |view, _, window, cx| {
                     view.dispatch_application_tab(request, tab, window, cx);
                 })),
             );
         }
-        tabs = tabs.child(div().flex_1()).child(
-            controls::button(
-                "sidebar-toggle",
-                None,
-                "Show / hide sidebar · F10",
-                controls::Icon::Sidebar,
-                &theme,
+        tabs = tabs
+            .child(
+                div()
+                    .flex_1()
+                    .h_full()
+                    .debug_selector(|| "application-drag-region".into()),
             )
-            .on_click(cx.listener(move |view, _, _, cx| {
-                if view.browser_request == request
-                    && view.picker.is_none()
-                    && view.new_session.is_none()
-                    && view.pane_actions.is_none()
-                    && view.marked.is_empty()
-                {
-                    view.toggle_sidebar(cx);
-                }
-            })),
-        );
+            .child(
+                controls::button(
+                    "sidebar-toggle",
+                    None,
+                    "Show / hide sidebar · F10",
+                    controls::Icon::Sidebar,
+                    &theme,
+                )
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_click(cx.listener(move |view, _, _, cx| {
+                    if view.browser_request == request
+                        && view.picker.is_none()
+                        && view.new_session.is_none()
+                        && view.pane_actions.is_none()
+                        && view.marked.is_empty()
+                    {
+                        view.toggle_sidebar(cx);
+                    }
+                })),
+            );
         tabs.into_any_element()
     }
 

@@ -6,31 +6,28 @@ pub(super) fn rows(settings: &Settings, query: &str) -> Vec<Row> {
     let mut rows = vec![
         Row {
             target: Target::Font(Choice::Size(1)),
-            label: "Increase terminal size (+1 pt)".into(),
+            label: "Increase terminal size (+1)".into(),
         },
         Row {
             target: Target::Font(Choice::Size(-1)),
-            label: "Decrease terminal size (−1 pt)".into(),
+            label: "Decrease terminal size (−1)".into(),
         },
     ];
-    rows.extend(settings.names.iter().map(|name| Row {
-        target: Target::Font(Choice::Family(name.clone())),
-        label: format!(
-            "{}{}",
-            if settings.config.family == *name {
-                "✓ "
-            } else {
-                ""
-            },
-            name
-        ),
-    }));
-    rows.into_iter()
-        .filter(|r| {
-            query
-                .split_whitespace()
-                .all(|q| r.label.to_lowercase().contains(q))
-        })
-        .take(256)
-        .collect()
+    rows.retain(|row| matches(&row.label, &query));
+    rows.extend(
+        settings
+            .names
+            .iter()
+            .filter(|name| matches(name, &query))
+            .take(256 - rows.len())
+            .map(|name| Row {
+                target: Target::Font(Choice::Family(name.clone())),
+                label: name.clone(),
+            }),
+    );
+    rows
+}
+fn matches(label: &str, query: &str) -> bool {
+    let label = label.to_lowercase();
+    query.split_whitespace().all(|term| label.contains(term))
 }

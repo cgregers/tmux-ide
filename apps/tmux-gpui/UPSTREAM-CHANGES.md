@@ -1,5 +1,16 @@
 # Changes from the pinned upstream revision
 
+- Alpha polish (2026-10-14): Home/Terminals share the native titlebar beside
+  the macOS traffic lights, using Herdr titlebar move/double-click behavior and
+  existing SVG assets. Interactive tabs and sidebar toggle stop drag propagation;
+  retained session and daemon-owned tmux window strips remain separate.
+  Selected sidebar rows use measured, one-time reveal inspired by Herdr sidebar
+  scrolling, while manual scrolling and keyboard navigation retain ownership.
+  Font controls reuse shared size bounds, corner tokens and the check SVG;
+  redundant preference writes/geometry resets are suppressed.
+  Upstream reference refreshed separately to `01fd228fd03365abf5924dee8ebc1dbb9ba50825`;
+  this is a targeted adaptation, not a bulk replacement of the pinned derivative.
+
 - `tmux_snapshot/home/filters.rs` reuses Herdr SearchInput for bounded local
   agent name/session search and All/Working/Needs attention filters. Published
   roster identities, availability, coverage and selection fences stay authoritative.

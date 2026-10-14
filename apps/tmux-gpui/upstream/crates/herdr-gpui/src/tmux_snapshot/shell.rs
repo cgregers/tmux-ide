@@ -29,36 +29,10 @@ pub(super) fn themed_frame(
     theme: &Theme,
     canvas: u32,
     glass: bool,
-    heading: impl IntoElement,
+    navigation: impl IntoElement,
 ) -> AnyElement {
     let font = Config::default().ui;
-    let header =
-        crate::titlebar::header(theme, window, |window, _| window.remove_window()).map(|bar| {
-            // Equal insets center the title on the window, not the space after
-            // the traffic lights. Reserve room for either platform's controls.
-            bar.relative().child(
-                div()
-                    .debug_selector(|| "tmux-window-heading".into())
-                    .absolute()
-                    .top_0()
-                    .left(px(104.))
-                    .right(px(104.))
-                    .h_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .min_w_0()
-                    .text_color(rgb(theme.foreground))
-                    .child(
-                        div()
-                            .debug_selector(|| "tmux-window-heading-text".into())
-                            .max_w_full()
-                            .min_w_0()
-                            .truncate()
-                            .child(heading),
-                    ),
-            )
-        });
+    let header = crate::titlebar::navigation_header(theme, window, navigation.into_any_element());
     let content = div()
         .size_full()
         .flex()
@@ -68,7 +42,7 @@ pub(super) fn themed_frame(
         .text_size(px(font.size))
         .when(!glass, |content| content.bg(rgb(canvas)))
         .text_color(rgb(theme.foreground))
-        .children(header)
+        .child(header)
         .child(
             div()
                 .debug_selector(|| "tmux-shell-body".into())

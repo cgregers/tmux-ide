@@ -101,7 +101,7 @@ impl SnapshotView {
             .when(picker.mode == Mode::Font, |panel| {
                 panel
                     .child(div().px_2().py_1().child(format!(
-                        "Terminal font · {} · {} pt",
+                        "Terminal font · {} · size {}",
                         self.terminal_font.config.family, self.terminal_font.config.size
                     )))
                     .child(
@@ -167,8 +167,10 @@ impl SnapshotView {
         for (index, row) in picker.rows.iter().enumerate() {
             let target = row.target.clone();
             let enabled = !picker.mode.is_reference()
-                && !(picker.mode == Mode::Font
-                    && (self.terminal_font.saving || !self.terminal_font.ready))
+                && match &target {
+                    Target::Font(choice) => self.terminal_font.can_choose(choice),
+                    _ => true,
+                }
                 && current(&self.browser_state, &target);
             list = list.child(
                 div()
@@ -176,7 +178,7 @@ impl SnapshotView {
                     .debug_selector(move || format!("picker-row-{index}"))
                     .px_2()
                     .py_1()
-                    .rounded(px(4.))
+                    .rounded(px(crate::config::corners::CONTROL))
                     .when(!picker.mode.is_reference(), |row| row.truncate())
                     .when(picker.mode.is_reference(), |row| {
                         row.w_full().whitespace_normal()
@@ -190,7 +192,15 @@ impl SnapshotView {
                     } else {
                         theme.surface
                     }))
-                    .child(row.label.clone())
+                    .when(picker.mode == Mode::Font, |row| {
+                        row.min_h(px(super::super::controls::CONTROL_HEIGHT))
+                            .flex().items_center().gap_2()
+                            .child(div().size(px(16.)).flex_shrink_0().when(
+                                matches!(&target, Target::Font(super::super::terminal_font::Choice::Family(name)) if *name == self.terminal_font.config.family),
+                                |slot| slot.child(svg().path("icons/check.svg").size_full().text_color(rgb(theme.foreground))),
+                            ))
+                    })
+                    .child(div().min_w_0().when(!picker.mode.is_reference(), |label| label.truncate()).child(row.label.clone()))
                     .when(enabled, |row| {
                         row.on_click(cx.listener(move |view, _, window, cx| {
                             view.choose_picker(target.clone(), window, cx)

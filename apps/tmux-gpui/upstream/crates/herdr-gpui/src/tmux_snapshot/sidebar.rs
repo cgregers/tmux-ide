@@ -3,6 +3,8 @@
 mod hierarchy;
 #[path = "sidebar/keyboard.rs"]
 mod keyboard;
+#[path = "sidebar/reveal.rs"]
+mod reveal;
 use crate::{config::Theme, tmux_snapshot::browser};
 use gpui::{prelude::*, *};
 pub(in crate::tmux_snapshot) use keyboard::Keyboard;

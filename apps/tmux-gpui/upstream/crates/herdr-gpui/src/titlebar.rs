@@ -386,6 +386,29 @@ pub(crate) fn header(
     })
 }
 
+/// Application navigation shares the native drag band; server-decorated
+/// platforms keep the same navigation immediately below their system frame.
+pub(crate) fn navigation_header(
+    theme: &crate::config::Theme,
+    window: &Window,
+    navigation: AnyElement,
+) -> AnyElement {
+    if cfg!(target_os = "macos") || decorations::client(window) {
+        render(theme.surface, Some(navigation), window)
+            .children(controls(window, theme, |window, _| window.remove_window()))
+            .into_any_element()
+    } else {
+        div()
+            .flex()
+            .flex_none()
+            .w_full()
+            .h(px(HEIGHT))
+            .bg(rgb(theme.surface))
+            .child(navigation)
+            .into_any_element()
+    }
+}
+
 /// Room before the first control: macOS keeps it clear for the traffic
 /// lights, which every other platform draws elsewhere or not at all.
 const LEADING: f32 = if cfg!(target_os = "macos") { 80. } else { 8. };

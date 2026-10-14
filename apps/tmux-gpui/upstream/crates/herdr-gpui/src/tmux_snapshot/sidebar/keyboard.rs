@@ -9,6 +9,7 @@ pub(in crate::tmux_snapshot) struct Keyboard {
     pub(in crate::tmux_snapshot::browser_ui) selected: Option<Target>,
     pub(in crate::tmux_snapshot::browser_ui) scroll: ScrollHandle,
     pub(in crate::tmux_snapshot::browser_ui) machine_focus: Option<String>,
+    reveal: reveal::Reveal,
     request: u64,
     displayed: Vec<Option<Target>>,
 }
@@ -39,6 +40,18 @@ impl SnapshotView {
     ) {
         let valid = self.sidebar_keyboard_allowed()
             && self.sidebar_keyboard.request == self.browser_request;
+        if self.browser_state.surface == browser::Surface::Workspace
+            && self.browser_state.request == self.browser_request
+            && !self.sidebar_hidden
+            && !self.picker_in_sidebar()
+        {
+            self.sidebar_keyboard.reveal.update(
+                &rows(&self.browser_state),
+                &self.sidebar_keyboard.scroll,
+                self.sidebar_keyboard.active && valid,
+                window,
+            );
+        }
         if !valid && self.sidebar_keyboard.active {
             self.sidebar_keyboard.active = false;
             self.interrupt_input(cx);

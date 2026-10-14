@@ -132,3 +132,38 @@ pub(super) fn tab(
         .child(glyph(icon, foreground))
         .child(div().min_w_0().truncate().child(label.into()))
 }
+
+/// Fixed application destinations sit inside the draggable native titlebar.
+pub(super) fn titlebar_tab(
+    id: &'static str,
+    label: &'static str,
+    icon: Icon,
+    selected: bool,
+    theme: &Theme,
+) -> Stateful<Div> {
+    let foreground = if selected {
+        theme.foreground
+    } else {
+        theme.muted
+    };
+    let hover = theme.active;
+    div()
+        .id(id)
+        .h(px(30.))
+        .min_w(px(108.))
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(CONTENT_GAP))
+        .px(px(14.))
+        .rounded_t(px(8.))
+        .text_size(px(LABEL_SIZE))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(rgb(foreground))
+        .when(selected, |tab| tab.bg(rgb(theme.surface)))
+        .cursor_pointer()
+        .hover(move |tab| tab.bg(rgb(hover)))
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(glyph(icon, foreground))
+        .child(label)
+}

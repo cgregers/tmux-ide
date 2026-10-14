@@ -423,3 +423,6 @@ mod sidebar_visibility;
 mod fonts;
 mod header_scope;
 mod reference;
+
+#[path = "tests/font_controls.rs"]
+mod font_controls;

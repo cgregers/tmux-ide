@@ -1,7 +1,7 @@
 //! tmux-ide-only font preferences. Reuses Herdr FontConfig/cascade resolution;
 //! never reads or writes Herdr's application configuration.
 use super::SnapshotView;
-use crate::config::{Config, FONT_SIZE_RANGE, FontConfig};
+use crate::config::{Config, FONT_SIZE_RANGE, FONT_SIZE_STEP, FontConfig};
 use gpui::Context;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -101,6 +101,17 @@ fn write(path: &Path, value: &Saved) -> io::Result<()> {
     result
 }
 impl Settings {
+    pub(super) fn can_choose(&self, choice: &Choice) -> bool {
+        if !self.ready || self.saving {
+            return false;
+        }
+        match choice {
+            Choice::Family(name) => self.config.family != *name && self.names.contains(name),
+            Choice::Size(1) => self.config.size < *FONT_SIZE_RANGE.end(),
+            Choice::Size(-1) => self.config.size > *FONT_SIZE_RANGE.start(),
+            Choice::Size(_) => false,
+        }
+    }
     pub fn load() -> Self {
         let mut result = Self {
             path: path(),
@@ -179,7 +190,7 @@ impl SnapshotView {
         .detach();
     }
     pub(super) fn choose_terminal_font(&mut self, choice: Choice, cx: &mut Context<Self>) {
-        if self.terminal_font.saving || !self.terminal_font.ready {
+        if !self.terminal_font.can_choose(&choice) {
             return;
         }
         let mut config = self.terminal_font.config.clone();
@@ -188,7 +199,8 @@ impl SnapshotView {
                 config.family = name
             }
             Choice::Size(delta) if delta == 1 || delta == -1 => {
-                config.size = (config.size + f32::from(delta)).clamp(8., 48.)
+                config.size = (config.size + f32::from(delta) * FONT_SIZE_STEP)
+                    .clamp(*FONT_SIZE_RANGE.start(), *FONT_SIZE_RANGE.end())
             }
             _ => return,
         }
@@ -199,6 +211,7 @@ impl SnapshotView {
         };
         self.terminal_font.saving = true;
         self.terminal_font.note = Some("Saving terminal font…");
+        cx.notify();
         let installed = self.terminal_font.names.clone();
         let task = cx.background_executor().spawn(async move {
             let mut resolved = Config {

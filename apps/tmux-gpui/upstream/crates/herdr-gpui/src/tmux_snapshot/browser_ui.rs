@@ -659,9 +659,8 @@ impl SnapshotView {
         let is_home = self.browser_state.surface == browser::Surface::Home;
         let show_sidebar = (!is_home && !self.sidebar_hidden) || self.picker_in_sidebar();
         let viewport = window.viewport_size();
-        let chrome_height = crate::titlebar::HEIGHT
-            + super::workspace_chrome::APPLICATION_TABS_HEIGHT
-            + self.retained_session_height();
+        let chrome_height =
+            super::workspace_chrome::APPLICATION_TABS_HEIGHT + self.retained_session_height();
         let glass = self.glass.sync(
             window,
             Bounds::new(
@@ -851,16 +850,6 @@ impl SnapshotView {
                 .child(self.picker_render(cx));
         }
         let home = is_home.then(|| self.home_render(window, cx));
-        let heading = if is_home {
-            "Home".to_owned()
-        } else {
-            self.browser_state
-                .sessions
-                .iter()
-                .find(|session| Some(&session.id) == self.browser_state.selected_session.as_ref())
-                .map(|session| session.label.clone())
-                .unwrap_or_else(|| "Session".into())
-        };
         let context = div()
             .id("workspace-context")
             .flex()
@@ -943,7 +932,6 @@ impl SnapshotView {
             .when(!glass, |body| body.bg(rgb(self.canvas())))
             .text_color(rgb(theme.foreground))
             .on_key_down(cx.listener(Self::picker_key))
-            .child(application_tabs)
             .children(session_tabs)
             .child(main)
             .children(
@@ -955,7 +943,7 @@ impl SnapshotView {
                     .map(|dialog| deferred(dialog).with_priority(2)),
             )
             .into_any_element();
-        super::shell::themed_frame(body, window, &theme, self.canvas(), glass, heading)
+        super::shell::themed_frame(body, window, &theme, self.canvas(), glass, application_tabs)
     }
 }
 

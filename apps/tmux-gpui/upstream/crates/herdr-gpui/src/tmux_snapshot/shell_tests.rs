@@ -55,11 +55,6 @@ fn native_header_does_not_overlap_terminal_or_navigation(cx: &mut TestAppContext
     assert!(terminal.bottom() <= body.bottom());
     if let Some(header) = cx.debug_bounds("titlebar") {
         assert!(header.bottom() <= body.top());
-        let title = cx.debug_bounds("tmux-window-heading-text").unwrap();
-        assert_eq!(title.left() + title.right(), header.left() + header.right());
-        // Text line boxes may round to half pixels during layout.
-        assert!((title.top() + title.bottom() - header.top() - header.bottom()).abs() <= px(1.));
-        assert!(title.left() > header.left() && title.right() < header.right());
     }
 }
 

@@ -234,3 +234,6 @@ mod fleet_agent_tests;
 
 #[path = "narrow_layout_tests.rs"]
 mod narrow_layout_tests;
+
+#[path = "reveal_tests.rs"]
+mod reveal_tests;

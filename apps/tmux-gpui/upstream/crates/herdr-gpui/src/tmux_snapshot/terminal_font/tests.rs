@@ -35,3 +35,6 @@ fn fontconfig_line_height_scales_with_size_and_preserves_fallbacks() {
     assert_eq!(font.line_height(), 30.);
     assert!(font.font().fallbacks.is_some());
 }
+
+#[path = "tests/choices.rs"]
+mod choices;
