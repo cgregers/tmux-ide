@@ -684,10 +684,10 @@ impl SnapshotView {
             .when_some(self.sidebar_keyboard.focus.as_ref(), |list, focus| {
                 list.track_focus(focus)
             })
-            .w(px(224.))
-            .h_full()
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .overflow_y_scroll()
-            .flex_shrink_0()
             .p_2()
             .bg(super::shell::sidebar_fill(theme.surface, glass))
             .flex()
@@ -760,47 +760,61 @@ impl SnapshotView {
             );
         }
         sidebar = sidebar.children(self.workspace_agent_rows(cx));
-        sidebar = sidebar.child(div().flex_1()).child(
-            div()
-                .flex()
-                .gap_2()
-                .px_2()
-                .py_2()
-                .child(
-                    controls::button(
-                        "open-picker",
-                        Some("Switch"),
-                        "Switch session",
-                        controls::Icon::Sessions,
-                        &theme,
+        sidebar = div()
+            .id("sidebar-viewport")
+            .debug_selector(|| "tmux-sidebar-viewport".into())
+            .w(px(224.))
+            .h_full()
+            .min_h_0()
+            .flex_shrink_0()
+            .overflow_hidden()
+            .bg(super::shell::sidebar_fill(theme.surface, glass))
+            .flex()
+            .flex_col()
+            .child(sidebar)
+            .child(
+                div()
+                    .debug_selector(|| "tmux-sidebar-footer".into())
+                    .flex_none()
+                    .flex()
+                    .gap_2()
+                    .px_2()
+                    .py_2()
+                    .child(
+                        controls::button(
+                            "open-picker",
+                            Some("Switch"),
+                            "Switch session",
+                            controls::Icon::Sessions,
+                            &theme,
+                        )
+                        .on_click(cx.listener(|view, _, window, cx| view.open_picker(window, cx))),
                     )
-                    .on_click(cx.listener(|view, _, window, cx| view.open_picker(window, cx))),
-                )
-                .child(
-                    controls::button(
-                        "open-theme-picker",
-                        None,
-                        "Choose theme",
-                        controls::Icon::Theme,
-                        &theme,
+                    .child(
+                        controls::button(
+                            "open-theme-picker",
+                            None,
+                            "Choose theme",
+                            controls::Icon::Theme,
+                            &theme,
+                        )
+                        .on_click(
+                            cx.listener(|view, _, window, cx| view.open_theme_picker(window, cx)),
+                        ),
                     )
-                    .on_click(
-                        cx.listener(|view, _, window, cx| view.open_theme_picker(window, cx)),
+                    .child(
+                        controls::button(
+                            "refresh-sessions",
+                            None,
+                            "Refresh sessions",
+                            controls::Icon::Refresh,
+                            &theme,
+                        )
+                        .on_click(cx.listener(|view, _, window, cx| {
+                            view.select(Selection::Refresh, window, cx)
+                        })),
                     ),
-                )
-                .child(
-                    controls::button(
-                        "refresh-sessions",
-                        None,
-                        "Refresh sessions",
-                        controls::Icon::Refresh,
-                        &theme,
-                    )
-                    .on_click(cx.listener(|view, _, window, cx| {
-                        view.select(Selection::Refresh, window, cx)
-                    })),
-                ),
-        );
+            );
         let application_tabs = self.application_tabs(window, cx);
         let session_tabs = self.retained_session_strip(cx);
         let window_strip = self.workspace_window_strip(window, cx);

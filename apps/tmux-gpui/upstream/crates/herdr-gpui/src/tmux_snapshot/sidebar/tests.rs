@@ -231,3 +231,6 @@ mod workspace_agents;
 
 #[path = "fleet_agent_tests.rs"]
 mod fleet_agent_tests;
+
+#[path = "narrow_layout_tests.rs"]
+mod narrow_layout_tests;
