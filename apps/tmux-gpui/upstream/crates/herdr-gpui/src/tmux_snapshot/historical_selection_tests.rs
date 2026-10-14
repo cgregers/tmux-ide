@@ -1,6 +1,6 @@
 use super::*;
 
-fn history(view: &mut SnapshotView) {
+pub(super) fn history(view: &mut SnapshotView) {
     // Use the same geometry installation as the existing click fixture: rendering
     // may have replaced the constructor's placeholder bounds before this event.
     view.input_geometry = Some((

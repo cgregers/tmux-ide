@@ -42,6 +42,13 @@ impl SnapshotView {
         if self.picker.is_some() || self.pane_actions.is_some() || self.new_session.is_some() {
             return;
         }
+        if super::terminal_links::gesture(event) {
+            if let Some(url) = self.terminal_web_link(event.position) {
+                cx.open_url(&url);
+            }
+            cx.stop_propagation();
+            return;
+        }
         if self.begin_divider(event.position, cx) {
             return;
         }

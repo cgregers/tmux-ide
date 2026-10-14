@@ -303,3 +303,6 @@ mod wheel_event_tests;
 
 #[path = "historical_selection_tests.rs"]
 mod historical_selection_tests;
+
+#[path = "terminal_links/pointer_tests.rs"]
+mod terminal_link_pointer_tests;

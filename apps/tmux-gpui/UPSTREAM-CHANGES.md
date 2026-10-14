@@ -1,5 +1,12 @@
 # Changes from the pinned upstream revision
 
+- Native terminal web links: `tmux_snapshot/terminal_links.rs` reuses Herdr
+  `terminal::link_at` HTTP(S) parsing and validation. Cmd/Ctrl-click resolves only
+  the exact painted selected pane; canonical copy-region wrapping joins complete
+  logical lines without crossing panes or guessing clipped continuations.
+  It opens via GPUI without rearming terminal input or sending daemon commands.
+  Ordinary/Shift selection remains unchanged; OSC 8 transport is not added.
+
 - Alpha polish (2026-10-14): Home/Terminals share the native titlebar beside
   the macOS traffic lights, using Herdr titlebar move/double-click behavior and
   existing SVG assets. Follow-up styling directly adapts Herdr `window/tab_strip.rs`

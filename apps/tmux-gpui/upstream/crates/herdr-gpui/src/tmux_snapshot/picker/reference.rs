@@ -24,6 +24,7 @@ const SHORTCUTS: &[&str] = &[
     "Home · f — Cycle machine filter (when available)",
     "Home · r — Retry observations (when available)",
     "Home · m — Load more sessions (when available)",
+    "Terminal links · Cmd-click / Ctrl-click — Open selected-pane HTTP(S) link",
     "Terminal selection · Cmd+C — Copy selected text",
     "Terminal · Cmd+Shift+C — Copy visible pane (no selection)",
     "Terminal · Cmd+V — Paste (live input authority required)",

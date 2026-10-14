@@ -29,6 +29,7 @@ mod session_tabs;
 mod shell;
 mod stream;
 mod terminal_font;
+mod terminal_links;
 #[cfg(test)]
 mod tests;
 mod workspace_chrome;
