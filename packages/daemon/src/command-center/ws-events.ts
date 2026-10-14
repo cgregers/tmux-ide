@@ -791,9 +791,12 @@ export function handleWsEventsConnection(
 
   const subscribe = (sessionName: string, sendInitialSnapshot: boolean): void => {
     if (subscriptions.has(sessionName)) return;
-    const session = discoverSessions().find((s) => s.name === sessionName);
     subscriptions.add(sessionName);
-    if (session && sendInitialSnapshot && legacyDeliveryEnabled) {
+    if (sendInitialSnapshot && legacyDeliveryEnabled) {
+      // Semantic subscriptions use resource interests, not legacy snapshots.
+      // Avoid a synchronous full-fleet scan for every subscribed session.
+      const session = discoverSessions().find((s) => s.name === sessionName);
+      if (!session) return;
       const data = buildSessionSnapshot(sessionName);
       if (data) {
         send({ type: "snapshot", sessionName, data });

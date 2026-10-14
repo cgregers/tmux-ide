@@ -1,0 +1,339 @@
+import { createFleetDialScheduler } from "@tmux-ide/daemon-client/fleet-dial-scheduler";
+import {
+  LOCAL_MACHINE_ID,
+  SavedMachineSchema,
+  SavedMachineRegistrySchema,
+  type CanonicalDaemonInfo,
+  type SavedMachine,
+} from "@tmux-ide/contracts";
+import {
+  createDaemonConnectionOwner,
+  type DaemonConnectionEndpoint,
+} from "./daemon-connection-owner.ts";
+
+type Owner = ReturnType<typeof createDaemonConnectionOwner>;
+type GenerationListener = (generation: string | null) => void;
+export interface MachineConnectionHandle {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "local" | "ssh";
+  readonly ready: Promise<boolean>;
+  read(): CanonicalDaemonInfo | null;
+  isAlive(info: CanonicalDaemonInfo): Promise<boolean>;
+  endpoint(): DaemonConnectionEndpoint;
+  observe(listener: GenerationListener): Promise<() => void>;
+}
+export interface MachineConnectionSummary {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: "local" | "ssh";
+  readonly state: DaemonConnectionEndpoint["state"];
+  readonly sshTarget?: string;
+}
+export interface MachineConnectionSnapshot {
+  readonly selectedMachineId: string;
+  readonly machines: readonly MachineConnectionSummary[];
+}
+export interface MachineConnectionManagerDependencies {
+  createOwner(): Owner;
+  retryDelayMs?: number;
+}
+interface Machine {
+  readonly id: string;
+  label: string;
+  readonly kind: "local" | "ssh";
+  profile?: SavedMachine;
+  owner: Owner;
+  readonly handle: MachineConnectionHandle;
+  readonly listeners: Set<GenerationListener>;
+  epoch: number;
+  stopObserver: (() => void) | null;
+  observingOwner: Owner | null;
+  stopStatus: (() => void) | null;
+  retired: boolean;
+}
+
+/** Owns independent transport lifetimes; selecting a machine changes only the active route. */
+export function createMachineConnectionManager(
+  dependencies: MachineConnectionManagerDependencies = {
+    createOwner: createDaemonConnectionOwner,
+  },
+) {
+  const machines = new Map<string, Machine>();
+  const subscribers = new Set<() => void>();
+  const selectedObservers = new Set<GenerationListener>();
+  const lifetime = new AbortController();
+  const scheduler = createFleetDialScheduler();
+  let selectedId: string = LOCAL_MACHINE_ID;
+  let selectedEpoch = 0;
+  let disposed = false;
+  let stopProfiles: (() => void) | null = null;
+  const safe = (callback: () => void) => {
+    try {
+      callback();
+    } catch {
+      /* Observers cannot own machine lifetime. */
+    }
+  };
+  const publish = () => {
+    for (const listener of subscribers) safe(listener);
+  };
+  const selectedGeneration = (generation: string | null) => {
+    for (const listener of selectedObservers) safe(() => listener(generation));
+  };
+  const changed = (machine: Machine, generation: string | null) => {
+    if (disposed || machine.retired) return;
+    machine.epoch++;
+    for (const listener of machine.listeners) safe(() => listener(generation));
+    if (machine.id === selectedId) {
+      selectedEpoch++;
+      selectedGeneration(generation);
+    }
+    publish();
+  };
+  const observe = (machine: Machine, owner: Owner) => {
+    if (machine.observingOwner === owner) return;
+    machine.observingOwner = owner;
+    void owner
+      .observe((generation) => {
+        if (machine.owner === owner) changed(machine, generation);
+      })
+      .then(
+        (stop) => {
+          if (disposed || machine.retired || machine.owner !== owner) stop();
+          else machine.stopObserver = stop;
+        },
+        () => {
+          /* Local filesystem watcher failure does not disable catalog polling. */
+        },
+      );
+  };
+  const makeMachine = (id: string, label: string, profile?: SavedMachine): Machine => {
+    let settle!: (ready: boolean) => void;
+    const ready = profile
+      ? new Promise<boolean>((resolve) => {
+          settle = resolve;
+        })
+      : Promise.resolve(true);
+    const owner = dependencies.createOwner();
+    const listeners = new Set<GenerationListener>();
+    const machine = {
+      id,
+      label,
+      kind: profile ? "ssh" : "local",
+      profile,
+      owner,
+      listeners,
+      epoch: 0,
+      stopObserver: null,
+      observingOwner: null,
+      stopStatus: null,
+      retired: false,
+    } as Machine;
+    const handle: MachineConnectionHandle = Object.freeze({
+      id,
+      get label() {
+        return machine.label;
+      },
+      kind: machine.kind,
+      ready,
+      read: () => (disposed || machine.retired ? null : machine.owner.read()),
+      isAlive: (info: CanonicalDaemonInfo) =>
+        disposed || machine.retired ? Promise.resolve(false) : machine.owner.isAlive(info),
+      endpoint: () =>
+        Object.freeze({
+          ...machine.owner.endpoint(),
+          kind: machine.kind,
+          label: machine.profile ? machine.label : null,
+          epoch: machine.epoch,
+          ...(disposed || machine.retired
+            ? { state: "disconnected" as const, remote: null, localBaseUrl: null }
+            : {}),
+        }),
+      observe: async (listener: GenerationListener) => {
+        if (disposed || machine.retired) return () => {};
+        if (machine.kind === "local") observe(machine, machine.owner);
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    });
+    Object.assign(machine, { handle });
+    machines.set(id, machine);
+    if (!profile) return machine;
+    // The owner selects SSH synchronously and owns ALL retries, including initial failure.
+    machine.stopStatus = owner.observeConnection(publish);
+    const initializing = owner.initialize(profile.sshTarget, lifetime.signal, {
+      scheduler,
+      expectedEnvironmentId: profile.expectedEnvironmentId,
+      retryDelayMs: dependencies.retryDelayMs,
+    });
+    observe(machine, owner);
+    publish();
+    void initializing.then(
+      () => settle(!disposed && !machine.retired),
+      () => settle(false),
+    );
+    return machine;
+  };
+  makeMachine(LOCAL_MACHINE_ID, "Local");
+  const snapshot = (): MachineConnectionSnapshot =>
+    Object.freeze({
+      selectedMachineId: selectedId,
+      machines: Object.freeze(
+        [...machines.values()].map((machine) =>
+          Object.freeze({
+            id: machine.id,
+            label: machine.label,
+            kind: machine.kind,
+            state: machine.handle.endpoint().state,
+            ...(machine.profile ? { sshTarget: machine.profile.sshTarget } : {}),
+          }),
+        ),
+      ),
+    });
+  const manager = {
+    snapshot,
+    getMachine: (id: string): MachineConnectionHandle | null => machines.get(id)?.handle ?? null,
+    subscribe(listener: () => void): () => void {
+      if (disposed) return () => {};
+      const local = machines.get(LOCAL_MACHINE_ID)!;
+      observe(local, local.owner);
+      subscribers.add(listener);
+      return () => {
+        subscribers.delete(listener);
+      };
+    },
+    retry(id: string): void {
+      const machine = machines.get(id);
+      if (disposed || !machine?.profile) return;
+      scheduler.prioritize(machine.profile.sshTarget);
+      void machine.owner.retry();
+    },
+    disconnect(id: string): void {
+      if (disposed) return;
+      machines.get(id)?.owner.disconnect();
+    },
+    select(id: string): boolean {
+      if (disposed || !machines.has(id)) return false;
+      if (selectedId === id) return true;
+      // Revoke old generation bindings while their old machine is still selected.
+      selectedEpoch++;
+      selectedGeneration(null);
+      selectedId = id;
+      const target = machines.get(id)?.profile?.sshTarget;
+      if (target) scheduler.prioritize(target);
+      selectedEpoch++;
+      selectedGeneration(machines.get(id)!.handle.read()?.instanceId ?? null);
+      publish();
+      return true;
+    },
+    add(input: SavedMachine): MachineConnectionHandle {
+      if (disposed) throw new Error("Machine authority manager has been disposed");
+      const profile = SavedMachineSchema.parse(input);
+      const existing = machines.get(profile.id);
+      if (existing) {
+        if (
+          existing.profile?.sshTarget !== profile.sshTarget ||
+          existing.label !== profile.label ||
+          existing.profile?.expectedEnvironmentId !== profile.expectedEnvironmentId
+        )
+          throw new Error("Machine identity is already registered");
+        return existing.handle;
+      }
+      SavedMachineRegistrySchema.parse({
+        version: 1,
+        machines: [
+          ...[...machines.values()].flatMap((machine) =>
+            machine.profile ? [machine.profile] : [],
+          ),
+          profile,
+        ],
+      });
+      if (!profile.enabled) throw new Error("Disabled machine profiles cannot be connected");
+      const machine = makeMachine(profile.id, profile.label, profile);
+      publish();
+      return machine.handle;
+    },
+    initialize(profiles: readonly SavedMachine[]): void {
+      SavedMachineRegistrySchema.parse({ version: 1, machines: profiles });
+      for (const profile of profiles) if (profile.enabled) manager.add(profile);
+    },
+    reconcile(profiles: readonly SavedMachine[]): void {
+      if (disposed) return;
+      const next = SavedMachineRegistrySchema.parse({ version: 1, machines: profiles });
+      const previousSelection = selectedId;
+      for (const machine of [...machines.values()]) {
+        if (!machine.profile) continue;
+        const profile = next.machines.find(
+          (candidate) => candidate.id === machine.id && candidate.enabled,
+        );
+        if (
+          profile &&
+          profile.sshTarget === machine.profile.sshTarget &&
+          profile.expectedEnvironmentId === machine.profile.expectedEnvironmentId
+        ) {
+          // Labels are presentation metadata, not transport identity. Preserve
+          // the connected owner and every consumer holding its stable handle.
+          machine.label = profile.label;
+          machine.profile = profile;
+          continue;
+        }
+        if (selectedId === machine.id) manager.select(LOCAL_MACHINE_ID);
+        machine.retired = true;
+        machine.stopStatus?.();
+        machine.stopObserver?.();
+        for (const listener of machine.listeners) safe(() => listener(null));
+        machine.owner.dispose();
+        machine.listeners.clear();
+        machines.delete(machine.id);
+      }
+      for (const profile of next.machines) if (profile.enabled) manager.add(profile);
+      if (machines.has(previousSelection)) manager.select(previousSelection);
+      publish();
+    },
+    followProfiles(
+      subscribe: (onChange: (profiles: readonly SavedMachine[]) => void) => () => void,
+    ): void {
+      if (disposed) return;
+      stopProfiles?.();
+      stopProfiles = subscribe(manager.reconcile);
+    },
+    read: (): CanonicalDaemonInfo | null => machines.get(selectedId)?.handle.read() ?? null,
+    isAlive: (info: CanonicalDaemonInfo): Promise<boolean> =>
+      machines.get(selectedId)?.handle.isAlive(info) ?? Promise.resolve(false),
+    endpoint: (): DaemonConnectionEndpoint =>
+      Object.freeze({ ...machines.get(selectedId)!.handle.endpoint(), epoch: selectedEpoch }),
+    async observeSelected(listener: GenerationListener): Promise<() => void> {
+      if (disposed) return () => {};
+      const local = machines.get(LOCAL_MACHINE_ID)!;
+      observe(local, local.owner);
+      selectedObservers.add(listener);
+      return () => {
+        selectedObservers.delete(listener);
+      };
+    },
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      stopProfiles?.();
+      stopProfiles = null;
+      lifetime.abort();
+      selectedEpoch++;
+      selectedGeneration(null);
+      for (const machine of machines.values()) {
+        machine.stopStatus?.();
+        machine.stopObserver?.();
+        machine.stopObserver = null;
+        machine.owner.dispose();
+        machine.listeners.clear();
+      }
+      publish();
+      subscribers.clear();
+      selectedObservers.clear();
+    },
+  };
+  return manager;
+}
+export type MachineConnectionManager = ReturnType<typeof createMachineConnectionManager>;

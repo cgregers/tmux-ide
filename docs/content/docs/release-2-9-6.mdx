@@ -1,0 +1,41 @@
+---
+title: tmux-ide 2.9.6 candidate
+metaTitle: "What's planned for 2.9.6"
+description: "tmux-ide 2.9.6 candidate: terminal delivery, guarded resizing, shared discovery and separate native alpha integration."
+---
+
+**Release candidate — not yet published.** These notes describe the changes
+prepared for `2.9.6`. Release qualification and publication must finish before
+this version is available through the installer or npm. The published terminal
+release remains [2.9.5](/docs/release-2-9-5).
+
+## Terminal and daemon changes
+
+- Preserve terminal delivery order and public workspace identity when controllers disconnect or runtimes change.
+- Authorize pane resizing against current tmux layout and ownership, including guarded native split resizing.
+- Share Home and machine discovery between terminal and native clients, with polling and subscription fixes that let pending observations finish.
+- Improve empty-server discovery and exact-agent admission while preserving existing tmux sessions.
+
+These changes concern shared daemon and terminal behavior. They do not claim
+complete TUI parity, zero bugs or a measured performance improvement.
+
+## Separate native alpha
+
+The repository includes the opt-in [native macOS alpha](/docs/native-alpha)
+source and distribution tooling. The native app remains outside the npm runtime
+package: installing or updating the CLI does not install or update the app.
+The published native alpha's documented CLI compatibility remains 2.9.5 until
+qualification establishes a newer pairing.
+
+The former web/Electron clients are retired. Their shared qualification fixtures
+now live independently of renderer packages; the documentation website remains
+supported.
+
+## Before updating
+
+Wait for publication and the final release notes. Existing tmux sessions are
+preserved; do not kill servers as an upgrade step. Native and CLI versions have
+separate installation and rollback paths.
+
+Full candidate change list:
+[CHANGELOG.md](https://github.com/wavyrai/tmux-ide/blob/main/CHANGELOG.md).

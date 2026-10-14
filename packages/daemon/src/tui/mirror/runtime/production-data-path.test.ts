@@ -455,8 +455,28 @@ describe("production OpenTUI v2 data path", () => {
         /node:|\b(?:process|fetch|spawn|execFile|execFileSync|setInterval|setTimeout|createWorkspaceClient|createTerminalFastLane)\b/u,
       );
     }
+    // Seven former TUI implementations now sit behind compatibility adapters.
+    // The first four were extracted before the budget was updated (HEAD: 176 > 172);
+    // agent observation adds exactly the final three (179). No extra owner is started.
+    const sharedFleetOwners = [
+      "daemon-connection-owner",
+      "machine-connection-manager",
+      "home-catalog",
+      "machine-catalog",
+      "home-agent-observer",
+      "home-agent-transport",
+      "machine-agents",
+    ];
+    for (const name of sharedFleetOwners) {
+      const path = `packages/daemon/src/lib/${name}.ts`;
+      expect(authorityDataPathFiles).toContain(path);
+      expect(productionGraph.sourceByFile.get(path)).not.toMatch(
+        /from\s*["'][^"']*(?:tui\/|application-machine-authority)/u,
+      );
+    }
     expect(authorityDataPathFiles.length).toBeLessThanOrEqual(
       154 +
+        sharedFleetOwners.length +
         learningModules.length +
         inputHelpers.length +
         teamPresentationHelpers.length +

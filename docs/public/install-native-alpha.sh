@@ -23,16 +23,45 @@ node="$HOME/.local/share/tmux-ide/current/node/bin/node"
 [ -f "$node" ] && [ -x "$node" ] || fail 'First run the universal installer: curl -fsSL https://tmux-ide.com/install.sh | sh'
 unset NODE_OPTIONS NODE_PATH
 case "$("$node" --version)" in v24.*) ;; *) fail 'Managed Node 24 is required; update using https://tmux-ide.com/install.sh' ;; esac
-base=https://github.com/wavyrai/tmux-ide/releases/download/native-alpha-2026101406
-installer_sha=17cf01adb3d2d46f2b8f9d56c603d4942974b3ec097edd022b621cbb0c0c21c1
-archive_sha=c676bdec31f0cebf748e58e0538e3de0944eca825020a830f1eac15af64c2710
+# A stable user Applications entry points at the managed alias, never a version.
+# Preflight conflicts BEFORE any installer mutation; never replace foreign entries.
+applications_entry() {
+  "$node" --input-type=module -e '
+    import fs from "node:fs";
+    import path from "node:path";
+    const [mode,home,prefix]=process.argv.slice(1);
+    const directory=path.join(home,"Applications");
+    const entry=path.join(directory,"Tmux IDE Alpha.app");
+    const target=path.join(prefix,"TmuxIDE.app");
+    const stat=p=>{try{return fs.lstatSync(p);}catch(e){if(e.code==="ENOENT")return null;throw e;}};
+    const check=()=>{
+      const parent=stat(directory);
+      if(parent && (!parent.isDirectory() || parent.isSymbolicLink())) throw new Error("Applications directory is not an ordinary directory");
+      const current=stat(entry);
+      if(current && (!current.isSymbolicLink() || fs.readlinkSync(entry)!==target)) throw new Error("Applications entry already belongs to another app or installation");
+      return current;
+    };
+    try {
+      const current=check();
+      if(mode==="remove") { if(current) fs.unlinkSync(entry); }
+      else if(mode==="create") {
+        fs.mkdirSync(directory,{recursive:true,mode:0o700});
+        if(!check()) fs.symlinkSync(target,entry);
+      }
+    } catch { console.error("tmux-ide native alpha: Applications entry conflict or operation failed; no foreign entry was replaced"); process.exit(1); }
+  ' "$1" "$HOME" "$prefix"
+}
+applications_entry check
+base=https://github.com/wavyrai/tmux-ide/releases/download/native-alpha-2026101410
+installer_sha=a3819360478f4231cdb68cfb7ce0802659ac94e3bc9b8722c06d260050759ccc
+archive_sha=aab55052ccece446215fd080a04f2b0641087d6b89d2a94cf7577b9f670ce09e
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/tmux-native-alpha.XXXXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 fetch() { curl --proto '=https' --proto-redir '=https' -fLsS --connect-timeout 15 --max-time 300 --max-filesize 536870912 "$1" -o "$2"; }
 verify() { actual=$(shasum -a 256 "$1" | awk '{print $1}'); [ "$actual" = "$2" ] || fail 'Downloaded asset checksum mismatch'; }
-fetch "$base/tmux-ide-install.mjs" "$scratch/installer.mjs"
+fetch "$base/tmux-ide-install-v2.mjs" "$scratch/installer.mjs"
 verify "$scratch/installer.mjs" "$installer_sha"
 printf '%s\n' '{"teamId":"7HWMF997US","bundleId":"com.tmux-ide.gpui.alpha","architecture":"arm64","minimumMacOS":"14.2"}' > "$scratch/policy.json"
 mkdir -p "$(dirname "$prefix")"
@@ -40,7 +69,7 @@ case "$action" in
   uninstall) "$node" "$scratch/installer.mjs" uninstall --prefix "$prefix" ;;
   rollback) "$node" "$scratch/installer.mjs" rollback --prefix "$prefix" --policy "$scratch/policy.json" ;;
   install|update)
-    fetch "$base/tmux-ide-gpui-0.1.0-macos-arm64.app.tar.gz" "$scratch/app.tar.gz"
+    fetch "$base/tmux-ide-gpui-0.1.1-macos-arm64.app.tar.gz" "$scratch/app.tar.gz"
     verify "$scratch/app.tar.gz" "$archive_sha"
     # Only the pinned, checksum-verified archive reaches tar. Bound both reads.
     "$node" --input-type=module -e '
@@ -53,12 +82,16 @@ case "$action" in
       const extraction=spawnSync("/usr/bin/tar",["-xzf",archive,"-C",destination],{stdio:"inherit",timeout:120000});
       if(extraction.error || extraction.status!==0) process.exit(1);
     ' "$scratch/app.tar.gz" "$scratch"
-    "$node" "$scratch/installer.mjs" "$action" --prefix "$prefix" --policy "$scratch/policy.json" --app "$scratch/TmuxIDE.app" --version 0.1.0-2026101406 ;;
+    "$node" "$scratch/installer.mjs" "$action" --prefix "$prefix" --policy "$scratch/policy.json" --app "$scratch/TmuxIDE.app" --version 0.1.1-2026101410 ;;
+esac
+case "$action" in
+  uninstall) applications_entry remove ;;
+  *) applications_entry create ;;
 esac
 case "$action" in
   install|update)
     printf '\nNative alpha is installed at:\n  %s/TmuxIDE.app\n' "$prefix"
-    printf '%s\n' 'In Finder, choose Go → Go to Folder and paste that app path to open it.'
+    printf '\nOpen from your Applications folder:\n  %s/Applications/Tmux IDE Alpha.app\n' "$HOME"
     printf '%s\n' 'If the CLI daemon needs starting or updating, run this separately:' '  ~/.local/bin/tmux-ide update --daemon --json'
     printf '%s\n' 'This installer did not start or stop the daemon or any tmux session.' ;;
   rollback) printf '\nPrevious verified native version restored at:\n  %s/TmuxIDE.app\n' "$prefix" ;;
