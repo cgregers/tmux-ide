@@ -66,7 +66,8 @@ panes:
 ## Architecture
 
 This TypeScript monorepo uses pnpm and Turbo. The terminal CLI/daemon is the
-current npm release surface; the former web and desktop applications are retired. See `ARCHITECTURE.md` for import direction and
+current npm release surface. GPUI is a separately distributed native macOS alpha;
+the former web and Electron applications are retired. See `ARCHITECTURE.md` for import direction and
 `eslint.config.js` for enforced package boundaries.
 
 ### CLI and daemon
@@ -102,7 +103,11 @@ current npm release surface; the former web and desktop applications are retired
   `workspace/` workspace presentation, and `features/` optional feature modules.
 - `packages/daemon/src/widgets/` — explorer, changes, preview, config, setup and
   sidebar widgets; `resolve.ts` resolves entries and `lib/` holds shared helpers.
-- The former Solid desktop renderer and Electron shell have been retired; a replacement is not yet shipped.
+- `apps/tmux-gpui/` — native macOS alpha using the shared daemon contract and
+  pinned Herdr GPUI source. Follow its README, upstream instructions and separate
+  Rust/bridge/package gates; keep native assets out of the universal npm package.
+- The former Solid/Electron and experimental React workspace clients are retired;
+  shared qualification fixtures live in `scripts/lib/product-fixtures`.
 - Do not add an external or closed-source canvas SDK to the core, TUI or web GUI.
 
 ### Development, native inputs and documentation
@@ -303,7 +308,8 @@ pnpm pack:check
 - Broad contributor gate: `pnpm check`
 - Terminal release gate: `pnpm release:opentui:check`; follow `RELEASE.md`.
   `prepublishOnly` runs this focused gate and the prepublish artifact check,
-  not the broad contributor gate. Web/desktop checks remain independent signals.
+  not the broad contributor gate. Native GPUI checks remain separate; shared
+  daemon/contract/tmux changes require the terminal gate as well.
 - Docs build: `pnpm docs:build`
 
 ### Best practices
