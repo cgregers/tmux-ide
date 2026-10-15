@@ -1,0 +1,8 @@
+{
+  "source": "docs/app/icon.png",
+  "sourceSha256": "7532f99afa0bde79f8f2c0b9fecfd723cba7bc383a316ad8a53cd3d88dbd2af5",
+  "output": "AppIcon.icns",
+  "outputSha256": "45250f0dee732eeacfed8519e0b02d45e5e01620830521bf86abec47da7e3b5c",
+  "conversion": "macOS sips -z (16,32,128,256,512 at 1x and 2x), iconutil -c icns",
+  "scope": "Existing tmux-ide artwork; larger representations upscale the 256px source, no new artwork."
+}

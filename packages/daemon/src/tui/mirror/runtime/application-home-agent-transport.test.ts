@@ -329,3 +329,8 @@ it("keeps default push fast, polls only independent scopes while healthy, and ca
     vi.useRealTimers();
   }
 });
+
+it("keeps selected-machine discovery when an optional reader is explicitly undefined", () => {
+  const transport = createApplicationHomeAgentTransport({ readDaemon: undefined });
+  expect(typeof transport.readDaemon).toBe("function");
+});

@@ -13,9 +13,9 @@ The current product surface is deliberately narrow:
 - agent discovery and status
 - the minimal command palette
 
-The web and native desktop clients are future consumers of the daemon contract;
-they are not part of the 2.9 release cut. The retained Solid desktop renderer
-provides browser-specific fixtures used by cross-client qualification. Shared daemon,
+The native GPUI client is a separately distributed public macOS alpha; it is not
+part of the universal CLI/npm package. The former Solid/Electron clients have
+been retired. Shared daemon,
 private tmux fleet, process ownership, and retirement fixtures live in
 `scripts/lib/product-fixtures`, independent of renderer packages.
 The separate experimental React workspace client and its Electron launch variants
@@ -112,7 +112,6 @@ colors, duplicate input listeners, and direct renderer-side tmux mutation.
 - `packages/presentation` — renderer-neutral pane and workspace presentation models
 - `packages/sdk` — public programmatic API
 - `packages/tmux-bridge` — tmux protocol/process integration
-- `apps/desktop-renderer`, `apps/electron-shell` and `app/` — deferred desktop surfaces and retained cross-client qualification fixtures
 - `docs/` — marketing site and user documentation
 
 The SDK shares HTTP/retry behavior through the exported
@@ -203,3 +202,21 @@ Keep new work behind the existing ownership boundaries:
 
 Do not create a second application root, terminal replica, workspace authority,
 or browser-only version of the TUI.
+
+## Native GPUI alpha
+
+`apps/tmux-gpui/` contains the pinned Herdr GPUI source baseline and native
+client implementation. It is part of this repository, outside npm publication.
+Its Rust, bridge and packaged-app gates are separate from the terminal release
+gate; changes to shared daemon, contracts or tmux ownership still require terminal
+qualification. The native browser reuses the upstream painter
+and the existing TypeScript terminal delivery validator for session/pane
+selection, authenticated input, resize, scroll/copy and explicit Refresh recovery.
+Its theme picker shares the TUI's named preset catalog and palette projection.
+The daemon remains authoritative. Native alpha 0.1.0 build 2026101406 is publicly
+distributed for Apple Silicon with Developer ID signing and Apple notarization.
+This does not establish full TUI parity or production stability: a fresh second-Mac
+installation and two-distinct-version rollback remain unqualified. The native
+app declares macOS 14.2 minimum; the qualified CLI 2.9.5 plus native setup requires
+macOS 26 or later. See `apps/tmux-gpui/README.md`, its validation evidence and
+`docs/content/docs/native-alpha.mdx` for exact scope.

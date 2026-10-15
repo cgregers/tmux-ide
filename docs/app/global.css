@@ -752,14 +752,6 @@
   flex-shrink: 0;
 }
 
-.hero-secondary-count {
-  font-family: var(--font-mono), ui-monospace, monospace;
-  font-size: 0.75rem;
-  line-height: 1rem;
-  font-weight: 400;
-  color: var(--color-fd-muted-foreground);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .hero-secondary {
     transition: none;

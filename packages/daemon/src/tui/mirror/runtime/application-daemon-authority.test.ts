@@ -1,9 +1,9 @@
 import { SshConnectionError } from "../../../lib/ssh-daemon-transport.ts";
 import { describe, expect, it, vi } from "vitest";
 import {
-  createApplicationDaemonAuthority,
-  type ApplicationDaemonAuthorityDependencies,
-} from "./application-daemon-authority.ts";
+  createDaemonConnectionOwner as createApplicationDaemonAuthority,
+  type DaemonConnectionOwnerDependencies as ApplicationDaemonAuthorityDependencies,
+} from "../../../lib/daemon-connection-owner.ts";
 const remote = {
   pid: 999999,
   port: 7000,
@@ -348,4 +348,21 @@ it("retires every transport exactly once through 100 disconnect and reconnect cy
   }
   expect(connections).toHaveLength(101);
   for (const value of connections) expect(value.dispose).toHaveBeenCalledOnce();
+});
+
+it("keeps shared-owner telemetry bounded and independent of connection cleanup", async () => {
+  const f = setup();
+  const records: unknown[] = [];
+  const authority = createApplicationDaemonAuthority(f.deps, (record) => {
+    records.push(record);
+    throw new Error("observer failure");
+  });
+  try {
+    await authority.initialize("build");
+    expect(authority.endpoint().state).toBe("ready");
+    expect(JSON.stringify(records)).not.toContain(remote.authToken);
+  } finally {
+    authority.dispose();
+  }
+  expect(f.first.dispose).toHaveBeenCalledOnce();
 });

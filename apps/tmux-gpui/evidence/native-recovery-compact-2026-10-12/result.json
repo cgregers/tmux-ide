@@ -1,0 +1,9 @@
+{
+  "passed": true,
+  "daemonReplaced": true,
+  "sameAppRecovered": true,
+  "packagedRuntime": true,
+  "isolatedCwd": true,
+  "minimalPath": true,
+  "sourceSurvivesClose": true
+}

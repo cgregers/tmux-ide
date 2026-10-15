@@ -183,9 +183,9 @@ function label(value: string | null | undefined, fallback: string): string {
   return normalized || fallback;
 }
 
-function fallbackPaneId(
-  session: ApplicationShellSessionFacts,
-  pane: ApplicationShellPaneFacts,
+export function fallbackPaneId(
+  session: Pick<ApplicationShellSessionFacts, "name" | "runtimeSessionId">,
+  pane: Pick<ApplicationShellPaneFacts, "runtimePaneId">,
 ): string {
   // Runtime identity is hashed, never serialized. Unlike title/command/index,
   // it is stable for the lifetime of a pane across resource refreshes.

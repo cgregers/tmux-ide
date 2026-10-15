@@ -2,9 +2,11 @@
 
 ## Scope
 
-This release ships the OpenTUI Home and Terminals path. The deferred web and
-native desktop clients are not release prerequisites and must not be included in
-the universal npm package.
+The CLI/npm release ships the OpenTUI Home and Terminals path. The former web
+and Electron clients are retired. The public native GPUI macOS alpha is a
+separate distribution and must not be included in the universal npm package.
+Its standalone UI gates do not replace terminal qualification when shared
+daemon, contracts, observers or tmux ownership code changes.
 
 ## Preflight
 
@@ -57,7 +59,7 @@ survive viewer shutdown.
 ## Publish
 
 1. Commit the release changes and merge the reviewed branch to `main` after its required checks pass.
-2. Push the matching `vX.Y.Z` tag at that commit. The release workflows build and qualify all four bundled tmux/TUI platforms.
+2. Push the matching `vX.Y.Z` tag at that commit. The release workflows build and qualify the three supported bundled tmux/TUI platforms (macOS Apple Silicon, Linux x64 and Linux ARM64; Intel macOS is unsupported as of 2.9.6).
 3. Let the Release workflow publish npm through its trusted-publishing environment. It verifies matching runtime assets and provenance before publishing; do not publish a second copy manually.
 4. Stable versions use npm `latest`; prereleases use `beta`. Verify the matching GitHub release notes and assets.
 
@@ -92,7 +94,7 @@ service journey. This proves real-manager ownership protection, not backward
 compatibility with a historical published binary.
 
 Qualification-only dispatches additionally run
-`node scripts/qualify-installer-service.mjs <new-evidence-directory>` on all four
+`node scripts/qualify-installer-service.mjs <new-evidence-directory>` on all three supported
 platforms. This uses the reviewed installer in an isolated HOME and a prefix
 containing spaces, with only `/usr/bin:/bin` on the installer's PATH. Apple Silicon
 uses published `2.9.0-beta.50` → `2.9.2` for cross-version coverage. The older
@@ -123,3 +125,25 @@ production services or login lingering.
 2. Run `tmux-ide doctor --json` and `tmux-ide app`.
 3. Verify the npm page, GitHub assets, docs site, and retry path:
    `tmux-ide update --tui-binary`.
+
+## Separate native alpha distribution
+
+Native alpha 0.1.0 build 2026101406 is publicly signed and notarized for Apple
+Silicon. Its compatibility qualification uses CLI/daemon 2.9.5; a forthcoming
+CLI release must be qualified independently before updating that compatibility
+claim. Do not infer native release readiness from an npm release, or vice versa.
+
+Follow `apps/tmux-gpui/README.md`, `apps/tmux-gpui/SIGNING.md` and the native
+workflow for Rust, bridge, exact packaged-app and signing checks. Preserve the
+embedded upstream licenses/notices and distinguish pre-signing build receipts
+from signed artifact identities. Public artifacts and installer checksums must
+refer to the same reviewed build.
+
+The default native installer exposes `~/Applications/Tmux IDE Alpha.app` as a
+user-facing entry to the managed installation under
+`~/Library/Application Support/tmux-ide/native-alpha`. Updates and rollback use
+retained managed versions; the Applications entry must not overwrite an unrelated
+app or link. Verify that install/update/rollback/uninstall preserve unrelated
+entries, daemon processes and tmux sessions. A fresh second-Mac test and rollback
+between two distinct signed native builds remain outstanding; same-build
+reinstallation and first-install rollback refusal do not establish those claims.

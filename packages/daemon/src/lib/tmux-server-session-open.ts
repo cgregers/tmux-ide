@@ -1,3 +1,8 @@
+import {
+  captureAgentAdmission,
+  observedAgentSchema,
+  type ObservedAgent,
+} from "./tmux-server-agent-admission.ts";
 import { randomUUID } from "node:crypto";
 import { WorkspaceCatalogLiveSessionIdSchemaZ } from "@tmux-ide/contracts";
 import { liveSessionIdForNativeIdentity } from "../terminal/protocol/live-session-identity.ts";
@@ -21,15 +26,16 @@ export function createNativeTmuxSessionOpener(options: {
     options.assertOpen();
     if (disposed) throw new Error("Session admission is retired");
   };
-  const open = async (liveSessionId: string) => {
+  const open = async (liveSessionId: string, observed?: ObservedAgent) => {
     assertOpen();
     const records = await options.run([
       "list-sessions",
       "-F",
       "#{pid}\t#{session_id}\t#{session_created}\t#{session_name}",
     ]);
+    // The final field is an exact session identity; spaces are valid name bytes.
     const matches = records
-      .trim()
+      .replace(/\n+$/u, "")
       .split("\n")
       .map((line) => line.split("\t"))
       .filter(
@@ -67,6 +73,10 @@ export function createNativeTmuxSessionOpener(options: {
         throw new Error("Selected live tmux session changed during admission");
       return output;
     };
+    const agent = observed
+      ? await captureAgentAdmission(run, { id: nativeSessionId!, name: name! }, observed)
+      : null;
+    await agent?.verify(false);
     const promotion = new WorkspacePromotionAuthority({
       daemonInstanceId: options.generation,
       registry: options.registry,
@@ -79,7 +89,12 @@ export function createNativeTmuxSessionOpener(options: {
         intent: { sessionId: fleetSessionIdForName(name!) },
       });
       await run(["display-message", "-p", "-t", nativeSessionId!, "#{session_id}"]);
-      return { workspaceName: result.resource.workspaceName, liveSessionId };
+      const semanticPaneId = await agent?.verify(true);
+      return {
+        workspaceName: result.resource.workspaceName,
+        liveSessionId,
+        ...(semanticPaneId ? { semanticPaneId } : {}),
+      };
     } finally {
       await promotion.dispose();
     }
@@ -95,6 +110,26 @@ export function createNativeTmuxSessionOpener(options: {
         .then(() => open(liveSessionId))
         .finally(() => pending.delete(liveSessionId));
       pending.set(liveSessionId, operation);
+      tail = operation.catch(() => {});
+      return operation;
+    },
+    openAgent(
+      liveSessionId: string,
+      input: ObservedAgent,
+    ): Promise<{ workspaceName: string; liveSessionId: string; semanticPaneId: string }> {
+      WorkspaceCatalogLiveSessionIdSchemaZ.parse(liveSessionId);
+      const observed = observedAgentSchema.parse(input);
+      assertOpen();
+      if (pending.size >= 16) throw new Error("Session admission capacity reached");
+      const key = randomUUID();
+      const operation = tail
+        .then(async () => {
+          const result = await open(liveSessionId, observed);
+          if (!result.semanticPaneId) throw new Error("Agent admission returned no target");
+          return { ...result, semanticPaneId: result.semanticPaneId };
+        })
+        .finally(() => pending.delete(key));
+      pending.set(key, operation);
       tail = operation.catch(() => {});
       return operation;
     },
