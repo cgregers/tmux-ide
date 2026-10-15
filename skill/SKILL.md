@@ -67,12 +67,23 @@ blocked, Stop → done, SessionEnd → idle) and records `@agent_session_id`. It
 takes effect for **new** Claude Code sessions; the merge is reversible
 (`integration uninstall claude`).
 
+**Copilot CLI users** — `tmux-ide integration install copilot` registers
+user-level hooks for working/blocked/done/idle status. Unsandboxed hooks also
+capture `@agent_session_id`. Inside cplt, hooks write status-only drop records
+for the host updater; they deliberately do not capture resume ids or hints.
+The installer prints the grant command: tell the user to run
+`cplt config set -g allow.write <agentStateDir>` — exactly that folder, never
+`~/.tmux-ide` itself. Any sandboxed agent with this grant can read, forge or hide
+another Copilot pane's status, including notifications and `wait agent-status`
+outcomes. Sandbox-aware restore is future work.
+
 **Session-id capture for other kinds** (what `restore --resume-agents` resumes
 from): codex and cursor-agent panes are stamped **automatically** — the chrome
 updater reads each CLI's own on-disk session state; opencode gets a plugin via
 `tmux-ide integration install opencode`. `tmux-ide integration status` shows
-what's active. Kinds without a verified resume story (gemini, aider, copilot, …)
-can self-report the id as above.
+what's configured (Copilot capture is unsandboxed only; hook delivery is not
+verified). Other kinds can self-report the id as above, but restore requires
+a verified per-kind resume command.
 
 **How detection layers work:** Layer 1 is the authority above — a fresh
 `@agent_state` option is ground truth. When none is present, Layer 2 resolves the

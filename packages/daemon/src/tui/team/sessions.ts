@@ -167,6 +167,8 @@ export interface PaneDetail {
   paneId: string;
   agent: string | null;
   status: AgentStatus;
+  /** Raw existing `@agent_state`, including stale stamps (bridge ordering uses its epoch). */
+  authorityRaw: string | null;
   /** `window_index` of the pane's window — the notification path suppresses
    *  toasts window-granularly, so the transition must know its window. */
   windowIndex: number;
@@ -352,6 +354,7 @@ export function listTeamSessions(
           paneId: pane.id,
           agent: manifest && manifest.id !== "shell" ? manifest.id : null,
           status,
+          authorityRaw: pane.authority.length > 0 ? pane.authority : null,
           windowIndex: pane.windowIndex,
           pid: pane.pid,
           dir: pane.dir,

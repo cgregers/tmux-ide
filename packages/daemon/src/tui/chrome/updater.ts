@@ -29,6 +29,7 @@ import {
   updaterSpawnArgv,
 } from "./front-door.ts";
 import { DEFAULT_THEME, getAppConfig, type AppTheme } from "../../lib/app-config.ts";
+import { resolveRuntimeNamespace } from "../../lib/runtime-namespace.ts";
 import {
   maybeCheckForUpdate,
   markUpdateNotified,
@@ -36,6 +37,7 @@ import {
 } from "../../lib/update-check.ts";
 import { createStatusTracker, type AgentStatus } from "../detect/classify.ts";
 import { createSessionIdCapturer } from "../detect/session-id.ts";
+import { createAgentStateBridge, readAgentStateDrop } from "../detect/agent-state-drop.ts";
 import { listTeamProjects, type TeamProject } from "../team/projects.ts";
 import type { PaneDetail } from "../team/sessions.ts";
 import { paneChip } from "./chip.ts";
@@ -317,6 +319,8 @@ export interface UpdaterTickDeps {
    * a fleet with no unstamped capturable panes costs nothing.
    */
   captureSessionIds?: (panes: PaneDetail[]) => void;
+  /** Status-only sandbox bridge, run after capture; never stamps resume ids or hints. */
+  bridgeAgentStates?: (panes: PaneDetail[]) => void;
 }
 
 /**
@@ -367,6 +371,11 @@ export function runUpdaterTick(deps: UpdaterTickDeps): void {
   }
   writeChips(deps, adopted, panes, theme);
   deps.captureSessionIds?.(panes);
+  try {
+    deps.bridgeAgentStates?.(panes);
+  } catch {
+    // A hostile record or failed bridge must not suppress events/notifications.
+  }
   if (update?.updateAvailable && update.latest) dispatchUpdateToast(deps, update.latest);
   if (deps.prevState && deps.appendEvents) {
     const { events, state } = diffFleet(deps.prevState, fleetStatuses(projects));
@@ -747,6 +756,14 @@ export function runUpdaterLoop(): void {
     // the next capture window".
     stamp: (paneId, id) => runTmux(["set-option", "-p", "-t", paneId, "@agent_session_id", id]),
   });
+  // This host updater is the only drop-record writer to tmux. The bridge pins
+  // the server identity once and treats sandbox-writable files as hostile.
+  const agentStateBridge = createAgentStateBridge({
+    agentStateDir: resolveRuntimeNamespace().agentStateDir,
+    serverPid: () => runTmux(["display-message", "-p", "#{pid}"]).toString().trim(),
+    readRecord: readAgentStateDrop,
+    stamp: (argv) => runTmux(argv),
+  });
   // The fleet snapshotter — pulsed each tick, self-throttled, writes only on a
   // structural change so the fleet can be rebuilt after a tmux-server death.
   const snapshotter = createSnapshotter({
@@ -784,6 +801,7 @@ export function runUpdaterLoop(): void {
         maybeCheckForUpdate: () => maybeCheckForUpdate({ enabled: config.updates.check }),
         markUpdateNotified,
         captureSessionIds: (panes) => capturer.onTick(panes),
+        bridgeAgentStates: (panes) => agentStateBridge.onTick(panes),
       });
     } catch {
       // never let one bad tick kill the loop

@@ -1,14 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, unlinkSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
+  developmentNamespaceEnvironment,
   resolveRuntimeNamespace,
   resolveTmuxServerIntent,
   runtimeNamespaceEnvironment,
 } from "./runtime-namespace.ts";
+import { resolveDevelopmentInstance } from "./development-instance.ts";
 
 const userHome = "/Users/runtime-test";
 const cwd = "/checkout/tmux-ide";
@@ -56,6 +58,87 @@ describe("RuntimeNamespace", () => {
       persistence: "durable",
       isolated: false,
     });
+  });
+
+  it("resolves the production Copilot integration and drop-folder paths", () => {
+    expect(resolveRuntimeNamespace({ env: {}, userHome, cwd })).toMatchObject({
+      copilotHookPath: join(userHome, ".tmux-ide", "hooks", "copilot-state.sh"),
+      copilotHooksDir: join(userHome, ".copilot", "hooks"),
+      agentStateDir: join(userHome, ".tmux-ide", "agent-state"),
+    });
+  });
+
+  it("honors COPILOT_HOME and integration overrides without moving the production hook", () => {
+    expect(
+      resolveRuntimeNamespace({
+        env: { COPILOT_HOME: "/fixture/copilot", TMUX_IDE_HOME: "/fixture/state" },
+        userHome,
+        cwd,
+      }),
+    ).toMatchObject({
+      copilotHookPath: join(userHome, ".tmux-ide", "hooks", "copilot-state.sh"),
+      copilotHooksDir: "/fixture/copilot/hooks",
+      agentStateDir: "/fixture/state/agent-state",
+    });
+    expect(
+      resolveRuntimeNamespace({
+        env: {
+          COPILOT_HOME: "/ignored/copilot",
+          TMUX_IDE_COPILOT_HOOK_PATH: "/fixture/hook.sh",
+          TMUX_IDE_COPILOT_HOOKS_DIR: "/fixture/hooks",
+          TMUX_IDE_AGENT_STATE_DIR: "/fixture/drop",
+        },
+        userHome,
+        cwd,
+      }),
+    ).toMatchObject({
+      copilotHookPath: "/fixture/hook.sh",
+      copilotHooksDir: "/fixture/hooks",
+      agentStateDir: "/fixture/drop",
+    });
+    expect(
+      resolveRuntimeNamespace({ env: { COPILOT_HOME: "  " }, userHome, cwd }).copilotHooksDir,
+    ).toBe(join(userHome, ".copilot", "hooks"));
+  });
+
+  it("keeps development Copilot paths and overrides inside their instance", () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "copilot-namespace-")));
+    try {
+      const instance = resolveDevelopmentInstance({
+        worktree: root,
+        store: join(root, "store"),
+        userHome: root,
+      });
+      const env = {
+        ...developmentNamespaceEnvironment(instance, "copilot:namespace:fixture"),
+        COPILOT_HOME: "/foreign/copilot",
+      };
+      expect(resolveRuntimeNamespace({ env, userHome: root })).toMatchObject({
+        copilotHookPath: join(instance.stateHome, "hooks", "copilot-state.sh"),
+        copilotHooksDir: join(instance.stateHome, "integrations", ".copilot", "hooks"),
+        agentStateDir: join(instance.stateHome, "agent-state"),
+      });
+      const overrides = {
+        TMUX_IDE_COPILOT_HOOK_PATH: join(instance.root, "fixture", "copilot.sh"),
+        TMUX_IDE_COPILOT_HOOKS_DIR: join(instance.root, "fixture", "hooks"),
+        TMUX_IDE_AGENT_STATE_DIR: join(instance.root, "fixture", "drop"),
+      };
+      const namespace = resolveRuntimeNamespace({
+        env: { ...env, ...overrides },
+        userHome: root,
+      });
+      expect(runtimeNamespaceEnvironment(namespace)).toMatchObject(overrides);
+      for (const key of Object.keys(overrides)) {
+        expect(() =>
+          resolveRuntimeNamespace({
+            env: { ...env, [key]: "/foreign/path" },
+            userHome: root,
+          }),
+        ).toThrow("escapes instance");
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("inherits daemon publication from an explicit registry authority", () => {
