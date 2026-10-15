@@ -18,7 +18,7 @@
     "packages/contracts/src/visual-tokens.ts": "8d6bb05e00ca1c70",
     "packages/daemon/src/tui/mirror/ansi-palette.ts": "2454ed810dd15b57",
     "packages/daemon/src/tui/mirror/blit.ts": "1b5751f0eae70aea",
-    "packages/daemon/src/tui/mirror/canonical-workspace-routing.ts": "bbf7bf4cea56b23c",
+    "packages/daemon/src/tui/mirror/canonical-workspace-routing.ts": "4e86a8deb8eba90a",
     "packages/daemon/src/tui/mirror/pane-surface.tsx": "116c73f5c4146c61",
     "packages/daemon/src/tui/mirror/performance-events.ts": "0af92eef59df62e1",
     "packages/daemon/src/tui/mirror/renderer-commands.ts": "a5a840b6ff3382ab",
