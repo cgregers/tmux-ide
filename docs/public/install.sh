@@ -6,6 +6,10 @@ fetch() { curl -fLsS --retry 3 --connect-timeout 15 --max-time 180 "$1" -o "$2";
 digest() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'
 }
+if [ -t 1 ]; then step_mark=$(printf '\033[32m>\033[0m'); else step_mark='>'; fi
+step() { printf '  %s %s\n' "$step_mark" "$*"; }
+# Show captured tool output only when that step fails.
+show_log() { [ ! -s "$1" ] || tail -n 20 "$1" | sed 's/^/    /' >&2; }
 main() {
   action=install
   confirmed=false
@@ -116,11 +120,15 @@ JS
     *) fail 'Supported systems: macOS and glibc Linux, including supported WSL distributions' ;;
   esac
   case "$(uname -m)" in arm64|aarch64) arch=arm64 ;; x86_64|amd64) arch=x64 ;; *) fail 'Supported architectures: ARM64 and x64' ;; esac
+  [ "$os-$arch" != darwin-x64 ] || fail 'Intel Macs are not supported; tmux-ide on macOS requires Apple Silicon'
   for tool in curl tar gzip awk mktemp grep; do command -v "$tool" >/dev/null 2>&1 || fail "Missing required tool: $tool"; done
   command -v sha256sum >/dev/null 2>&1 || command -v shasum >/dev/null 2>&1 || fail 'A SHA-256 tool is required'
   stage=$(mktemp -d "$root/releases/.install.XXXXXX")
   candidate="$root/releases/install-${stage##*.install.}"
-  printf 'Installing tmux-ide@%s for %s-%s…\n' "$version" "$os" "$arch"
+  case "$os" in darwin) platform='macOS · Apple Silicon' ;; *) platform="Linux · $arch" ;; esac
+  printf '\n  tmux-ide installer · tmux-ide.com\n\n'
+  step "$platform"
+  case "$version" in latest) step 'Downloading tmux-ide…' ;; *) step "Downloading tmux-ide ${version}…" ;; esac
   fetch https://nodejs.org/dist/latest-v24.x/SHASUMS256.txt "$stage/SHASUMS256.txt"
   archive=$(awk -v suffix="-$os-$arch.tar.gz" '$2 ~ /^node-v24\.[0-9]+\.[0-9]+-/ && substr($2,length($2)-length(suffix)+1)==suffix {print $2}' "$stage/SHASUMS256.txt")
   case "$archive" in ''|*[!a-zA-Z0-9.-]*) fail 'Could not resolve an official Node.js archive' ;; esac
@@ -139,7 +147,10 @@ JS
   # prebuilt binaries for every supported platform, and tmux-ide's own
   # postinstall runs explicitly once the release is in place. Skipping them
   # also avoids running third-party install scripts and npm's allowScripts warning.
-  TMUX_IDE_RUNTIME_MODE=development npm install --global --ignore-scripts --prefix "$stage/npm" "tmux-ide@$version"
+  if ! TMUX_IDE_RUNTIME_MODE=development npm install --global --ignore-scripts --prefix "$stage/npm" "tmux-ide@$version" >"$stage/npm.log" 2>&1; then
+    show_log "$stage/npm.log"
+    fail "npm could not install tmux-ide@$version; the existing installation is unchanged"
+  fi
   cli="$stage/npm/lib/node_modules/tmux-ide/bin/cli.js"
   installed=$(node --input-type=module -e 'import fs from "node:fs"; console.log(JSON.parse(fs.readFileSync(process.argv[1], "utf8")).version)' "$stage/npm/lib/node_modules/tmux-ide/package.json")
   [ "$(node "$cli" --version)" = "tmux-ide v$installed" ] || fail 'Installed CLI version does not match its package'
@@ -180,12 +191,16 @@ JS
   chmod +x "$native"
   native_version=$("$native" -V)
   printf '%s\n' "$native_version" | awk '$1 == "tmux" && $2 ~ /^[0-9]+\.[0-9]+[a-z]?$/ { split($2, v, "."); if (v[1]+0 > 3 || (v[1]+0 == 3 && v[2]+0 >= 7)) ok=1 } END { exit !ok }' || fail 'Bundled tmux must be version 3.7 or newer'
-  printf '%s\n' "$native_version"
-  node "$cli" update --tui-binary
-  rm "$stage/node.tar.gz" "$stage/SHASUMS256.txt"
+  if ! node "$cli" update --tui-binary >"$stage/runtime.log" 2>&1; then
+    show_log "$stage/runtime.log"
+    fail 'Could not download the tmux-ide app runtime; the existing installation is unchanged'
+  fi
+  step "Verified tmux-ide $installed, its app runtime and bundled $native_version"
+  rm "$stage/node.tar.gz" "$stage/SHASUMS256.txt" "$stage/npm.log" "$stage/runtime.log"
   node --input-type=module - "$root" "$prefix" "$stage" "$agent_teams" <<'JS'
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 const [root, prefix, stage, agentTeams] = process.argv.slice(2);
 const destination = path.join(root, 'releases', path.basename(stage).replace('.install.', 'install-'));
@@ -209,11 +224,12 @@ const replaceLink = (target, link) => {
   else { fs.symlinkSync(target, temporary); fs.renameSync(temporary, link); }
 };
 let activated = false;
+let version;
 try {
   fs.renameSync(stage, destination);
   const node = path.join(destination, 'node/bin/node');
   const pkg = path.join(destination, 'npm/lib/node_modules/tmux-ide');
-  const version = JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8')).version;
+  version = JSON.parse(fs.readFileSync(path.join(pkg, 'package.json'), 'utf8')).version;
   const env = {...process.env, PATH: `${path.join(destination, 'node/bin')}:${process.env.PATH}`, npm_config_global: 'false', npm_config_prefix: path.join(destination, 'npm')};
   // Complete package setup at its final path before switching the active release.
   // Daemon upgrades and other host integrations are explicit follow-up actions;
@@ -245,27 +261,45 @@ try {
 if (agentTeams === '1') {
   try {
     const out = execFileSync(launcherPath, ['integration', 'agent-teams', 'enable', '--if-not-disabled'], {encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'pipe']});
-    if (out.trim()) console.log(`\n${out.trim()}`);
+    if (out.trim()) console.log(`  > ${out.trim()}`);
   } catch (error) {
     const detail = String(error.stdout || error.stderr || error.message).trim().split('\n')[0];
-    if (detail.startsWith('Usage: tmux-ide integration <')) console.log('\nThis tmux-ide version cannot configure Claude Code agent teams; skipped.');
-    else console.log(`\nWarning: could not configure Claude Code agent teams (${detail}). Retry: ${quote(launcherPath)} integration agent-teams enable`);
+    if (detail.startsWith('Usage: tmux-ide integration <')) console.log('  > This tmux-ide version cannot configure Claude Code agent teams; skipped.');
+    else console.log(`  ! Warning: could not configure Claude Code agent teams (${detail}). Retry: ${quote(launcherPath)} integration agent-teams enable`);
   }
 } else {
-  console.log('\nSkipped Claude Code agent teams (opted out). Enable later: tmux-ide integration agent-teams enable');
+  console.log('  > Skipped Claude Code agent teams (opted out). Enable later: tmux-ide integration agent-teams enable');
 }
-console.log(`\nInstalled successfully.\n\nStart now:\n  ${quote(launcherPath)} app\n\nUpdate later:\n  ${quote(launcherPath)} update`);
-console.log(`\nTo use the short command in sh, bash or zsh, run:\n  export PATH=${quote(path.join(prefix, 'bin'))}:"$PATH"\nAdd that line to your shell profile to keep it for new terminals.`);
-console.log(`\nExisting tmux sessions are preserved. Reopen any running tmux-ide UI.\nTo update a running daemon explicitly:\n  ${quote(launcherPath)} update --daemon --if-running`);
+// Offer the short command only when it resolves to this installation.
+const bin = path.join(prefix, 'bin');
+const firstOnPath = (process.env.PATH || '').split(':').filter(Boolean)
+  .map((directory) => path.join(path.resolve(directory), 'tmux-ide'))
+  .find((candidate) => { try { fs.accessSync(candidate, fs.constants.X_OK); return true; } catch { return false; } });
+const command = firstOnPath === launcherPath ? 'tmux-ide' : quote(launcherPath);
+console.log(`\n  ✓ Installed successfully. tmux-ide ${version} is ready.\n\n  Start:   ${command} app\n  Update:  ${command} update`);
+if (firstOnPath === undefined)
+  console.log(`\n  To run it as plain \`tmux-ide\`, add this line to your shell profile:\n    export PATH=${quote(bin)}:"$PATH"`);
+else if (firstOnPath !== launcherPath)
+  console.log(`\n  Another tmux-ide comes first on your PATH (${firstOnPath}).\n  Remove it, or add this line at the end of your shell profile:\n    export PATH=${quote(bin)}:"$PATH"`);
+// A daemon from an older release keeps running until explicitly moved.
+try {
+  const infoDir = process.env.TMUX_IDE_DAEMON_INFO_DIR || process.env.TMUX_IDE_REGISTRY_DIR || process.env.TMUX_IDE_HOME || path.join(os.homedir(), '.tmux-ide');
+  const info = JSON.parse(fs.readFileSync(path.join(infoDir, 'daemon.json'), 'utf8'));
+  if (Number.isInteger(info.pid) && info.productVersion !== version) {
+    process.kill(info.pid, 0);
+    console.log(`\n  A tmux-ide ${info.productVersion} daemon is still running; your sessions are safe.\n  Move it to ${version}:  ${command} update --daemon --if-running`);
+  }
+} catch {}
+console.log('');
 JS
   export PATH="$root/current/node/bin:$PATH"
-  "$launcher" --version
+  "$launcher" --version >/dev/null
 }
 # Native alpha is explicit; ordinary CLI installs keep their existing behavior.
 if [ "${1:-}" = --native-alpha ]; then
   shift
   if [ "${1:-}" = --help ]; then
-    printf '%s\n' 'Usage: install.sh --native-alpha [--prefix ABSOLUTE_NATIVE_ROOT] [--update|--rollback|--uninstall]' 'Apple Silicon macOS 26+. Ensures CLI 2.9.5 for native install/update; native actions preserve daemon and tmux processes.'
+    printf '%s\n' 'Usage: install.sh --native-alpha [--prefix ABSOLUTE_NATIVE_ROOT] [--update|--rollback|--uninstall]' 'Apple Silicon macOS 26+. Bootstraps CLI 2.9.5; preserves qualified CLI 2.9.5 or 2.9.6 for native install/update; native actions preserve daemon and tmux processes.'
     exit 0
   fi
   [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || fail 'Native alpha requires an Apple Silicon Mac'
@@ -294,7 +328,10 @@ if [ "${1:-}" = --native-alpha ]; then
       if [ -x "$HOME/.local/bin/tmux-ide" ]; then
         native_cli_version=$("$HOME/.local/bin/tmux-ide" --version 2>/dev/null) || native_cli_version=''
       fi
-      [ "$native_cli_version" = 'tmux-ide v2.9.5' ] || native_cli_needed=true ;;
+      case "$native_cli_version" in
+        'tmux-ide v2.9.5'|'tmux-ide v2.9.6') ;;
+        *) native_cli_needed=true ;;
+      esac ;;
   esac
   if [ "$native_cli_needed" = true ]; then
     (main --version 2.9.5 --prefix "$HOME/.local" --no-claude-agent-teams)
@@ -302,8 +339,8 @@ if [ "${1:-}" = --native-alpha ]; then
   native_stage=$(mktemp -d "${TMPDIR:-/tmp}/tmux-native-bootstrap.XXXXXXXX")
   trap 'rm -rf "$native_stage"' 0
   trap 'exit 1' INT TERM
-  fetch https://github.com/wavyrai/tmux-ide/releases/download/native-alpha-2026101406/install-native-alpha.sh "$native_stage/install.sh"
-  [ "$(digest "$native_stage/install.sh")" = 83b20635c1fef2ce4b218093b8396940f78424431b61c6a472d9dee87368ff77 ] || fail 'Native installer checksum mismatch'
+  fetch https://github.com/wavyrai/tmux-ide/releases/download/native-alpha-2026101410/install-native-alpha-v2.sh "$native_stage/install.sh"
+  [ "$(digest "$native_stage/install.sh")" = 586cdd1b094169bbc07373bc36974a234893f3221fa85e3cc1584591857b20f4 ] || fail 'Native installer checksum mismatch'
   sh "$native_stage/install.sh" "$@"
 else
   main "$@"

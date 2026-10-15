@@ -31,8 +31,8 @@ import { gunzipSync } from "node:zlib";
 import { acquirePrivateOperationLock } from "./private-operation-lock.ts";
 import { getCurrentVersion } from "./update-check.ts";
 
-/** The `<os>-<arch>` tags we publish a prebuilt TUI binary for. */
-export type TuiPlatformTag = "darwin-arm64" | "darwin-x64" | "linux-x64" | "linux-arm64";
+/** The `<os>-<arch>` tags we publish a prebuilt TUI binary for. Intel macOS is unsupported as of 2.9.6. */
+export type TuiPlatformTag = "darwin-arm64" | "linux-x64" | "linux-arm64";
 
 /** The GitHub repo the release assets live under. */
 export const RELEASE_REPO = "wavyrai/tmux-ide";
@@ -49,7 +49,6 @@ const MAX_CHECKSUM_MANIFEST_BYTES = 4 * 1024;
 
 const SUPPORTED: Record<string, TuiPlatformTag> = {
   "darwin-arm64": "darwin-arm64",
-  "darwin-x64": "darwin-x64",
   "linux-x64": "linux-x64",
   "linux-arm64": "linux-arm64",
 };

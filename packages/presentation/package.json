@@ -10,7 +10,8 @@
     "./pane-frame/web.css": "./src/pane-frame/web-host.css",
     "./workbench-dock": "./src/workbench-dock/index.ts",
     "./workbench-dock/web": "./src/workbench-dock/web-host-unstyled.tsx",
-    "./workbench-dock/web.css": "./src/workbench-dock/web-host.css"
+    "./workbench-dock/web.css": "./src/workbench-dock/web-host.css",
+    "./home-agent-roster": "./src/home-agent-roster.ts"
   },
   "scripts": {
     "lint": "eslint src",

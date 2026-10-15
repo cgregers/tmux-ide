@@ -1,0 +1,13 @@
+{
+  "passed": true,
+  "settings": {
+    "version": 1,
+    "family": "Menlo",
+    "size": 15
+  },
+  "operatorConfirmedRestoration": true,
+  "terminalInputBytes": 0,
+  "sourceSurvivesClose": true,
+  "producerPid": "32489",
+  "cleanup": true
+}

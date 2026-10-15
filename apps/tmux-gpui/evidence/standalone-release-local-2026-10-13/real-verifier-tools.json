@@ -1,0 +1,14 @@
+[
+  {
+    "tool": "/usr/bin/sw_vers",
+    "code": 0
+  },
+  {
+    "tool": "/usr/sbin/spctl",
+    "code": 0
+  },
+  {
+    "tool": "/usr/bin/codesign",
+    "code": 1
+  }
+]

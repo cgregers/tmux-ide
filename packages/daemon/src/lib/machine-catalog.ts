@@ -1,0 +1,349 @@
+import type { TmuxServerDescriptor } from "@tmux-ide/contracts";
+import type { FleetCachedRoute } from "@tmux-ide/contracts/fleet-client-state";
+import { groupFleetEnvironments } from "@tmux-ide/daemon-client/fleet-environments";
+import {
+  fleetConnectionMessage,
+  type FleetConnectionStatus,
+} from "@tmux-ide/daemon-client/fleet-connection-status";
+import { machineResourceKey } from "@tmux-ide/core";
+import {
+  type MachineConnectionHandle,
+  type MachineConnectionManager,
+} from "./machine-connection-manager.ts";
+import {
+  createHomeCatalog,
+  type HomeCatalog,
+  type HomeCatalogSession,
+  type HomeCatalogSnapshot,
+} from "./home-catalog.ts";
+
+export interface MachineCatalogSession extends HomeCatalogSession {
+  readonly machineId: string;
+  readonly sourceId: string;
+  readonly disabled: boolean;
+}
+export interface MachineCatalogGroup {
+  readonly id: string;
+  readonly label: string;
+  readonly state: "ready" | "connecting" | "disconnected";
+  readonly sessions: readonly MachineCatalogSession[];
+  readonly servers?: readonly TmuxServerDescriptor[];
+  readonly note: string | null;
+  readonly diagnostic?: FleetConnectionStatus;
+  readonly environmentId?: string | null;
+  readonly routeIds?: readonly string[];
+  readonly identityConflict?: boolean;
+  readonly lastSeenAt?: number | null;
+}
+export interface MachineCatalogSnapshot {
+  readonly selectedMachineId: string;
+  readonly groups: readonly MachineCatalogGroup[];
+}
+interface Entry {
+  handle: MachineConnectionHandle;
+  catalog: HomeCatalog | null;
+  stopCatalog: (() => void) | null;
+  stopObserve: (() => void) | null;
+  revision: number;
+  snapshot: HomeCatalogSnapshot;
+  lastSessions: readonly HomeCatalogSession[];
+  binding: string | null;
+  environmentId: string | null;
+  generation: string | null;
+  seenAt: number | null;
+}
+const empty = (): HomeCatalogSnapshot => ({
+  phase: "loading",
+  daemonInstanceId: null,
+  sessions: [],
+  note: null,
+});
+
+/** Per-machine catalog metadata only. This owner never opens pane-screen streams. */
+export function createMachineCatalog(options: {
+  manager: Pick<MachineConnectionManager, "snapshot" | "getMachine" | "subscribe">;
+  createCatalog?: (handle: MachineConnectionHandle) => HomeCatalog;
+  cachedRoutes?: readonly FleetCachedRoute[];
+  onCache?: (route: FleetCachedRoute) => void;
+}) {
+  const manager = options.manager;
+  const createCatalog =
+    options.createCatalog ??
+    ((handle) =>
+      createHomeCatalog({
+        readCanonicalDaemonInfo: handle.read,
+      }));
+  const entries = new Map<string, Entry>();
+  const preferredRoutes = new Map<string, string>();
+  const listeners = new Set<(value: MachineCatalogSnapshot) => void>();
+  let started = false,
+    disposed = false;
+  let stopManager: (() => void) | null = null;
+  let snapshot: MachineCatalogSnapshot = {
+    selectedMachineId: manager.snapshot().selectedMachineId,
+    groups: [],
+  };
+  const publish = () => {
+    if (disposed) return;
+    const current = manager.snapshot();
+    snapshot = {
+      selectedMachineId: current.selectedMachineId,
+      groups: current.machines.map((machine) => {
+        const entry = entries.get(machine.id);
+        const ready =
+          machine.state === "ready" &&
+          entry?.snapshot.phase === "live" &&
+          entry.handle.read() !== null;
+        const state =
+          machine.state !== "ready"
+            ? machine.state
+            : ready
+              ? "ready"
+              : entry?.snapshot.phase === "unavailable"
+                ? "disconnected"
+                : "connecting";
+        const diagnostic = entry?.handle.endpoint().diagnostic;
+        return {
+          id: machine.id,
+          label: machine.label,
+          state,
+          diagnostic,
+          lastSeenAt: entry?.seenAt ?? null,
+          note:
+            diagnostic && diagnostic.phase !== "ready"
+              ? fleetConnectionMessage(diagnostic)
+              : (entry?.snapshot.note ?? null),
+          servers: entry?.snapshot.servers,
+          sessions: (entry?.lastSessions ?? []).map((session) => ({
+            ...session,
+            sourceId: session.id,
+            id: machineResourceKey(machine.id, "session", session.id),
+            machineId: machine.id,
+            disabled: !ready,
+          })),
+        };
+      }),
+    };
+    const groups = snapshot.groups;
+    snapshot = {
+      ...snapshot,
+      groups: groupFleetEnvironments(
+        groups.map((group) => ({
+          id: group.id,
+          ready: group.state === "ready",
+          environmentId: entries.get(group.id)?.environmentId ?? null,
+          generation: entries.get(group.id)?.generation ?? null,
+        })),
+        current.selectedMachineId,
+        preferredRoutes,
+      ).map((joined) => {
+        const group = groups.find((group) => group.id === joined.primaryRouteId)!;
+        if (joined.environmentId && !joined.conflict)
+          preferredRoutes.set(joined.environmentId, group.id);
+        return {
+          ...group,
+          environmentId: joined.environmentId,
+          routeIds: joined.routeIds,
+          identityConflict: joined.conflict,
+          note: joined.conflict
+            ? "Conflicting environment identities. Verify these routes before combining them."
+            : group.note,
+          sessions: group.sessions.map((session) => ({
+            ...session,
+            id:
+              session.liveSessionId && joined.environmentId && !joined.conflict
+                ? JSON.stringify([
+                    joined.environmentId,
+                    "session",
+                    session.server?.serverId,
+                    session.server?.generation,
+                    session.liveSessionId,
+                  ])
+                : session.id,
+          })),
+        };
+      }),
+    };
+    for (const listener of [...listeners]) {
+      try {
+        listener(snapshot);
+      } catch {
+        /* View observers never own transport state. */
+      }
+    }
+  };
+  const stopCatalog = (entry: Entry) => {
+    entry.revision++;
+    entry.stopCatalog?.();
+    entry.stopCatalog = null;
+    entry.catalog?.dispose();
+    entry.catalog = null;
+    entry.binding = null;
+  };
+  const bind = (entry: Entry, force = false) => {
+    if (disposed) return;
+    const daemon = entry.handle.read();
+    if (!daemon && entry.handle.kind === "ssh") {
+      stopCatalog(entry);
+      entry.snapshot = {
+        ...empty(),
+        phase: "unavailable",
+        note: "Machine disconnected. Reconnecting…",
+      };
+      publish();
+      return;
+    }
+    const binding = daemon
+      ? JSON.stringify([daemon.instanceId, daemon.startedAt, daemon.bindHostname, daemon.port])
+      : "local-unavailable";
+    if (!force && entry.catalog && entry.binding === binding) return;
+    stopCatalog(entry);
+    entry.binding = binding;
+    entry.snapshot = empty();
+    const revision = entry.revision;
+    const catalog = createCatalog(entry.handle);
+    entry.catalog = catalog;
+    entry.stopCatalog = catalog.subscribe((value) => {
+      if (disposed || entries.get(entry.handle.id) !== entry || entry.revision !== revision) return;
+      const current = entry.handle.read();
+      if (value.phase === "live" && (!current || value.daemonInstanceId !== current.instanceId))
+        return;
+      entry.snapshot = value;
+      if (value.phase === "live") {
+        entry.lastSessions = value.sessions;
+        entry.seenAt = Date.now();
+        entry.environmentId = current?.environmentId ?? null;
+        entry.generation = current ? JSON.stringify([current.instanceId, current.startedAt]) : null;
+        try {
+          options.onCache?.({
+            routeId: entry.handle.id,
+            environmentId: entry.environmentId,
+            generation: entry.generation,
+            seenAt: entry.seenAt,
+            sessions: value.sessions
+              .slice(0, 64)
+              .map(({ id, liveSessionId, name, paneCount, server, serverLabel }) => ({
+                id,
+                ...(liveSessionId ? { liveSessionId } : {}),
+                name,
+                paneCount,
+                ...(server ? { server, serverLabel } : {}),
+              })),
+          });
+        } catch {
+          /* Cache failure must never prevent live catalog publication. */
+        }
+      }
+      publish();
+    });
+    catalog.start();
+  };
+  const remove = (entry: Entry) => {
+    stopCatalog(entry);
+    entry.stopObserve?.();
+    entry.stopObserve = null;
+  };
+  const reconcile = () => {
+    if (disposed || !started) return;
+    const current = manager.snapshot();
+    const present = new Set(current.machines.map(({ id }) => id));
+    for (const [id, entry] of entries) {
+      if (!present.has(id) || manager.getMachine(id) !== entry.handle) {
+        remove(entry);
+        entries.delete(id);
+      }
+    }
+    for (const machine of current.machines) {
+      const handle = manager.getMachine(machine.id);
+      if (!handle) continue;
+      let entry = entries.get(machine.id);
+      if (!entry) {
+        entry = {
+          handle,
+          catalog: null,
+          stopCatalog: null,
+          stopObserve: null,
+          revision: 0,
+          snapshot: empty(),
+          lastSessions:
+            options.cachedRoutes?.find((route) => route.routeId === machine.id)?.sessions ?? [],
+          binding: null,
+          // Cached identity is display metadata; it cannot authenticate or join routes.
+          environmentId: null,
+          generation: null,
+          seenAt:
+            options.cachedRoutes?.find((route) => route.routeId === machine.id)?.seenAt ?? null,
+        };
+        entries.set(machine.id, entry);
+        const owned = entry;
+        void handle
+          .observe(() => {
+            if (!disposed && entries.get(handle.id) === owned) bind(owned, true);
+          })
+          .then((stop) => {
+            if (disposed || entries.get(handle.id) !== owned) stop();
+            else owned.stopObserve = stop;
+          })
+          .catch(() => {});
+      }
+      bind(entry);
+    }
+    publish();
+  };
+  const getSelectedCatalogSnapshot = (): HomeCatalogSnapshot => {
+    const entry = entries.get(snapshot.selectedMachineId);
+    const group = snapshot.groups.find(({ id }) => id === snapshot.selectedMachineId);
+    return {
+      phase:
+        group?.state === "ready"
+          ? "live"
+          : group?.state === "connecting"
+            ? "loading"
+            : "unavailable",
+      daemonInstanceId:
+        group?.state === "ready" ? (entry?.snapshot.daemonInstanceId ?? null) : null,
+      // Existing selected-session controls must not offer stale rows as live targets.
+      sessions: group?.state === "ready" ? group.sessions : [],
+      note: group?.note ?? null,
+    };
+  };
+  const owner = {
+    getSnapshot: () => snapshot,
+    getSelectedCatalogSnapshot,
+    subscribe(listener: (value: MachineCatalogSnapshot) => void) {
+      if (disposed) return () => {};
+      listeners.add(listener);
+      listener(snapshot);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    start() {
+      if (disposed || started) return;
+      started = true;
+      stopManager = manager.subscribe(reconcile);
+      reconcile();
+    },
+    retry(machineId = snapshot.selectedMachineId) {
+      const entry = entries.get(machineId);
+      if (entry) bind(entry, true);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      stopManager?.();
+      stopManager = null;
+      for (const entry of entries.values()) remove(entry);
+      entries.clear();
+      listeners.clear();
+    },
+  };
+  const selectedCatalog: HomeCatalog = {
+    getSnapshot: getSelectedCatalogSnapshot,
+    subscribe: (listener) => owner.subscribe(() => listener(getSelectedCatalogSnapshot())),
+    start: owner.start,
+    retry: () => owner.retry(),
+    dispose: owner.dispose,
+  };
+  return { ...owner, selectedCatalog };
+}

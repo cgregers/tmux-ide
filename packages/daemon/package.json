@@ -1,6 +1,6 @@
 {
   "name": "@tmux-ide/daemon",
-  "version": "2.9.5",
+  "version": "2.9.6",
   "private": true,
   "description": "Singleton background daemon for tmux-ide — embeddable workspace registry, command-center API, and chat/codex orchestration.",
   "type": "module",
@@ -28,6 +28,22 @@
     "./errors": {
       "types": "./dist/command-center/actions/errors.d.ts",
       "default": "./dist/command-center/actions/errors.js"
+    },
+    "./machine-catalog": {
+      "types": "./dist/lib/machine-catalog.d.ts",
+      "default": "./dist/lib/machine-catalog.js"
+    },
+    "./machine-connections": {
+      "types": "./dist/lib/machine-connection-manager.d.ts",
+      "default": "./dist/lib/machine-connection-manager.js"
+    },
+    "./connection-owner": {
+      "types": "./dist/lib/daemon-connection-owner.d.ts",
+      "default": "./dist/lib/daemon-connection-owner.js"
+    },
+    "./machine-agents": {
+      "types": "./dist/lib/machine-agents.d.ts",
+      "default": "./dist/lib/machine-agents.js"
     }
   },
   "files": [

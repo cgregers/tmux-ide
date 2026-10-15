@@ -1,11 +1,18 @@
+import { WindowSplitLayoutUnavailable } from "../terminal/mirror/window-split-authority.ts";
 import { streamTmuxInteractions } from "./tmux-server-interaction-events.ts";
 import { mountTmuxServerNativeBackingRoute } from "./tmux-server-native-backing.ts";
+import { mountTmuxServerEditorContextRoute } from "./tmux-server-editor-context.ts";
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import { projectApplicationShellResource } from "./resources/application-shell.ts";
 import { fleetSessionIdForName } from "./resources/fleet-catalog.ts";
 import { z } from "zod";
 import {
+  TmuxAgentOpenRequestSchemaZ,
+  TmuxAgentOpenResponseSchemaZ,
+  WorkspaceCatalogLiveSessionIdSchemaZ,
+  WindowLinkTargetSchemaZ,
+  WindowSplitLayoutResourceSchemaZ,
   TMUX_SERVERS_API_PATH,
   PANE_STREAM_ISSUE_PATH,
   TmuxServerIdSchemaZ,
@@ -37,7 +44,7 @@ const workspaceSchema = z
   .min(1)
   .max(160)
   .refine((value) => !/[\0\r\n]/u.test(value));
-async function boundedJson(request: Request): Promise<unknown> {
+async function boundedJson(request: Request, limit = 64 * 1024): Promise<unknown> {
   if (!request.body) throw new TypeError("Missing body");
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];
@@ -47,7 +54,7 @@ async function boundedJson(request: Request): Promise<unknown> {
       const next = await reader.read();
       if (next.done) break;
       size += next.value.byteLength;
-      if (size > 64 * 1024) {
+      if (size > limit) {
         void reader.cancel().catch(() => undefined);
         throw new TypeError("Body too large");
       }
@@ -65,6 +72,8 @@ async function boundedJson(request: Request): Promise<unknown> {
   return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
 }
 function failure(c: Context, error: unknown): Response {
+  if (error instanceof WindowSplitLayoutUnavailable)
+    return c.json({ error: { code: "split-layout-stale" } }, 409);
   if (error instanceof TmuxServerScopeError)
     return c.json(
       { error: { code: error.code } },
@@ -124,6 +133,30 @@ export function mountTmuxServerRoutes(app: Hono, options: TmuxServerRoutesOption
     }),
   );
   const scoped = `${base}/:serverId/:generation`;
+  mountTmuxServerEditorContextRoute(app, {
+    scopedPath: scoped,
+    owners: options.owners,
+    readBody: (request) => boundedJson(request, 8 * 1024),
+  });
+  // Structured read only: this never acquires a channel or changes tmux geometry.
+  app.post(
+    `${scoped}/split-layout/:workspaceName`,
+    route(async (c) => {
+      const server = scope(c);
+      const workspaceName = workspaceSchema.parse(c.req.param("workspaceName"));
+      const target = WindowLinkTargetSchemaZ.parse(await boundedJson(c.req.raw));
+      c.req.raw.signal.throwIfAborted();
+      const resource = await options.owners.withOwner(server, (owner) =>
+        owner.readWindowSplitLayout(workspaceName, target),
+      );
+      c.req.raw.signal.throwIfAborted();
+      return c.json({
+        version: 1,
+        server,
+        resource: WindowSplitLayoutResourceSchemaZ.parse(resource),
+      });
+    }),
+  );
   app.get(
     `${scoped}/interaction-events`,
     route(async (c) => {
@@ -181,6 +214,24 @@ export function mountTmuxServerRoutes(app: Hono, options: TmuxServerRoutesOption
           }),
         ),
       );
+    }),
+  );
+  app.post(
+    `${scoped}/sessions/:liveSessionId/open-agent`,
+    route(async (c) => {
+      const server = scope(c);
+      const liveSessionId = WorkspaceCatalogLiveSessionIdSchemaZ.parse(
+        c.req.param("liveSessionId"),
+      );
+      const target = TmuxAgentOpenRequestSchemaZ.parse(await boundedJson(c.req.raw, 8192));
+      c.req.raw.signal.throwIfAborted();
+      const result = await options.owners.withOwner(server, (owner) =>
+        owner.openAgent(liveSessionId, target),
+      );
+      c.req.raw.signal.throwIfAborted();
+      if (result.liveSessionId !== liveSessionId)
+        return c.json({ error: { code: "stale-agent" } }, 409);
+      return c.json(TmuxAgentOpenResponseSchemaZ.parse({ version: 1, server, ...result }));
     }),
   );
   app.post(

@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { AppIcon } from "@/components/app-icon";
 import { CopyAgentPrompt } from "@/components/copy-agent-prompt";
-import { DocsMark, GitHubMark } from "@/components/docs/assistant-marks";
+import { DocsMark } from "@/components/docs/assistant-marks";
 import { LandingFaqJsonLd } from "@/components/landing-faq-json-ld";
 import {
   Band,
@@ -46,20 +46,6 @@ export const metadata: Metadata = {
 const bodyCopy = "type-marketing-body max-w-[62ch] text-fd-muted-foreground";
 const agentVisuals = ["names", "status", "navigate"] satisfies TuiFigureVariant[];
 
-async function fetchStarCount(): Promise<number | null> {
-  try {
-    const response = await fetch("https://api.github.com/repos/wavyrai/tmux-ide", {
-      next: { revalidate: 3600 },
-      headers: { Accept: "application/vnd.github+json" },
-    });
-    if (!response.ok) return null;
-    const data = (await response.json()) as { stargazers_count?: number };
-    return typeof data.stargazers_count === "number" ? data.stargazers_count : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Keeps hyphenated words such as "open-source" from breaking at the hyphen. */
 function keepHyphenatedWords(text: string) {
   return text.split(/(\S+-\S+)/u).map((part, index) =>
@@ -94,14 +80,7 @@ function withInline(text: string) {
   });
 }
 
-function formatStars(count: number): string {
-  if (count >= 1000) return `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k`;
-  return String(count);
-}
-
-export default async function HomePage() {
-  const stars = await fetchStarCount();
-
+export default function HomePage() {
   return (
     <MarketingFrame id="main-content" tabIndex={-1}>
       <Stretch ground="paper">
@@ -143,25 +122,6 @@ export default async function HomePage() {
                       <DocsMark />
                       <span>Docs</span>
                     </Link>
-                    <a
-                      href="https://github.com/wavyrai/tmux-ide"
-                      target="_blank"
-                      rel="noreferrer"
-                      aria-label={
-                        stars === null
-                          ? "tmux-ide on GitHub (opens in a new tab)"
-                          : `tmux-ide on GitHub, ${stars} stars (opens in a new tab)`
-                      }
-                      className="hero-secondary"
-                    >
-                      <GitHubMark />
-                      <span>GitHub</span>
-                      {stars !== null ? (
-                        <span className="hero-secondary-count">
-                          <span aria-hidden>★</span> {formatStars(stars)}
-                        </span>
-                      ) : null}
-                    </a>
                   </div>
                 </div>
               </div>
