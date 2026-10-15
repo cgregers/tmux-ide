@@ -274,7 +274,7 @@ describe("direct application-shell transport version selection", () => {
     ]);
     expect(socketOptions).toEqual([
       { headers: { Authorization: "Bearer owner-secret" } },
-      undefined,
+      { headers: { Authorization: "Bearer owner-secret" } },
     ]);
   });
 
@@ -762,6 +762,7 @@ describe("direct application-shell transport version selection", () => {
       resolveSessionName: () => "alpha",
       terminalRuntimeAuthority: true,
       terminalReconnectClock: clock,
+      ownerToken: "owner-secret",
       createWebSocket: () => {
         const socket = new FakeSocket();
         sockets.push(socket);
@@ -818,6 +819,7 @@ describe("direct application-shell transport version selection", () => {
       resolveSessionName: () => "alpha",
       terminalRuntimeAuthority: true,
       terminalReconnectClock: clock,
+      ownerToken: "owner-secret",
       createWebSocket: () => {
         const socket = new FakeSocket();
         sockets.push(socket);
@@ -881,6 +883,7 @@ describe("direct application-shell transport version selection", () => {
       descriptor,
       resolveSessionName: () => "alpha",
       applicationShellResourceVersion: APPLICATION_SHELL_RESOURCE_V2_VERSION,
+      ownerToken: "owner-secret",
       fetch: async (input) => {
         requests.push(new URL(String(input)));
         return json({
@@ -906,6 +909,7 @@ describe("direct application-shell transport version selection", () => {
     );
     const transport = createDirectLoopbackDaemonTransport({
       descriptor,
+      ownerToken: "owner-secret",
       resolveSessionName: () => "alpha",
       applicationShellResourceVersion: APPLICATION_SHELL_RESOURCE_V2_VERSION,
       fetch: async () =>
@@ -925,6 +929,7 @@ describe("direct application-shell transport version selection", () => {
     const requests: URL[] = [];
     const transport = createDirectLoopbackDaemonTransport({
       descriptor,
+      ownerToken: "owner-secret",
       resolveSessionName: () => "alpha",
       fetch: async (input) => {
         requests.push(new URL(String(input)));

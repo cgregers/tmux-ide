@@ -79,7 +79,9 @@ const auth = { Authorization: `Bearer ${OWNER}` };
 describe("lazy workspace missions resource", () => {
   it("does not touch mission authority during the terminal-first V3 shell read", async () => {
     const { app, load, loadSnapshot } = setup();
-    const response = await app.request("/api/project/tmux-alpha/application-shell?version=3");
+    const response = await app.request("/api/project/tmux-alpha/application-shell?version=3", {
+      headers: auth,
+    });
     expect(response.status).toBe(200);
     const shell = ApplicationShellResourceV3SchemaZ.parse(await response.json());
     expect(shell.resource.terminalInventory.resources).toHaveLength(1);

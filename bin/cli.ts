@@ -177,6 +177,7 @@ const knownCommands = new Set([
   "widget",
   "web",
   "serve",
+  // Keep retired commands recognized so they return migration guidance.
   "command-center",
   "server",
   "help",
@@ -326,8 +327,6 @@ ${bold("Pane Messaging:")}
 
 ${bold("Server:")}
   ${cyan("tmux-ide serve")} [socket-path]         ${dim("Foreground owner-only local NDJSON control socket")}
-  ${cyan("tmux-ide command-center")} [--port N]    ${dim("Start the command-center HTTP API")}
-  ${cyan("tmux-ide server")} [--port N]            ${dim("Deprecated loopback-only PTY server")}
 
 ${bold("Discover (in the TUI):")}
   ${dim("Bare")} ${cyan("tmux-ide")} ${dim("with no project config opens the HOME cockpit — the fleet home screen.")}
@@ -2620,22 +2619,17 @@ try {
     }
 
     case "command-center": {
-      const { startCommandCenter } = await import("../packages/daemon/src/command-center/index.ts");
-      await startCommandCenter({ port: parseInt(values.port ?? "4000") });
-      break;
+      throw new IdeError("The standalone command-center is retired. Run `tmux-ide app` instead.", {
+        code: "COMMAND_CENTER_RETIRED",
+        exitCode: 1,
+      });
     }
 
     case "server": {
-      if ("bun" in process.versions) {
-        const scriptPath = resolve(__dirname, "../packages/daemon/src/server/standalone.ts");
-        const serverArgs = ["--experimental-strip-types", scriptPath];
-        if (values.port) serverArgs.push("--port", values.port);
-        execFileSync("node", serverArgs, { stdio: "inherit" });
-      } else {
-        const { start } = await import("../packages/daemon/src/server/index.ts");
-        await start(values.port ? parseInt(values.port, 10) : undefined);
-      }
-      break;
+      throw new IdeError(
+        "`tmux-ide server` is retired. Run `tmux-ide app` (or `tmux-ide --headless` for the daemon) instead.",
+        { code: "SERVER_RETIRED", exitCode: 1 },
+      );
     }
 
     case "help":

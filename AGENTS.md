@@ -209,11 +209,11 @@ tmux-ide init         # Scaffold config (auto-detects stack)
 tmux-ide init --template nextjs  # Use specific template
 ```
 
-### Command Center
+### Daemon API
 
-```bash
-tmux-ide command-center [--port 4000]   # Start REST API + SSE + WebSocket server
-```
+Use `tmux-ide app` to start the supported app and its daemon. Every `/api/*`
+request and `/ws/*` connection requires the daemon token from the owner-only
+`daemon.json`; browser hosts use a same-origin proxy.
 
 ## Claude Skill
 
@@ -319,15 +319,17 @@ pnpm pack:check
 - Use `detect --json` first to understand the project stack
 - Mission runtime wiring is future work; avoid documenting legacy pane task metadata as current.
 
-### Command Center API
+### Daemon API
 
 ```bash
-tmux-ide command-center   # Start on port 4000
+tmux-ide app             # Start the app and its canonical daemon
 
 # REST endpoints:
 # GET  /api/sessions                    — List all sessions
 # GET  /api/project/:name               — Full project detail
 # GET  /api/project/:name/panes         — Live pane listing
 # GET  /api/events                      — SSE stream (real-time updates)
-# WS   /ws/mirror/:session/:paneId      — Terminal mirroring (raw ANSI)
+# WS   /ws/events                      — Authenticated daemon events
 ```
+
+API requests and WebSocket connections require the daemon token.

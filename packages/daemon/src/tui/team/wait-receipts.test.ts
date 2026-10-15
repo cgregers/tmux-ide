@@ -23,7 +23,7 @@ const daemonInfo: CanonicalDaemonInfo = {
   instanceId: "9bcf33b0-c837-4a94-b5e8-c0977f54464f",
   startedAt: "2026-07-21T00:00:00.000Z",
   bindHostname: "127.0.0.1",
-  authToken: null,
+  authToken: "test-receipt-owner",
 };
 
 class FakeSocket extends EventEmitter implements ReceiptSocket {

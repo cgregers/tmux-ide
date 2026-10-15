@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { publishWidgetAsset } from "../lib/widget-asset-store.ts";
-import { createApp } from "./server.ts";
+import { createAuthenticatedTestApp as createApp } from "./authenticated-test-app.ts";
 
 let home: string;
 let previousHome: string | undefined;

@@ -169,13 +169,17 @@ describe("owner terminal attachment issue route", () => {
   ])("rejects %s without invoking admission", async (_label, overrides, path) => {
     const issue = vi.fn();
     const app = appWith({ issue });
-    const result = await parsed(
-      await app.request(path, {
-        method: "POST",
-        headers: headers(overrides),
-        body: JSON.stringify(mutation()),
-      }),
-    );
+    const response = await app.request(path, {
+      method: "POST",
+      headers: headers(overrides),
+      body: JSON.stringify(mutation()),
+    });
+    if (_label === "missing owner bearer") {
+      expect(response.status).toBe(401);
+      expect(issue).not.toHaveBeenCalled();
+      return;
+    }
+    const result = await parsed(response);
     expect(result).toMatchObject({ status: "error" });
     expect(issue).not.toHaveBeenCalled();
   });

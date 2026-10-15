@@ -17,12 +17,16 @@ import {
   type DesktopResourceClock,
 } from "./desktop-resource-store.ts";
 import {
-  createDirectLoopbackDaemonTransport,
+  createDirectLoopbackDaemonTransport as createProductionTransport,
   type DaemonEventHandlers,
   type DaemonEventSocket,
   type DaemonFetch,
   type DesktopDaemonTransport,
 } from "./daemon-transport.ts";
+
+const createDirectLoopbackDaemonTransport = (
+  dependencies: Parameters<typeof createProductionTransport>[0],
+) => createProductionTransport({ ownerToken: "test-owner", ...dependencies });
 
 const descriptor: DesktopDaemonHostDescriptor = {
   apiBaseUrl: "http://127.0.0.1:6060",

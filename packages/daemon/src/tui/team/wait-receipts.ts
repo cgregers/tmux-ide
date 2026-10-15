@@ -107,7 +107,7 @@ export async function waitForAgentStatusViaReceipts(
   } catch {
     return null;
   }
-  if (!info) return null;
+  if (!info?.authToken) return null;
   const probeAlive = opts.probeAlive ?? isCanonicalDaemonAlive;
   let probeTimer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -127,17 +127,14 @@ export async function waitForAgentStatusViaReceipts(
   }
 
   const connectTimeoutMs = opts.connectTimeoutMs ?? RECEIPT_CONNECT_TIMEOUT_MS;
-  // A loopback-bound daemon admits same-machine upgrades without a token; a
-  // remote-bound daemon enforces its token even locally, so present the one
-  // the user-owned daemon.json already carries.
+  // Every bind requires the credential from the user-owned daemon.json.
   const authToken = info.authToken;
   const openSocket =
     opts.openSocket ??
     ((url: string) =>
-      new WsWebSocket(
-        url,
-        authToken ? { headers: { Authorization: `Bearer ${authToken}` } } : undefined,
-      ) as unknown as ReceiptSocket);
+      new WsWebSocket(url, {
+        headers: { Authorization: `Bearer ${authToken}` },
+      }) as unknown as ReceiptSocket);
   const tracker = createStatusTracker();
   const currentStatus =
     opts.currentStatus ?? (() => findSessionStatus(listTeamSessions(tracker), session));

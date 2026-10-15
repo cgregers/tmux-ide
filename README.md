@@ -143,6 +143,11 @@ tmux-ide builds on it instead of replacing it, and never puts your work behind a
 proprietary session format. If the app or daemon stops, your sessions are still
 ordinary tmux.
 
+Start the supported interface with `tmux-ide app`. Its daemon requires the
+token from the owner-only `daemon.json` for every `/api/*` request and `/ws/*`
+connection; browser hosts use a same-origin proxy. The standalone
+`command-center` command is retired.
+
 ## Documentation
 
 - [Getting started](https://tmux-ide.com/docs/getting-started)

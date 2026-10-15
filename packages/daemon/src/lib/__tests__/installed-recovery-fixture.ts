@@ -277,8 +277,10 @@ export async function createPrivateFleet(prefix: string): Promise<PrivateFleet> 
     return { child, info: published };
   };
 
-  const headers = (info: CanonicalDaemonInfo): Record<string, string> =>
-    info.authToken ? { authorization: `Bearer ${info.authToken}` } : {};
+  const headers = (info: CanonicalDaemonInfo): Record<string, string> => {
+    if (!info.authToken) throw new Error("Fixture daemon credential is unavailable.");
+    return { authorization: `Bearer ${info.authToken}` };
+  };
 
   const fetchJson = async (info: CanonicalDaemonInfo, path: string, init: RequestInit = {}) => {
     const response = await fetch(`http://127.0.0.1:${info.port}${path}`, {

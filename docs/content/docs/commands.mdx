@@ -220,7 +220,7 @@ matching active package-manager destination. Homebrew, Yarn, npx, development
 checkouts and unknown origins receive instructions for their installation method.
 A dry run reports the plan without installing or synchronizing skills.
 
-## Daemon and server entry points
+## Daemon entry points
 
 These are integration surfaces for process hosts, not the normal way to open
 the app.
@@ -233,13 +233,16 @@ the app.
 | `tmux-ide daemon release-supervisor <id> --yes [--json]` | Release the reservation after removing the service and proving its owners stopped |
 | `tmux-ide daemon restart [--json]`                       | Reset the existing daemon runtime in its supervising process; preserve tmux panes |
 | `tmux-ide daemon info [--json]`                          | Identity, supervisor and actual log destination of the daemon; labels stale logs  |
-| `tmux-ide command-center [--port <N>]`                   | Start the command-center HTTP API (default port 4000)                             |
-| `tmux-ide server [--port <N>]`                           | Deprecated loopback-only PTY server; use `--headless`                             |
 
 The headless owner publishes `~/.tmux-ide/daemon.json` with owner-only
 permissions. A host should wait until both `/identity` matches that record and
 `/health` reports a compatible protocol before considering the child ready.
 Stop it with `SIGINT` or `SIGTERM`; do not wrap it in a second daemonizer.
+
+Use `tmux-ide app` for the supported interface, or `tmux-ide --headless` for the
+daemon. The standalone `command-center` and `server` commands are retired.
+Every daemon `/api/*` request and `/ws/*` connection requires its token,
+including on loopback. Browser hosts use a same-origin proxy.
 
 ## Restart versus upgrade
 

@@ -141,8 +141,10 @@ function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   return globalThis.fetch(input, init);
 }
 
-function defaultCreateWebSocket(url: string): DaemonEventSocket {
-  return new globalThis.WebSocket(url) as unknown as DaemonEventSocket;
+function defaultCreateWebSocket(): DaemonEventSocket {
+  // Browser hosts use their same-origin proxy transport, not a direct socket
+  // which cannot carry Authorization headers.
+  throw descriptorError("Direct daemon sockets require an authenticated WebSocket factory.");
 }
 
 function descriptorError(message: string): DaemonTransportError {
@@ -318,6 +320,12 @@ export function createDirectLoopbackDaemonTransport(
   }
   const fetchImpl = dependencies.fetch ?? defaultFetch;
   const createWebSocket = dependencies.createWebSocket ?? defaultCreateWebSocket;
+  const ownerHeaders = (): Record<string, string> => {
+    if (!dependencies.ownerToken) {
+      throw descriptorError("Daemon owner credential is unavailable.");
+    }
+    return { Authorization: `Bearer ${dependencies.ownerToken}` };
+  };
   const diagnose = dependencies.terminalRuntimeDiagnostic
     ? (
         phase: Parameters<NonNullable<DaemonTransportDependencies["terminalRuntimeDiagnostic"]>>[0],
@@ -421,7 +429,7 @@ export function createDirectLoopbackDaemonTransport(
       method: "GET",
       headers: {
         accept: "application/json",
-        ...(dependencies.ownerToken ? { Authorization: `Bearer ${dependencies.ownerToken}` } : {}),
+        ...ownerHeaders(),
       },
       credentials: "omit",
       cache: "no-store",
@@ -459,9 +467,7 @@ export function createDirectLoopbackDaemonTransport(
     if (eventSupervisor && supervisorTargetKey === key) return eventSupervisor;
     eventSupervisor?.dispose();
     const socket = createWebSocket(eventSocketUrl(descriptor, "semantic"), {
-      headers: dependencies.ownerToken
-        ? { Authorization: `Bearer ${dependencies.ownerToken}` }
-        : undefined,
+      headers: ownerHeaders(),
     });
     diagnose?.("terminal-event-socket-create", {});
     let supervisor!: WorkspaceEventSupervisor;
@@ -686,9 +692,7 @@ export function createDirectLoopbackDaemonTransport(
             method: "GET",
             headers: {
               accept: "application/json",
-              ...(dependencies.ownerToken
-                ? { Authorization: `Bearer ${dependencies.ownerToken}` }
-                : {}),
+              ...ownerHeaders(),
             },
             credentials: "omit",
             cache: "no-store",
@@ -773,7 +777,7 @@ export function createDirectLoopbackDaemonTransport(
       }
       let eventReplica =
         eventReplicas.get(safeTarget.workspaceName) ?? initialResourceReplica<null>();
-      const socket = createWebSocket(eventSocketUrl(descriptor));
+      const socket = createWebSocket(eventSocketUrl(descriptor), { headers: ownerHeaders() });
       let closed = false;
       let socketOpened = false;
       let peerVerified = false;

@@ -801,9 +801,11 @@ async function runPackedGoldenJourney(installedCli, initialOwner) {
     const infoPath = join(homeDir, ".tmux-ide", "daemon.json");
     if (!existsSync(infoPath)) return [];
     const info = JSON.parse(readFileSync(infoPath, "utf8"));
+    if (!info.authToken) return [];
     try {
       const response = await fixtureFetch(
         `http://127.0.0.1:${info.port}/api/resources/workspace-catalog?version=2`,
+        { headers: { Authorization: `Bearer ${info.authToken}` } },
       );
       if (!response.ok) return [];
       const catalog = await response.json();
@@ -818,9 +820,11 @@ async function runPackedGoldenJourney(installedCli, initialOwner) {
     const infoPath = join(homeDir, ".tmux-ide", "daemon.json");
     if (!existsSync(infoPath)) return null;
     const info = JSON.parse(readFileSync(infoPath, "utf8"));
+    if (!info.authToken) return null;
     try {
       const response = await fixtureFetch(
         `http://127.0.0.1:${info.port}/api/project/${encodeURIComponent(sessionName)}/application-shell?version=3`,
+        { headers: { Authorization: `Bearer ${info.authToken}` } },
       );
       return response.ok ? await response.json() : null;
     } catch {

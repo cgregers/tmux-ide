@@ -16,11 +16,11 @@ import { createApp } from "./server.ts";
 const OWNER = "resource-policy-owner";
 
 type DeclaredPolicy =
-  /** Owner-only: 401 without the bearer, 503 when the daemon holds no token. */
+  /** Owner-only, after the global daemon credential gate. */
   | "owner-only"
-  /** Owner-only when a token is held; ownerless serves the resource. */
+  /** Owner-only when held; the global gate rejects ownerless daemons. */
   | "owner-only-when-held"
-  /** Deliberately not owner-gated — see the comment at the route. */
+  /** Not individually owner-gated; still requires a daemon credential. */
   | "open";
 
 const DECLARED: Readonly<Record<string, DeclaredPolicy>> = {
@@ -71,18 +71,15 @@ describe("/api/resources/* owner policy", () => {
       const ownerless = await get(path, { ownerToken: null });
 
       if (policy === "open") {
-        expect([path, wrongBearer.status]).toEqual([path, 200]);
-        expect([path, noBearer.status]).toEqual([path, 200]);
-        expect([path, ownerless.status]).toEqual([path, 200]);
+        expect([path, wrongBearer.status]).toEqual([path, 401]);
+        expect([path, noBearer.status]).toEqual([path, 401]);
+        expect([path, ownerless.status]).toEqual([path, 401]);
         continue;
       }
 
       expect([path, wrongBearer.status]).toEqual([path, 401]);
       expect([path, noBearer.status]).toEqual([path, 401]);
-      expect([path, ownerless.status]).toEqual([
-        path,
-        policy === "owner-only-when-held" ? 200 : 503,
-      ]);
+      expect([path, ownerless.status]).toEqual([path, 401]);
     }
   });
 });

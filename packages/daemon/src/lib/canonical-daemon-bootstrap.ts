@@ -101,8 +101,13 @@ function spawnOwner(entryPath: string, cwd: string): Promise<void> {
 }
 
 async function shutdownOlderOwner(info: CanonicalDaemonInfo): Promise<void> {
+  if (!info.authToken) {
+    throw new DaemonBootstrapError("incompatible", "Canonical daemon credential is unavailable.", {
+      reason: "identity-mismatch",
+    });
+  }
   const headers: Record<string, string> = { "content-type": "application/json" };
-  if (info.authToken) headers.authorization = `Bearer ${info.authToken}`;
+  headers.authorization = `Bearer ${info.authToken}`;
   const response = await fetch(
     canonicalDaemonUrl("http", info.bindHostname, info.port, "/api/v2/action/daemon.shutdown"),
     {

@@ -1392,6 +1392,7 @@ describe("WorkspaceClient", () => {
     });
     const transport = createDirectLoopbackDaemonTransport({
       descriptor: { ...ALPHA_DAEMON, apiBaseUrl: "http://127.0.0.1:6060/" },
+      ownerToken: "owner-secret",
       resolveSessionName: () => "alpha",
       terminalRuntimeAuthority: true,
       applicationShellResourceVersion: APPLICATION_SHELL_RESOURCE_V3_VERSION,

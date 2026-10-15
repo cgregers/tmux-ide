@@ -136,7 +136,12 @@ describe("owner pane-stream issue route", () => {
     const issue = vi.fn(async () => descriptor());
     const app = appWith({ issue });
     for (const authorization of [`Bearer ${REMOTE_TOKEN}`, ""]) {
-      const result = await parsed(await post(app, mutation(), { Authorization: authorization }));
+      const response = await post(app, mutation(), { Authorization: authorization });
+      if (!authorization) {
+        expect(response.status).toBe(401);
+        continue;
+      }
+      const result = await parsed(response);
       expect(result.status).toBe("error");
       if (result.status === "error") expect(result.error.code).toBe("invalid-request");
     }

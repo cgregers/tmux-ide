@@ -65,10 +65,10 @@ describe("passive daemon diagnostics", () => {
     },
   );
 
-  it("returns unavailable without sampling when no owner capability exists", async () => {
+  it("fails closed without sampling when no daemon credential exists", async () => {
     const app = createApp({ remoteAccess: { ownerToken: null } });
     const samples = sampleSpies();
-    expect((await app.request("/api/diagnostics", { headers })).status).toBe(503);
+    expect((await app.request("/api/diagnostics", { headers })).status).toBe(401);
     for (const sample of samples) expect(sample).not.toHaveBeenCalled();
   });
 

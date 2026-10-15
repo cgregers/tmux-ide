@@ -81,8 +81,9 @@ Always `tmux-ide validate --json` after config mutations. When helping a user de
   - `tui/mirror/` — the app (`tmux-ide app`); production code is `runtime/` + `workspace/` (see the app section above). The tmux protocol library it and `terminal/mirror` share now lives in the engine at `terminal/protocol/` (see its README); imports flow adapter → core only, enforced by `src/__tests__/engine-import-dag.test.ts`.
   - `tui/main.ts` + `tui/compiled.ts` + `scripts/build-tui.mjs` — the single-binary TUI (`bun build --compile` → dist/tui/tmux-ide-tui; resolution order: dev checkout → compiled binary → honest error).
   - `widgets/` — OpenTUI/Solid panels (explorer/changes/preview/config/setup/sidebar) + lib (theme mapped to app-config tokens, grammar, help-overlay); resolve.ts maps workspace `type:` panes (bundle-safe paths, spawns from REPO root for the bunfig preload).
-  - `lib/` — app-config (THE typed config: keys/theme/updater/notifications/restore/updates/integrations; `TMUX_IDE_CONFIG` path override), restore, worktree, update(+check), agent-discovery, copilot-integration (Copilot CLI user hooks + status-only cplt drop delivery), skill-sync, project-registry.
-  - `command-center/` — HTTP API (secondary surface).
+  - `lib/` — app-config (THE typed config: keys/theme/updater/notifications/restore/updates/integrations; `TMUX_IDE_CONFIG` path override), restore, worktree, update(+check), agent-discovery, skill-sync, project-registry.
+  - `command-center/` — embedded daemon HTTP API. Start via `tmux-ide app`;
+    `/api/*` and `/ws/*` require the daemon token, including on loopback.
 - `packages/tmux-bridge` (process helpers) · `packages/contracts` (workspace + compatibility schemas) · `skill/SKILL.md` (the agent-facing manual, version-marked, synced to `~/.claude/skills/tmux-ide/` by postinstall / `tmux-ide update` / `tmux-ide skill-sync` / `integration install`).
 - `docs/` — the website (Next/fumadocs). Gate: `pnpm docs:build`.
 
