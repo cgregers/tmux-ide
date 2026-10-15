@@ -180,8 +180,9 @@ function interestFrames(target: TuiToolResourceTarget, interests: ReadonlySet<st
 }
 
 function defaultSocket(url: string, ownerToken: string | null): ToolEventSocket {
+  if (!ownerToken) throw new Error("Daemon credential is unavailable.");
   return new WebSocket(url, {
-    headers: ownerToken ? { Authorization: `Bearer ${ownerToken}` } : undefined,
+    headers: { Authorization: `Bearer ${ownerToken}` },
   }) as unknown as ToolEventSocket;
 }
 
@@ -227,15 +228,19 @@ export function createTuiToolResourceAdapter(
     },
 
     async fetch(target, key, signal) {
+      if (!target.daemon.authToken) {
+        return {
+          status: "failed",
+          failure: failure("unavailable", "The daemon credential is unavailable.", false),
+        };
+      }
       let response: Response;
       try {
         response = await fetchImpl(resourceUrl(target, key), {
           method: "GET",
           headers: {
             accept: "application/json",
-            ...(target.daemon.authToken
-              ? { Authorization: `Bearer ${target.daemon.authToken}` }
-              : {}),
+            Authorization: `Bearer ${target.daemon.authToken}`,
           },
           credentials: "omit",
           cache: "no-store",

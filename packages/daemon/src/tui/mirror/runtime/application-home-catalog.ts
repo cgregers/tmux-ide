@@ -150,12 +150,11 @@ function createApplicationHomeCatalogAdapter(_onTransportRetired: () => void): H
     async fetch(target, _key, signal) {
       const base = canonicalDaemonUrl("http", target.daemon.bindHostname, target.daemon.port);
       const read = async (path: string) => {
+        if (!target.daemon.authToken) throw new Error("Daemon credential is unavailable.");
         const response = await fetch(base + path, {
           headers: {
             accept: "application/json",
-            ...(target.daemon.authToken
-              ? { Authorization: `Bearer ${target.daemon.authToken}` }
-              : {}),
+            Authorization: `Bearer ${target.daemon.authToken}`,
           },
           credentials: "omit",
           cache: "no-store",
@@ -228,6 +227,7 @@ function createApplicationHomeCatalogAdapter(_onTransportRetired: () => void): H
       };
       const startPush = async () => {
         if (closed || pending || closePush) return;
+        if (!target.daemon.authToken) return;
         pending = true;
         const socket = new WebSocket(
           canonicalDaemonUrl(
@@ -237,9 +237,7 @@ function createApplicationHomeCatalogAdapter(_onTransportRetired: () => void): H
             "/ws/events?mode=semantic",
           ),
           {
-            headers: target.daemon.authToken
-              ? { Authorization: `Bearer ${target.daemon.authToken}` }
-              : undefined,
+            headers: { Authorization: `Bearer ${target.daemon.authToken}` },
           },
         ) as unknown as WorkspaceEventSocket;
         const supervisor = createWorkspaceEventSupervisor({

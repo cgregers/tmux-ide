@@ -149,7 +149,7 @@ export async function resolveOpenTuiApplicationShellConnection(
       }
     : null;
   const daemon = dependencies.readCanonicalDaemonInfo();
-  if (!daemon || !(await dependencies.isCanonicalDaemonAlive(daemon))) return null;
+  if (!daemon?.authToken || !(await dependencies.isCanonicalDaemonAlive(daemon))) return null;
 
   const catalog = await dependencies.fetchCanonicalWorkspaceRouting(daemon);
   if (catalog.daemon.instanceId !== daemon.instanceId) return null;
@@ -176,7 +176,7 @@ export async function resolveOpenTuiApplicationShellConnection(
     descriptor: openTuiDaemonDescriptor(daemon),
     workspaceName,
     sessionName,
-    ...(daemon.authToken ? { ownerToken: daemon.authToken } : {}),
+    ownerToken: daemon.authToken,
     // OpenTUI lays out terminals from the semantic runtime lane and never
     // consumes V3 appWindows. V2 still carries the authenticated,
     // attachability-bearing inventory used to admit that lane.

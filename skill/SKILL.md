@@ -11,6 +11,10 @@ Around both: notifications when an agent needs a human, and crash-proof restore.
 tmux owns every process and pane, so sessions survive tmux-ide. `.tmux-ide/workspace.yml`
 is optional.
 
+Use `tmux-ide app`, not the retired standalone `command-center`. Daemon
+`/api/*` and `/ws/*` calls require the token from the owner-only `daemon.json`,
+including on loopback; browser hosts use a same-origin proxy.
+
 ## When to use
 
 - User mentions tmux, a dock/status bar over sessions, an agent fleet, or session status

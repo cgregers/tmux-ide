@@ -7,7 +7,8 @@ import {
   AppWindowDocumentV1SchemaZ,
   projectApplicationShellV1,
 } from "@tmux-ide/contracts";
-import { createApp, getCompatibilityMetrics } from "../server.ts";
+import { getCompatibilityMetrics } from "../server.ts";
+import { createAuthenticatedTestApp as createApp } from "../authenticated-test-app.ts";
 import { isHostNameTitle } from "./application-shell.ts";
 import { _setTmuxRunner } from "../discovery.ts";
 import { _setExecutor } from "../../widgets/lib/pane-comms.ts";
@@ -885,7 +886,7 @@ describe("GET /api/project/:name/application-shell", () => {
     });
 
     const denied = await app.request("/api/project/product/application-shell", {
-      headers: { origin: "https://desktop.invalid" },
+      headers: { origin: "https://desktop.invalid", Authorization: "" },
     });
     expect(denied.status).toBe(401);
 
@@ -897,7 +898,7 @@ describe("GET /api/project/:name/application-shell", () => {
       },
     });
     expect(legacyResponse.status).toBe(200);
-    expect(legacyResponse.headers.get("access-control-allow-origin")).toBe("*");
+    expect(legacyResponse.headers.get("access-control-allow-origin")).toBeNull();
     expect(legacyResponse.headers.get("deprecation")).toBe("true");
     expect(legacyResponse.headers.get("sunset")).toBe("Mon, 01 Feb 2027 00:00:00 GMT");
     expect(legacyResponse.headers.get("x-tmux-ide-compatibility")).toBe("application-shell-v1");

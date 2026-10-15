@@ -24,10 +24,17 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   APPLICATION_SHELL_V3_MAX_RESPONSE_BYTES,
-  DaemonResourceBroker,
+  DaemonResourceBroker as ProductionDaemonResourceBroker,
   workspacePromotionFailureFromUnknown,
   type BrokerEventSocket,
 } from "./daemon-resource-broker.ts";
+
+// Domain fixtures hold a real synthetic bearer; explicit null tests ownerless behavior.
+class DaemonResourceBroker extends ProductionDaemonResourceBroker {
+  constructor(dependencies: ConstructorParameters<typeof ProductionDaemonResourceBroker>[0]) {
+    super({ ownerToken: "owner-only-token", ...dependencies });
+  }
+}
 
 const IDENTITY = {
   protocolVersion: 1,
@@ -561,6 +568,7 @@ describe("Electron main daemon resource broker", () => {
     const fetch = vi.fn();
     const broker = new DaemonResourceBroker({
       daemon: CONNECTED,
+      ownerToken: null,
       fetch,
       // A renderer/remote bearer is not a constructor capability and is ignored.
       remoteToken: "remote-access-token",
@@ -779,7 +787,11 @@ describe("Electron main daemon resource broker", () => {
     expect(requests.every(({ init }) => init?.method === "GET" && init.redirect === "error")).toBe(
       true,
     );
-    expect(JSON.stringify(requests.map(({ init }) => init?.headers))).not.toMatch(/bearer|token/iu);
+    expect(
+      requests.every(
+        ({ init }) => new Headers(init?.headers).get("Authorization") === "Bearer owner-only-token",
+      ),
+    ).toBe(true);
   });
 
   it("honors an explicit V2 request without probing V3", async () => {
@@ -1142,7 +1154,9 @@ describe("Electron main daemon resource broker", () => {
     expect(one.status).toBe("subscribed");
     expect(two.status).toBe("subscribed");
     expect(createWebSocket).toHaveBeenCalledOnce();
-    expect(createWebSocket).toHaveBeenCalledWith("ws://127.0.0.1:6060/ws/events");
+    expect(createWebSocket).toHaveBeenCalledWith("ws://127.0.0.1:6060/ws/events", {
+      headers: { Authorization: "Bearer owner-only-token" },
+    });
 
     socket.emit("open");
     expect(socket.sent).toEqual([]);
@@ -1211,7 +1225,9 @@ describe("Electron main daemon resource broker", () => {
         return result;
       });
     await vi.waitFor(() => expect(createWebSocket).toHaveBeenCalledOnce());
-    expect(createWebSocket).toHaveBeenCalledWith("ws://127.0.0.1:6060/ws/events?mode=semantic");
+    expect(createWebSocket).toHaveBeenCalledWith("ws://127.0.0.1:6060/ws/events?mode=semantic", {
+      headers: { Authorization: "Bearer owner-only-token" },
+    });
     socket.emit("open");
     socket.emit(
       "message",
@@ -2132,6 +2148,7 @@ describe("Electron main daemon workspace read resources", () => {
   it("refuses a read without an owner capability", async () => {
     const broker = new DaemonResourceBroker({
       daemon: CONNECTED,
+      ownerToken: null,
       fetch: async () => json(WORKSPACE_CATALOG),
     });
     await expect(
@@ -2272,7 +2289,7 @@ describe("Electron main daemon workspace read resources", () => {
 
   it("refuses a fleet catalog read without the owner secret", async () => {
     const fetch = vi.fn();
-    const broker = new DaemonResourceBroker({ daemon: CONNECTED, fetch });
+    const broker = new DaemonResourceBroker({ daemon: CONNECTED, ownerToken: null, fetch });
     await expect(broker.fetchFleetCatalog()).resolves.toMatchObject({
       status: "error",
       error: { code: "daemon-unavailable" },
@@ -2553,7 +2570,7 @@ describe("Electron main pane-stream issuance (m43 card 3)", () => {
 
   it("requires the canonical owner secret before any request leaves the broker", async () => {
     const fetch = vi.fn();
-    const broker = new DaemonResourceBroker({ daemon: CONNECTED, fetch });
+    const broker = new DaemonResourceBroker({ daemon: CONNECTED, ownerToken: null, fetch });
     await expect(
       broker.issuePaneStream(paneStreamMutation(), "http://127.0.0.1:5173"),
     ).resolves.toMatchObject({ status: "error", error: { code: "daemon-unavailable" } });

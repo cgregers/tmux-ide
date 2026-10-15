@@ -50,6 +50,7 @@ function schemaSummary(parsed) {
 }
 /** Read-only diagnostics for the installed Home gate. Never returns resource bodies or credentials. */
 export async function diagnosePackedHome(daemon, sessionName, dependencies = {}) {
+  if (!daemon.authToken) throw new Error("Daemon credential is unavailable.");
   const fetchImpl = dependencies.fetch ?? fetch;
   const createSocket =
     dependencies.createSocket ?? ((url, headers) => new WebSocket(url, { headers }));
@@ -59,7 +60,7 @@ export async function diagnosePackedHome(daemon, sessionName, dependencies = {})
   const summary = { identityMatch: false, socketClosed: true };
   const headers = {
     accept: "application/json",
-    ...(daemon.authToken ? { Authorization: `Bearer ${daemon.authToken}` } : {}),
+    Authorization: `Bearer ${daemon.authToken}`,
   };
   const base = `http://${daemon.bindHostname.includes(":") ? `[${daemon.bindHostname}]` : daemon.bindHostname}:${daemon.port}`;
   const get = async (path, authorized = true) => {

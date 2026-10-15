@@ -66,6 +66,7 @@ export async function readDaemonStartupReadinessLadder(
       "/api/resources/startup-readiness",
     );
     authToken = record.info.authToken ?? null;
+    if (!authToken) return null;
   } catch {
     return null;
   }
@@ -77,7 +78,7 @@ export async function readDaemonStartupReadinessLadder(
       signal: abort.signal,
       headers: {
         Accept: "application/json",
-        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
+        Authorization: `Bearer ${authToken}`,
       },
     });
     if (!response.ok) return null;

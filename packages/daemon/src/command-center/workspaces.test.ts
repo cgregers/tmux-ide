@@ -7,7 +7,7 @@ import {
   _setDefaultWorkspaceRegistryForTests,
 } from "../lib/workspace-registry.ts";
 import { handleWsEventsConnection } from "./ws-events.ts";
-import { createApp } from "./server.ts";
+import { createAuthenticatedTestApp as createApp } from "./authenticated-test-app.ts";
 import { _resetCacheForTests, registerProject } from "../lib/project-registry.ts";
 import { fleetSessionIdForName } from "./resources/fleet-catalog.ts";
 

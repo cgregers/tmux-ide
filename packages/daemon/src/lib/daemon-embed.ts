@@ -359,48 +359,31 @@ function bearerToken(authHeader: string | string[] | undefined): string | null {
   return value.slice("Bearer ".length);
 }
 
-function requestToken(req: import("node:http").IncomingMessage): string | null {
+function daemonCredentialCandidates(
+  req: Pick<import("node:http").IncomingMessage, "headers" | "url">,
+): string[] {
   const headerToken = bearerToken(req.headers.authorization);
-  if (headerToken) return headerToken;
+  let queryToken: string | null = null;
   try {
     const url = new URL(req.url ?? "/", "http://localhost");
-    return url.searchParams.get("token");
+    queryToken = url.searchParams.get("token");
   } catch {
-    return null;
+    // A malformed URL contributes no query credential.
   }
+  return [headerToken, queryToken].filter((token): token is string => token !== null);
 }
 
-function isLoopbackRequest(req: import("node:http").IncomingMessage): boolean {
-  const remote = req.socket.remoteAddress ?? "";
-  // Cover both IPv4 (127.0.0.1) and IPv6 (::1 / ::ffff:127.0.0.1) loopback.
-  return (
-    remote === "127.0.0.1" ||
-    remote === "::1" ||
-    remote === "::ffff:127.0.0.1" ||
-    remote.startsWith("127.")
-  );
-}
-
-function isLoopbackBind(bindHostname: string | null | undefined): boolean {
-  return bindHostname === "127.0.0.1" || bindHostname === "::1" || bindHostname === "localhost";
-}
-
-function isUpgradeAuthorized(
-  req: import("node:http").IncomingMessage,
+export function isUpgradeAuthorized(
+  req: Pick<import("node:http").IncomingMessage, "headers" | "url">,
   token: string | null | undefined,
   localBypassToken: string | null | undefined,
-  bindHostname?: string | null,
+  ownerToken: string | null | undefined,
 ): boolean {
-  if (!token) return true;
-  // T085: when the daemon binds to a loopback interface, the only way to
-  // reach `/ws/events` + `/ws/pty/:id` is from the same machine — match the
-  // REST `requireAuth` loopback bypass so the localhost dashboard doesn't
-  // have to juggle the remote-access token through every URL. Remote-bound
-  // daemons (0.0.0.0 / explicit hostnames) still enforce the token even on
-  // loopback because the operator has explicitly opted into remote access.
-  if (isLoopbackBind(bindHostname) && isLoopbackRequest(req)) return true;
-  const supplied = requestToken(req);
-  return supplied === token || (localBypassToken != null && supplied === localBypassToken);
+  return daemonCredentialCandidates(req).some((candidate) =>
+    [ownerToken, localBypassToken, token].some((credential) =>
+      ownerBearerMatches(`Bearer ${candidate}`, credential ?? null),
+    ),
+  );
 }
 
 function rejectUpgradeWithPolicy(
@@ -419,7 +402,6 @@ function attachWebSockets(
   opts: {
     authToken?: string | null;
     localBypassToken?: string | null;
-    bindHostname?: string | null;
     daemonIdentity: DaemonInstanceIdentity;
     ownerToken?: string | null;
   },
@@ -444,8 +426,8 @@ function attachWebSockets(
   ): void => {
     const pathname = (req.url ?? "/").split("?")[0] ?? "/";
     if (
-      (pathname === "/ws/events" || pathname.startsWith("/ws/pty/")) &&
-      !isUpgradeAuthorized(req, opts.authToken, opts.localBypassToken, opts.bindHostname)
+      pathname.startsWith("/ws/") &&
+      !isUpgradeAuthorized(req, opts.authToken, opts.localBypassToken, opts.ownerToken)
     ) {
       rejectUpgradeWithPolicy(pathname === "/ws/events" ? eventsWss : ptyWss, req, socket, head);
       return;
@@ -457,7 +439,7 @@ function attachWebSockets(
         const requestUrl = new URL(req.url ?? "/ws/events", "http://daemon.local");
         handleWsEventsConnection(ws, opts.daemonIdentity, {
           mode: requestUrl.searchParams.get("mode") === "semantic" ? "semantic" : "legacy",
-          ownerAuthorized: ownerBearerMatches(req.headers.authorization, opts.ownerToken ?? null),
+          ownerAuthorized: isUpgradeAuthorized(req, null, null, opts.ownerToken),
         });
       });
       return;
@@ -465,12 +447,21 @@ function attachWebSockets(
 
     const ptyMatch = pathname.match(/^\/ws\/pty\/([^/]+)$/);
     if (ptyMatch) {
-      const id = decodeURIComponent(ptyMatch[1]!);
+      let id: string;
+      try {
+        id = decodeURIComponent(ptyMatch[1]!);
+      } catch {
+        socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        return;
+      }
       ptyWss.handleUpgrade(req, socket, head, (ws) => {
         track(ws);
         handlePtyWebSocket(ws, id);
       });
       return;
+    }
+    if (pathname.startsWith("/ws/")) {
+      socket.end("HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
     }
   };
 
@@ -636,7 +627,13 @@ async function requestValidatedDaemonShutdown(
   }
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (info.authToken) headers.Authorization = `Bearer ${info.authToken}`;
+  if (!info.authToken) {
+    throw new DaemonStartupError(
+      "Canonical daemon credential is unavailable",
+      "canonical_takeover_refused",
+    );
+  }
+  headers.Authorization = `Bearer ${info.authToken}`;
 
   let response: Response;
   try {
@@ -944,7 +941,6 @@ async function startHttpServer({
   const { closeClients, closeServers: closeWsServers } = attachWebSockets(server, {
     authToken,
     localBypassToken,
-    bindHostname,
     daemonIdentity: DaemonInstanceIdentitySchemaZ.parse({
       protocolVersion: DAEMON_WIRE_PROTOCOL_VERSION,
       ...daemonIdentity,
@@ -1046,9 +1042,8 @@ async function startEmbeddedDaemonGeneration(
       : null;
   const bindHostname =
     opts.bindHostname ?? opts.hostname ?? (persistedRemoteAccess ? "0.0.0.0" : DEFAULT_HOSTNAME);
-  // Explicit null means "no auth". This is important for the native app's
-  // loopback-only `tmux-ide --headless` child: persisted remote-access settings
-  // must not silently change the process contract it requested.
+  // Explicit null disables the shared remote token, not the owner credential.
+  // Persisted remote-access settings must not change a local host's contract.
   const authToken = Object.prototype.hasOwnProperty.call(opts, "authToken")
     ? (opts.authToken ?? null)
     : (persistedRemoteAccess?.token ?? null);

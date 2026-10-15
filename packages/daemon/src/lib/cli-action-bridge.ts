@@ -198,7 +198,7 @@ export async function tryDispatchAction<Name extends ActionName>(
     autostart: options.autostart ?? true,
     cwd: dir,
   });
-  if (!daemon) return null;
+  if (!daemon?.ownerToken) return null;
 
   const contract = ActionContractsZ[name];
   const parsedInput = contract.input.parse(input);
@@ -216,7 +216,7 @@ export async function tryDispatchAction<Name extends ActionName>(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(daemon.ownerToken ? { Authorization: `Bearer ${daemon.ownerToken}` } : {}),
+        Authorization: `Bearer ${daemon.ownerToken}`,
         ...(operationId ? { "X-Tmux-Ide-Operation-Id": operationId } : {}),
         ...(options.sourcePaneCredential
           ? { [PANE_SOURCE_CREDENTIAL_HEADER]: options.sourcePaneCredential }

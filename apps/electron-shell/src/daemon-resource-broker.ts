@@ -1,3 +1,4 @@
+import { WebSocket } from "ws";
 import {
   AppWindowMutationArgumentsSchemaZ,
   AppWindowMutationRequestSchemaZ,
@@ -181,7 +182,10 @@ export interface BrokerEventSocket {
 export interface DaemonResourceBrokerDependencies {
   readonly daemon: DesktopDaemonHostState;
   readonly fetch?: BrokerFetch;
-  readonly createWebSocket?: (url: string) => BrokerEventSocket;
+  readonly createWebSocket?: (
+    url: string,
+    options?: { headers: Record<string, string> },
+  ) => BrokerEventSocket;
   readonly requestTimeoutMs?: number;
   readonly maxResponseBytes?: number;
   readonly maxEventBytes?: number;
@@ -526,8 +530,11 @@ function defaultFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Res
   return globalThis.fetch(input, init);
 }
 
-function defaultWebSocket(url: string): BrokerEventSocket {
-  return new globalThis.WebSocket(url) as unknown as BrokerEventSocket;
+function defaultWebSocket(
+  url: string,
+  options?: { headers: Record<string, string> },
+): BrokerEventSocket {
+  return new WebSocket(url, options) as unknown as BrokerEventSocket;
 }
 
 async function readBoundedJson(response: Response, maximumBytes: number): Promise<unknown> {
@@ -576,7 +583,7 @@ async function readBoundedJson(response: Response, maximumBytes: number): Promis
 export class DaemonResourceBroker {
   readonly #daemon: DesktopDaemonHostState;
   readonly #fetch: BrokerFetch;
-  readonly #createWebSocket: (url: string) => BrokerEventSocket;
+  readonly #createWebSocket: NonNullable<DaemonResourceBrokerDependencies["createWebSocket"]>;
   readonly #requestTimeoutMs: number;
   readonly #maxResponseBytes: number;
   readonly #maxEventBytes: number;
@@ -1191,7 +1198,6 @@ export class DaemonResourceBroker {
           negotiatedVersion === APPLICATION_SHELL_RESOURCE_V3_VERSION
             ? APPLICATION_SHELL_V3_MAX_RESPONSE_BYTES
             : this.#maxResponseBytes,
-          false,
           signal,
         );
       } catch (error) {
@@ -1206,7 +1212,6 @@ export class DaemonResourceBroker {
         raw = await this.#requestJson(
           `/api/project/${encodeURIComponent(daemonWorkspaceRouteName("fetchApplicationShell", workspace))}/application-shell?version=${negotiatedVersion}`,
           this.#maxResponseBytes,
-          false,
           signal,
         );
       }
@@ -1333,7 +1338,6 @@ export class DaemonResourceBroker {
       const raw = await this.#requestJson(
         "/api/resources/fleet-catalog",
         this.#maxResponseBytes,
-        true,
         signal,
       );
       const parsed = FleetCatalogResourceV1SchemaZ.safeParse(raw);
@@ -1358,7 +1362,6 @@ export class DaemonResourceBroker {
       const raw = await this.#requestJson(
         "/api/resources/workspace-catalog?version=2",
         this.#maxResponseBytes,
-        true,
         signal,
       );
       const parsed = WorkspaceCatalogResourceV2SchemaZ.safeParse(raw);
@@ -1384,7 +1387,6 @@ export class DaemonResourceBroker {
       const raw = await this.#requestJson(
         `/api/widget-assets/${encodeURIComponent(request.assetId)}`,
         24 * 1024 * 1024,
-        true,
         signal,
       );
       const parsed = WidgetAssetResultSchemaZ.safeParse({ status: "ok", asset: raw });
@@ -1425,7 +1427,6 @@ export class DaemonResourceBroker {
       const raw = await this.#requestJson(
         buildPath(encodeURIComponent(daemonWorkspaceRouteName(resource, workspace))),
         this.#maxResponseBytes,
-        true,
         signal,
       );
       const parsed = envelopeSchema.safeParse(raw);
@@ -1625,7 +1626,6 @@ export class DaemonResourceBroker {
     const raw = await this.#requestJson(
       "/api/resources/workspace-catalog?version=2",
       this.#maxResponseBytes,
-      false,
       signal,
     );
     const parsed = WorkspaceCatalogResourceV2SchemaZ.safeParse(raw);
@@ -1679,7 +1679,6 @@ export class DaemonResourceBroker {
   async #requestJson(
     pathname: string,
     maximumResponseBytes = this.#maxResponseBytes,
-    authorize = false,
     signal?: AbortSignal,
   ): Promise<unknown> {
     if (this.#disposed) throw new BrokerFailure(daemonCapabilityError("disposed"));
@@ -1687,7 +1686,7 @@ export class DaemonResourceBroker {
     if (this.#daemon.status !== "connected") {
       throw new BrokerFailure(daemonCapabilityError("daemon-unavailable"));
     }
-    if (authorize && !this.#ownerToken) {
+    if (!this.#ownerToken) {
       throw new BrokerFailure(daemonCapabilityError("daemon-unavailable"));
     }
     const requestGeneration = this.#rendererGeneration;
@@ -1697,7 +1696,7 @@ export class DaemonResourceBroker {
       throw new BrokerFailure(daemonCapabilityError("invalid-request"));
     }
     const headers: Record<string, string> = { accept: "application/json" };
-    if (authorize && this.#ownerToken) headers.Authorization = `Bearer ${this.#ownerToken}`;
+    headers.Authorization = `Bearer ${this.#ownerToken}`;
     const controller = new AbortController();
     const cancel = () => controller.abort();
     signal?.addEventListener("abort", cancel, { once: true });
@@ -1915,11 +1914,14 @@ export class DaemonResourceBroker {
     if (this.#daemon.status !== "connected") {
       throw new Error("the daemon is not connected");
     }
+    if (!this.#ownerToken) throw new Error("Daemon owner credential is unavailable.");
     const url = new URL("/ws/events", this.#daemon.descriptor.apiBaseUrl);
     url.protocol = "ws:";
     this.#socketSemantic = this.#desiredSemanticMode();
     if (this.#socketSemantic) url.searchParams.set("mode", "semantic");
-    const socket = this.#createWebSocket(url.toString());
+    const socket = this.#createWebSocket(url.toString(), {
+      headers: { Authorization: `Bearer ${this.#ownerToken}` },
+    });
     this.#socket = socket;
     this.#socketPeerVerified = false;
     this.#socketOpened = false;

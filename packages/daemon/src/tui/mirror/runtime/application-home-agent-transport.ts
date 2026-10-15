@@ -43,10 +43,12 @@ export function createApplicationHomeAgentTransport(
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const createSocket =
     options.createSocket ??
-    ((url, daemon) =>
-      new WebSocket(url, {
-        headers: daemon.authToken ? { Authorization: `Bearer ${daemon.authToken}` } : undefined,
-      }) as HomeAgentEventSocket);
+    ((url, daemon) => {
+      if (!daemon.authToken) throw new Error("Daemon credential is unavailable.");
+      return new WebSocket(url, {
+        headers: { Authorization: `Bearer ${daemon.authToken}` },
+      }) as HomeAgentEventSocket;
+    });
   const urlFor = (daemon: CanonicalDaemonInfo, path: string, protocol: "http" | "ws" = "http") =>
     canonicalDaemonUrl(protocol, daemon.bindHostname, daemon.port, path);
   return {
@@ -54,11 +56,12 @@ export function createApplicationHomeAgentTransport(
     async fetchShell(daemon, session, signal) {
       const boundedSignal = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
       const get = async (path: string) => {
+        if (!daemon.authToken) throw new Error("Daemon credential is unavailable.");
         const response = await fetchImpl(urlFor(daemon, path), {
           method: "GET",
           headers: {
             accept: "application/json",
-            ...(daemon.authToken ? { Authorization: `Bearer ${daemon.authToken}` } : {}),
+            Authorization: `Bearer ${daemon.authToken}`,
           },
           credentials: "omit",
           cache: "no-store",

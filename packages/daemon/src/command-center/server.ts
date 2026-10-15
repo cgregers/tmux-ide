@@ -5,14 +5,11 @@ import { mountWorkspaceAdmissionRoute } from "./resources/workspace-admission-ro
 import { mountFleetPreviewRoute } from "./resources/fleet-preview-route.ts";
 import { mountSavedMachineRoute } from "./resources/saved-machine-route.ts";
 import { mountFleetClientStateRoute } from "./resources/fleet-client-state-route.ts";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { existsSync, readdirSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Hono, type MiddlewareHandler } from "hono";
 import { streamSSE } from "hono/streaming";
-import { cors } from "hono/cors";
 import {
   discoverSessions,
   discoverLiveSessionSummaries,
@@ -21,20 +18,9 @@ import {
   type FleetSessionFacts,
   type SessionOverview,
 } from "./discovery.ts";
-import {
-  listSessionPanes,
-  sendCommand,
-  sendEnterToPane,
-  sendLiteralToPane,
-  sendText,
-  getPaneBusyStatus,
-} from "../widgets/lib/pane-comms.ts";
-import { resolvePane } from "../send.ts";
-import { getSessionState, killSession, stopSessionMonitor } from "@tmux-ide/tmux-bridge";
-import { writeConfig } from "../lib/yaml-io.ts";
+import { listSessionPanes } from "../widgets/lib/pane-comms.ts";
 import { resolveConfig } from "../lib/resolved-config.ts";
 import { resolveProjectConfigContext } from "../lib/config-context.ts";
-import { IdeConfigSchema } from "../schemas/ide-config.ts";
 import { getLogBuffer, subscribeLogs, type LogEntry } from "../lib/log.ts";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -65,7 +51,6 @@ import {
   type WorkspaceCatalogResourceV2,
   type WorkspaceCatalogResourceV3,
   TERMINAL_RUNTIME_INVENTORY_RESOURCE_VERSION,
-  type DaemonInstanceIdentity,
   type DaemonPanesResponse,
   type DaemonProjectResponse,
   type DaemonProjectsResponse,
@@ -75,7 +60,6 @@ import {
   type DaemonWorkspaceResponse,
   type DaemonWorkspacesResponse,
 } from "@tmux-ide/contracts";
-import { sendCommandSchema } from "./schemas.ts";
 import {
   createScriptTerminalId,
   terminalCreateRequestSchema,
@@ -85,7 +69,6 @@ import {
   type TerminalRuntime,
 } from "@tmux-ide/contracts";
 import {
-  deleteTerminal as deleteTerminalRecord,
   loadTerminals,
   renameTerminal as renameTerminalRecord,
   upsertTerminal as upsertTerminalRecord,
@@ -95,43 +78,19 @@ import { broadcastTerminalsChanged } from "./ws-events.ts";
 import { AuthService } from "../lib/auth/auth-service.ts";
 import { authMiddleware } from "../lib/auth/middleware.ts";
 import type { AuthConfig } from "../lib/auth/types.ts";
-import { handleWsEventsConnection, broadcastInitOutput, broadcastInitError } from "./ws-events.ts";
 import { createActionDispatcher, markActionOwnerAuthorized } from "./actions/dispatcher.ts";
 import { PANE_SOURCE_CREDENTIAL_HEADER } from "../lib/pane-source-credentials.ts";
 import {
   listProjects,
-  getProject,
   registerProject,
   unregisterProject,
-  refreshProject,
   ProjectAlreadyRegisteredError,
   ProjectDirNotFoundError,
   ProjectNotFoundError,
 } from "../lib/project-registry.ts";
-import {
-  runInit,
-  ProjectInitFailedError,
-  ProjectInitTimeoutError,
-} from "../lib/project-init-runner.ts";
-import {
-  RegisterProjectRequestSchemaZ,
-  InitProjectRequestSchemaZ,
-  type ProjectTemplate,
-} from "../schemas/registry.ts";
-import { OnboardProjectRequestSchemaZ } from "../schemas/inspect.ts";
-import { SandboxViolationError, assertInsideSandbox } from "../lib/filesystem-browser.ts";
-import { inspectProject, InspectDirNotFoundError } from "../lib/project-inspect.ts";
-import {
-  composeIdeYmlConfig,
-  assertNoExistingIdeYml,
-  OnboardConflictError,
-  OnboardInvalidInputError,
-} from "../lib/project-onboard.ts";
-import { realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, resolve as pathResolve } from "node:path";
+import { RegisterProjectRequestSchemaZ, type ProjectTemplate } from "../schemas/registry.ts";
+import { isAbsolute } from "node:path";
 import { randomUUID } from "node:crypto";
-import { WebSocketServer } from "ws";
 import {
   projectDeprecatedStandaloneApplicationShellResourceV1,
   projectApplicationShellResource,
@@ -156,7 +115,11 @@ import { mountPaneStreamIssueRoute, type PaneStreamIssueBackend } from "./pane-s
 import { mountWorkspaceResourceRoutes } from "./resources/workspace-resource-routes.ts";
 import { mountFleetResourceRoute } from "./resources/fleet-resource-route.ts";
 import { mountWorkspaceMissionsRoute } from "./resources/workspace-missions-route.ts";
-import { ownerAuthorityGate, requireOwnerAuthority } from "./owner-authority.ts";
+import {
+  ownerAuthorityGate,
+  ownerBearerMatches,
+  requireOwnerAuthority,
+} from "./owner-authority.ts";
 import { mountDiagnosticsRoute } from "./diagnostics.ts";
 import {
   mountStartupReadinessRoute,
@@ -292,13 +255,18 @@ function workspaceDockSummary(
   };
 }
 
-function requireAuth(token: string | null, localBypassToken: string | null): MiddlewareHandler {
+function requireAuth(tokens: readonly (string | null)[]): MiddlewareHandler {
   return async (c, next) => {
-    if (!token) return next();
     const url = new URL(c.req.url);
-    const suppliedToken =
-      bearerToken(c.req.header("Authorization")) ?? url.searchParams.get("token");
-    if (suppliedToken === token || (localBypassToken && suppliedToken === localBypassToken)) {
+    const candidates = [
+      bearerToken(c.req.header("Authorization")),
+      url.searchParams.get("token"),
+    ].filter((token): token is string => token !== null);
+    if (
+      candidates.some((candidate) =>
+        tokens.some((token) => ownerBearerMatches(`Bearer ${candidate}`, token)),
+      )
+    ) {
       return next();
     }
     return c.json({ error: "Remote access token required" }, 401);
@@ -393,17 +361,12 @@ const requireOwnerCapability = (ownerToken: string | null): MiddlewareHandler =>
     mismatchMessage: "Host capability discovery requires owner authority",
   });
 
-function remoteAccessAuth(options: CreateAppOptions): {
-  token: string | null;
-  localBypassToken: string | null;
-} {
-  const bindHostname = options.remoteAccess?.bindHostname ?? "127.0.0.1";
-  const loopback =
-    bindHostname === "127.0.0.1" || bindHostname === "::1" || bindHostname === "localhost";
-  return {
-    token: loopback ? null : (options.remoteAccess?.token ?? null),
-    localBypassToken: options.remoteAccess?.localBypassToken ?? null,
-  };
+function remoteAccessAuth(options: CreateAppOptions): readonly (string | null)[] {
+  return [
+    options.remoteAccess?.ownerToken ?? null,
+    options.remoteAccess?.localBypassToken ?? null,
+    options.remoteAccess?.token ?? null,
+  ];
 }
 
 const sseMetrics = {
@@ -460,67 +423,6 @@ function buildProjectStreamSnapshot(session: DiscoveredSession) {
   };
 }
 
-/**
- * Resolve a user-supplied directory to a canonical absolute path and verify
- * it lives inside the filesystem-browser sandbox. Used by `/api/filesystem/
- * inspect` and `/api/projects/onboard` so unregistered directories get the
- * same protection as the directory browser. Returns either the canonical
- * path or a structured error suitable for `c.json`.
- *
- * Tilde-expansion mirrors `/api/filesystem/browse`: `~` and `~/sub` map to
- * `homedir()`. The sandbox roots are owned by `assertInsideSandbox`.
- */
-type SandboxResolveOk = { canonical: string };
-type SandboxResolveErr = {
-  error: "invalid-path" | "not-found" | "outside-sandbox";
-  message: string;
-  status: 400 | 403 | 404;
-};
-function sandboxResolveDir(rawDir: string): SandboxResolveOk | SandboxResolveErr {
-  const trimmed = rawDir.trim();
-  if (!trimmed) return { error: "invalid-path", message: "Path must not be empty", status: 400 };
-  if (trimmed.includes("\0")) {
-    return { error: "invalid-path", message: "Path contains a null byte", status: 400 };
-  }
-  const home =
-    process.env.TMUX_IDE_HOME_OVERRIDE && process.env.TMUX_IDE_HOME_OVERRIDE.trim().length > 0
-      ? process.env.TMUX_IDE_HOME_OVERRIDE
-      : homedir();
-  let candidate = trimmed;
-  if (candidate === "~") {
-    candidate = home;
-  } else if (candidate.startsWith("~/")) {
-    candidate = `${home.replace(/\/+$/, "")}/${candidate.slice(2)}`;
-  }
-  if (!isAbsolute(candidate)) {
-    return { error: "invalid-path", message: "Path must be absolute", status: 400 };
-  }
-  const resolved = pathResolve(candidate);
-  let canonical: string;
-  try {
-    canonical = realpathSync(resolved);
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code === "ENOENT" || code === "ENOTDIR") {
-      return {
-        error: "not-found",
-        message: `Path "${resolved}" does not exist`,
-        status: 404,
-      };
-    }
-    throw err;
-  }
-  try {
-    assertInsideSandbox(canonical, home);
-  } catch (err) {
-    if (err instanceof SandboxViolationError) {
-      return { error: "outside-sandbox", message: err.message, status: 403 };
-    }
-    throw err;
-  }
-  return { canonical };
-}
-
 export function createApp(options: CreateAppOptions = {}): Hono {
   const authConfig: AuthConfig = options.authConfig ?? { method: "none", token_expiry: 86400 };
   const authService = options.authService ?? new AuthService();
@@ -537,8 +439,9 @@ export function createApp(options: CreateAppOptions = {}): Hono {
 
   const app = new Hono();
 
-  // Allow cross-origin (Next.js dashboard, Tailscale, etc.)
-  app.use("/*", cors());
+  // Register before every API route, including owner-only issuance and auth.
+  // Browser clients use a same-origin host/proxy; every bind requires a token.
+  app.use("/api/*", requireAuth(remoteAccessAuth(options)));
 
   if (options.tmuxServerOwners) {
     mountAutomationRoutes(app, {
@@ -573,11 +476,6 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     workspaceRegistry: options.workspaceRegistry ?? getDefaultWorkspaceRegistry(),
     backend: options.paneStreamIssueBackend ?? null,
   });
-
-  // Remote access bearer gate. Local Electron access uses a per-daemon
-  // bypass token from preload; loopback IPs are not implicitly trusted.
-  const remoteAuth = remoteAccessAuth(options);
-  app.use("/api/*", requireAuth(remoteAuth.token, remoteAuth.localBypassToken));
 
   // Auth middleware — passes through when method is "none"
   app.use("/*", authMiddleware(authService, authConfig));
@@ -809,17 +707,11 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     return c.json({ workspaces: registry.list() } satisfies DaemonWorkspacesResponse);
   });
 
-  // OWNER POLICY: not owner-gated, deliberately. This is the path-free index
-  // the host reads BEFORE it can address any owner-gated resource, and the
-  // production broker fetches it with no Authorization header
-  // (`daemon-resource-broker.ts` `#requestJson`, whose `authorize` argument
-  // defaults to false and is passed `true` only for the fleet catalog and the
-  // workspace resources). It is path-free by construction — `{workspaceName,
-  // sessionName}` pairs and nothing else, asserted in `workspaces.test.ts` —
-  // and it still sits behind the remote-access gate on a non-loopback bind.
-  // Gating it on the owner bearer would break every desktop workspace read
-  // without withholding a single fact the owner-gated routes do not already
-  // protect. V2 live rows carry the daemon-minted opaque Fleet session id;
+  // OWNER POLICY: no additional per-route owner gate. This path-free index
+  // sits behind the global daemon credential gate on every bind; the
+  // production Electron broker supplies its owner bearer. Its base payload
+  // contains only `{workspaceName, sessionName}` pairs, asserted in
+  // `workspaces.test.ts`. V2 live rows carry the opaque Fleet session id;
   // additive V3 also carries the tmux-incarnation identity used by long-lived
   // Home selection without changing V2 for existing clients.
   app.get("/api/resources/workspace-catalog", (c) => {
@@ -1297,22 +1189,6 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     },
   );
 
-  app.delete("/api/project/:name/terminals/:id", async (c) => {
-    const name = c.req.param("name");
-    const id = c.req.param("id");
-    const sessions = discoverSessions();
-    const session = sessions.find((s) => s.name === name);
-    if (!session) return c.json({ error: "Session not found" }, 404);
-    const removedRecord = deleteTerminalRecord(session.dir, id);
-    // Kill the live bridge too — keep store + registry consistent.
-    const killed = defaultPtyBridgeRegistry.delete(id);
-    if (!removedRecord && !killed) {
-      return c.json({ error: "Terminal not found" }, 404);
-    }
-    broadcastTerminalsChanged(name);
-    return c.json({ ok: true });
-  });
-
   // --- Project event/stream endpoints ---
   // The orchestrator/task event feed moved out of tmux-ide (now in sfora.ai),
   // so these surfaces only carry the live pane/project snapshot.
@@ -1377,100 +1253,6 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     });
   });
 
-  app.post("/api/project/:name/inject", async (c) => {
-    const name = c.req.param("name");
-    const sessions = discoverSessions();
-    const session = sessions.find((s) => s.name === name);
-    if (!session) {
-      return c.json({ error: "Session not found" }, 404);
-    }
-
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-
-    if (!body || typeof body !== "object" || Array.isArray(body)) {
-      return c.json({ error: "Invalid request body" }, 400);
-    }
-
-    const text = (body as { text?: unknown }).text;
-    const paneId = (body as { paneId?: unknown }).paneId;
-    const sendEnter = (body as { sendEnter?: unknown }).sendEnter;
-
-    if (typeof text !== "string" || text.trim().length === 0) {
-      return c.json({ error: "text must be a non-empty string" }, 400);
-    }
-    if (paneId !== undefined && (typeof paneId !== "string" || !/^%\d+$/.test(paneId))) {
-      return c.json({ error: "paneId must match /^%\\d+$/" }, 400);
-    }
-    if (sendEnter !== undefined && typeof sendEnter !== "boolean") {
-      return c.json({ error: "sendEnter must be a boolean" }, 400);
-    }
-
-    const panes = listSessionPanes(name);
-    const pane = paneId
-      ? panes.find((candidate) => candidate.id === paneId)
-      : panes.find((p) => p.active);
-    if (!pane) {
-      return c.json({ error: "Pane not found" }, 404);
-    }
-
-    sendLiteralToPane(name, pane.id, text);
-    if (sendEnter) sendEnterToPane(name, pane.id);
-
-    return c.json({ ok: true });
-  });
-
-  // Send message to a pane by name/title/role/ID
-  app.post("/api/project/:name/send", zValidator("json", sendCommandSchema), async (c) => {
-    const name = c.req.param("name");
-    const sessions = discoverSessions();
-    const session = sessions.find((s) => s.name === name);
-    if (!session) {
-      return c.json({ error: "Session not found" }, 404);
-    }
-
-    const { target, message, noEnter } = c.req.valid("json");
-
-    const panes = listSessionPanes(name);
-    const pane = resolvePane(panes, target);
-    if (!pane) {
-      const available = panes.map((p) => ({
-        id: p.id,
-        title: p.title,
-        name: p.name,
-        role: p.role,
-      }));
-      return c.json({ error: "Pane not found", target, available }, 404);
-    }
-
-    const busyStatus = getPaneBusyStatus(name, pane.id);
-
-    // Collapse multiline for agent panes
-    const prepared = busyStatus === "agent" ? message.replace(/\n+/g, " ").trim() : message;
-
-    if (noEnter) {
-      sendText(name, pane.id, prepared);
-    } else {
-      sendCommand(name, pane.id, prepared);
-    }
-
-    return c.json({
-      ok: true,
-      session: name,
-      target: {
-        paneId: pane.id,
-        name: pane.name,
-        title: pane.title,
-        role: pane.role,
-      },
-      busyStatus,
-    });
-  });
-
   // GET /api/project/:name/config — read parsed workspace config. Used by
   // the v2 Config editor to hydrate the form.
   app.get("/api/project/:name/config", async (c) => {
@@ -1496,116 +1278,6 @@ export function createApp(options: CreateAppOptions = {}): Hono {
       const message = err instanceof Error ? err.message : String(err);
       return c.json({ error: "Failed to read workspace config", detail: message }, 500);
     }
-  });
-
-  // POST /api/project/:name/config — accept a full IdeConfig payload, validate
-  // against IdeConfigSchema, and write to workspace.yml. Returns the persisted
-  // config so the client can re-hydrate without a follow-up GET.
-  app.post("/api/project/:name/config", async (c) => {
-    const name = c.req.param("name");
-    const sessions = discoverSessions();
-    const session = sessions.find((s) => s.name === name);
-    if (!session) return c.json({ error: "Session not found" }, 404);
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-    const parsed = IdeConfigSchema.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: "Invalid config", details: parsed.error.issues }, 400);
-    }
-    try {
-      const context = await resolveProjectConfigContext(session.dir);
-      const configPath = writeConfig(context.configWriteRoot, parsed.data);
-      const resolved = await resolveConfig(session.dir);
-      return c.json({
-        ok: true,
-        config: parsed.data,
-        configPath,
-        configKind: resolved.kind,
-        hasWorkspaceConfig: resolved.kind === "workspace",
-        hasIdeYml: resolved.resolution.legacyConfigPath !== null,
-        ideConfigPath: resolved.resolution.legacyConfigPath,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return c.json({ error: "Failed to write workspace config", detail: message }, 500);
-    }
-  });
-
-  // Launch a tmux-ide session (shells out to CLI since launch has complex side effects)
-  const execFileAsync = promisify(execFile);
-
-  // POST /api/project/:name/restart — fire `tmux-ide restart` async. The CLI
-  // handles stop+launch; this endpoint is fire-and-forget aside from a short
-  // 30s timeout so the client can retry on its own.
-  app.post("/api/project/:name/restart", async (c) => {
-    const name = c.req.param("name");
-    const sessions = discoverSessions();
-    const session = sessions.find((s) => s.name === name);
-    if (!session) return c.json({ error: "Session not found" }, 404);
-    try {
-      await execFileAsync("tmux-ide", ["restart", "--json"], {
-        cwd: session.dir,
-        timeout: 30000,
-        env: { ...process.env, TMUX: "" },
-      });
-      return c.json({ ok: true, session: name, status: "restarted" });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      return c.json({ error: "Restart failed", detail: message }, 500);
-    }
-  });
-
-  app.post("/api/project/:name/launch", async (c) => {
-    const name = c.req.param("name");
-    const sessions = discoverSessions();
-    const session = sessions.find((s) => s.name === name);
-    if (!session) {
-      return c.json({ error: "Session not found" }, 404);
-    }
-
-    // Check if already running
-    const state = getSessionState(name);
-    if (state.running) {
-      return c.json({ ok: true, session: name, status: "already_running" });
-    }
-
-    try {
-      await execFileAsync("tmux-ide", ["--json"], {
-        cwd: session.dir,
-        timeout: 30000,
-        env: { ...process.env, TMUX: "" }, // Clear TMUX to avoid nesting
-      });
-      return c.json({ ok: true, session: name, status: "launched" });
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      return c.json({ error: "Launch failed", detail: message }, 500);
-    }
-  });
-
-  // Stop a tmux-ide session
-  app.post("/api/project/:name/stop", async (c) => {
-    const name = c.req.param("name");
-    const sessions = discoverSessions();
-    const session = sessions.find((s) => s.name === name);
-    if (!session) {
-      return c.json({ error: "Session not found" }, 404);
-    }
-
-    const state = getSessionState(name);
-    if (!state.running) {
-      return c.json({ ok: true, session: name, status: "not_running" });
-    }
-
-    stopSessionMonitor(name);
-    const result = killSession(name);
-    if (result.stopped) {
-      return c.json({ ok: true, session: name, status: "stopped" });
-    }
-    return c.json({ error: "Stop failed", reason: result.reason }, 500);
   });
 
   // SSE endpoint — cursor-based event streaming with orchestrator state
@@ -1695,202 +1367,55 @@ export function createApp(options: CreateAppOptions = {}): Hono {
     return c.json({ templates: listAvailableTemplates() } satisfies DaemonProjectTemplatesResponse);
   });
 
-  app.post("/api/projects", async (c) => {
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-    const parsed = RegisterProjectRequestSchemaZ.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: "Invalid request", details: parsed.error.issues }, 400);
-    }
-    try {
-      const project = await registerProject({
-        dir: parsed.data.dir,
-        name: parsed.data.name,
-        persistence: parsed.data.persistence,
-      });
-      return c.json({ project } satisfies DaemonRegisteredProjectResponse, 201);
-    } catch (err) {
-      if (err instanceof ProjectDirNotFoundError) {
-        return c.json({ error: err.message, code: err.code }, 400);
-      }
-      if (err instanceof ProjectAlreadyRegisteredError) {
-        return c.json({ error: err.message, code: err.code, suggestion: err.suggestion }, 409);
-      }
-      throw err;
-    }
-  });
-
-  app.delete("/api/projects/:name", (c) => {
-    const name = c.req.param("name");
-    try {
-      unregisterProject(name);
-      return c.json({ ok: true });
-    } catch (err) {
-      if (err instanceof ProjectNotFoundError) {
-        return c.json({ error: err.message, code: err.code }, 404);
-      }
-      throw err;
-    }
-  });
-
-  app.post("/api/projects/:name/probe", async (c) => {
-    const name = c.req.param("name");
-    if (!getProject(name)) {
-      return c.json({ error: `Project "${name}" not found in registry`, code: "NOT_FOUND" }, 404);
-    }
-    try {
-      const project = await refreshProject(name);
-      return c.json({ project } satisfies DaemonRegisteredProjectResponse);
-    } catch (err) {
-      if (err instanceof ProjectNotFoundError) {
-        return c.json({ error: err.message, code: err.code }, 404);
-      }
-      throw err;
-    }
-  });
-
-  app.post("/api/projects/init", async (c) => {
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-    const parsed = InitProjectRequestSchemaZ.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: "Invalid request", details: parsed.error.issues }, 400);
-    }
-    if (!existsSync(parsed.data.dir)) {
-      return c.json({ error: `Directory "${parsed.data.dir}" does not exist` }, 400);
-    }
-
-    const jobId = randomUUID();
-    const command = process.env.TMUX_IDE_INIT_COMMAND ?? "tmux-ide";
-
-    // Fire-and-forget — runs in the background and streams chunks via WS.
-    void (async () => {
+  // The reference performance fixture still registers and removes volatile projects.
+  app.post(
+    "/api/projects",
+    requireOwnerCapability(options.remoteAccess?.ownerToken ?? null),
+    async (c) => {
+      let body: unknown;
       try {
-        await runInit({
-          cwd: parsed.data.dir,
-          template: parsed.data.template,
-          command,
-          onChunk: (chunk) => {
-            broadcastInitOutput(jobId, chunk);
-          },
+        body = await c.req.json();
+      } catch {
+        return c.json({ error: "Invalid JSON body" }, 400);
+      }
+      const parsed = RegisterProjectRequestSchemaZ.safeParse(body);
+      if (!parsed.success) {
+        return c.json({ error: "Invalid request", details: parsed.error.issues }, 400);
+      }
+      try {
+        const project = await registerProject({
+          dir: parsed.data.dir,
+          name: parsed.data.name,
+          persistence: parsed.data.persistence,
         });
-        // Mark stream complete
-        broadcastInitOutput(jobId, "", true);
-
-        // Probe + register the freshly-init'd project so it shows up in
-        // the registry — also broadcasts `projects.changed`.
-        try {
-          await registerProject({ dir: parsed.data.dir });
-        } catch (err) {
-          // Already-registered is benign here; report anything else.
-          if (
-            !(err instanceof ProjectAlreadyRegisteredError) &&
-            !(err instanceof ProjectDirNotFoundError)
-          ) {
-            broadcastInitError(jobId, (err as Error).message);
-          }
-        }
+        return c.json({ project } satisfies DaemonRegisteredProjectResponse, 201);
       } catch (err) {
-        if (err instanceof ProjectInitTimeoutError) {
-          broadcastInitError(jobId, err.message);
-        } else if (err instanceof ProjectInitFailedError) {
-          broadcastInitError(jobId, err.message);
-        } else {
-          broadcastInitError(jobId, (err as Error).message);
+        if (err instanceof ProjectDirNotFoundError) {
+          return c.json({ error: err.message, code: err.code }, 400);
         }
+        if (err instanceof ProjectAlreadyRegisteredError) {
+          return c.json({ error: err.message, code: err.code, suggestion: err.suggestion }, 409);
+        }
+        throw err;
       }
-    })();
+    },
+  );
 
-    return c.json({ jobId }, 202);
-  });
-
-  // -------------------------------------------------------------------------
-  // POST /api/projects/onboard   — generate workspace.yml + register the project.
-  // -------------------------------------------------------------------------
-
-  app.post("/api/projects/onboard", async (c) => {
-    let body: unknown;
-    try {
-      body = await c.req.json();
-    } catch {
-      return c.json({ error: "Invalid JSON body" }, 400);
-    }
-    const parsed = OnboardProjectRequestSchemaZ.safeParse(body);
-    if (!parsed.success) {
-      return c.json({ error: "Invalid request", details: parsed.error.issues }, 400);
-    }
-    const sandboxResult = sandboxResolveDir(parsed.data.dir);
-    if ("error" in sandboxResult) {
-      return c.json(
-        { error: sandboxResult.error, message: sandboxResult.message },
-        sandboxResult.status,
-      );
-    }
-
-    const dir = sandboxResult.canonical;
-    let inspect;
-    try {
-      inspect = await inspectProject(dir);
-    } catch (err) {
-      if (err instanceof InspectDirNotFoundError) {
-        return c.json({ error: "not-found", message: err.message }, 404);
+  app.delete(
+    "/api/projects/:name",
+    requireOwnerCapability(options.remoteAccess?.ownerToken ?? null),
+    (c) => {
+      try {
+        unregisterProject(c.req.param("name"));
+        return c.json({ ok: true });
+      } catch (err) {
+        if (err instanceof ProjectNotFoundError) {
+          return c.json({ error: err.message, code: err.code }, 404);
+        }
+        throw err;
       }
-      throw err;
-    }
-
-    // Never overwrite an existing workspace or legacy config.
-    try {
-      await assertNoExistingIdeYml(dir);
-    } catch (err) {
-      if (err instanceof OnboardConflictError) {
-        return c.json({ error: err.message, code: err.code }, 409);
-      }
-      throw err;
-    }
-
-    // Compose the config from inputs (defaults to inspect.name).
-    const finalName = parsed.data.name?.trim() || inspect.name;
-    let config;
-    try {
-      config = composeIdeYmlConfig({
-        name: finalName,
-        agents: parsed.data.agents,
-        agentNames: parsed.data.agentNames,
-        devCommand: parsed.data.devCommand ?? null,
-        testCommand: parsed.data.testCommand ?? null,
-        lintCommand: parsed.data.lintCommand ?? null,
-      });
-    } catch (err) {
-      if (err instanceof OnboardInvalidInputError) {
-        return c.json({ error: err.message, code: err.code }, 400);
-      }
-      throw err;
-    }
-
-    writeConfig(dir, config);
-
-    // Now register — this also broadcasts `projects.changed`.
-    try {
-      const project = await registerProject({ dir, name: finalName });
-      return c.json({ project } satisfies DaemonRegisteredProjectResponse, 201);
-    } catch (err) {
-      if (err instanceof ProjectAlreadyRegisteredError) {
-        return c.json({ error: err.message, code: err.code, suggestion: err.suggestion }, 409);
-      }
-      if (err instanceof ProjectDirNotFoundError) {
-        return c.json({ error: err.message, code: err.code }, 400);
-      }
-      throw err;
-    }
-  });
+    },
+  );
 
   return app;
 }
@@ -1955,44 +1480,4 @@ function listAvailableTemplates(): ProjectTemplate[] {
       };
     })
     .sort((a, b) => a.id.localeCompare(b.id));
-}
-
-/**
- * Attach the unified `/ws/events` push channel to a Node HTTP server. The
- * daemon calls this once after binding the command-center port. Existing
- * SSE endpoints (`/api/events`, `/api/project/<name>/stream`) continue to
- * work alongside this — they will be retired in a follow-up slice.
- */
-export function attachWsEvents(
-  server: import("node:http").Server,
-  daemonIdentity: DaemonInstanceIdentity,
-): {
-  close: () => void;
-} {
-  const wss = new WebSocketServer({ noServer: true });
-
-  const upgradeListener = (
-    req: import("node:http").IncomingMessage,
-    socket: import("node:net").Socket,
-    head: Buffer,
-  ): void => {
-    const url = req.url ?? "/";
-    const pathname = url.split("?")[0];
-    if (pathname !== "/ws/events") return;
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      const requestUrl = new URL(req.url ?? "/ws/events", "http://daemon.local");
-      handleWsEventsConnection(ws, daemonIdentity, {
-        mode: requestUrl.searchParams.get("mode") === "semantic" ? "semantic" : "legacy",
-      });
-    });
-  };
-
-  server.on("upgrade", upgradeListener);
-
-  return {
-    close: () => {
-      server.off("upgrade", upgradeListener);
-      wss.close();
-    },
-  };
 }

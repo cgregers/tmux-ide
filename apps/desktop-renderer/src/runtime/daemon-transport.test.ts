@@ -10,11 +10,15 @@ import {
 } from "@tmux-ide/contracts";
 
 import {
-  createDirectLoopbackDaemonTransport,
+  createDirectLoopbackDaemonTransport as createProductionTransport,
   DaemonTransportError,
   type DaemonEventSocket,
   type DaemonFetch,
 } from "./daemon-transport.ts";
+
+const createDirectLoopbackDaemonTransport = (
+  dependencies: Parameters<typeof createProductionTransport>[0],
+) => createProductionTransport({ ownerToken: "test-owner", ...dependencies });
 
 const descriptor: DesktopDaemonHostDescriptor = {
   apiBaseUrl: "http://127.0.0.1:6060",
@@ -105,8 +109,8 @@ class FakeSocket implements DaemonEventSocket {
   }
 }
 
-describe("browser-safe daemon transport", () => {
-  it("fetches and validates the typed application-shell resource without credentials", async () => {
+describe("authenticated direct daemon transport", () => {
+  it("fetches and validates the typed application-shell resource with the owner bearer", async () => {
     const fetch = vi.fn<DaemonFetch>(async () =>
       Promise.resolve(
         new Response(JSON.stringify(resourceEnvelope()), {
@@ -136,7 +140,7 @@ describe("browser-safe daemon transport", () => {
       credentials: "omit",
       cache: "no-store",
       redirect: "error",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", Authorization: "Bearer test-owner" },
     });
     expect(JSON.stringify(init)).not.toContain("token");
   });
@@ -249,7 +253,9 @@ describe("browser-safe daemon transport", () => {
       },
     );
 
-    expect(createWebSocket).toHaveBeenCalledWith("ws://127.0.0.1:6060/ws/events");
+    expect(createWebSocket).toHaveBeenCalledWith("ws://127.0.0.1:6060/ws/events", {
+      headers: { Authorization: "Bearer test-owner" },
+    });
     socket.emit("open");
     expect(onVerifiedOpen).not.toHaveBeenCalled();
     expect(socket.sent).toEqual([]);

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { _setExecutor, type PaneInfo } from "../widgets/lib/pane-comms.ts";
 import { _setTmuxRunner } from "./discovery.ts";
-import { createApp } from "./server.ts";
+import { createAuthenticatedTestApp as createApp } from "./authenticated-test-app.ts";
 import { makePane } from "../__tests__/support.ts";
 
 let originalHome: string | undefined;
