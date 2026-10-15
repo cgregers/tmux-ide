@@ -152,7 +152,9 @@ async function fakeOwner(options: {
   servers.add({ server, sockets });
   const address = server.address();
   if (!address || typeof address === "string") throw new Error("fake owner did not bind TCP");
-  info = daemonInfo(address.port, { authToken: options.authToken ?? null });
+  info = daemonInfo(address.port, {
+    authToken: options.authToken === undefined ? "probe-secret" : options.authToken,
+  });
   writeCanonicalDaemonInfo(info, claimCanonicalSlot());
   return { info, actionRequests };
 }
@@ -266,6 +268,20 @@ describe.sequential("embedded daemon cooperative takeover", () => {
         body: { reason: "takeover", expectedInstanceId: info.instanceId },
       },
     ]);
+    expect(readCanonicalDaemonInfo()?.instanceId).toBe(info.instanceId);
+    expect(existsSync(getCanonicalDaemonClaimPath())).toBe(true);
+  });
+
+  it("refuses an owner without a credential before sending a shutdown action request", async () => {
+    const { info, actionRequests } = await fakeOwner({ action: "refuse", authToken: null });
+
+    await expect(
+      startEmbeddedDaemon({ takeoverIfRunning: true, silent: true }),
+    ).rejects.toMatchObject({
+      reason: "canonical_takeover_refused",
+      message: "Canonical daemon credential is unavailable",
+    });
+    expect(actionRequests).toEqual([]);
     expect(readCanonicalDaemonInfo()?.instanceId).toBe(info.instanceId);
     expect(existsSync(getCanonicalDaemonClaimPath())).toBe(true);
   });

@@ -51,6 +51,12 @@ async function fetchCanonicalCatalog(
   request: typeof fetch,
   signal?: AbortSignal,
 ): Promise<WorkspaceCatalogResourceV2 | WorkspaceCatalogResourceV3> {
+  if (!daemon.authToken)
+    throw new ApplicationShellTransportError(
+      "descriptor-invalid",
+      "Daemon owner credential is unavailable.",
+    );
+
   const baseUrl = canonicalDaemonUrl("http", daemon.bindHostname, daemon.port);
   let response: Response | null = null;
   for (let attempt = 0; attempt < WORKSPACE_CATALOG_ATTEMPTS; attempt += 1) {
@@ -59,6 +65,8 @@ async function fetchCanonicalCatalog(
       response = await request(`${baseUrl}/api/resources/workspace-catalog?version=${version}`, {
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         cache: "no-store",
+        redirect: "error",
+        headers: { Authorization: `Bearer ${daemon.authToken}` },
       });
       break;
     } catch (error) {
