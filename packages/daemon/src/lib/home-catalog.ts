@@ -126,7 +126,7 @@ export function closeHomeCatalogTransport(
   supervisor.dispose();
 }
 
-function createHomeCatalogAdapter(_onTransportRetired: () => void): HomeCatalogAdapter {
+export function createHomeCatalogAdapter(_onTransportRetired: () => void): HomeCatalogAdapter {
   return {
     validateTarget(value) {
       if (
