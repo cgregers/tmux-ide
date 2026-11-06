@@ -1,3 +1,4 @@
+import { registerVerifiedVersion } from "./diagnostic-versions.ts";
 import { canonicalDaemonUrl } from "../../../packages/daemon/src/lib/canonical-daemon.ts";
 import { randomUUID } from "node:crypto";
 import type { createDaemonConnectionOwner } from "../../../packages/daemon/src/lib/daemon-connection-owner.ts";
@@ -21,7 +22,8 @@ const messages = {
   unavailable: "Machine connection is unavailable. Reconnect the machine and try again.",
   retired: "Machine connection changed. Select the machine again.",
   identity: "Machine identity could not be verified. Reconnect the machine.",
-  incompatible: "Machine daemon is incompatible with this preview. Update the remote daemon.",
+  incompatible:
+    "App and remote daemon protocols are incompatible. Check that this app and tmux-ide on the remote machine are up to date, then retry.",
   "no-server": "The machine has no online tmux server. Open a tmux session and refresh.",
   "multiple-servers": "The machine has multiple online tmux servers. Select a server explicitly.",
   "server-changed":
@@ -51,12 +53,31 @@ export interface RemotePreviewRoute {
  */
 export async function createRemotePreviewRoute(
   owner: Owner,
-  options: { request?: typeof fetch; signal?: AbortSignal; scope?: TmuxServerScope } = {},
+  options: {
+    request?: typeof fetch;
+    signal?: AbortSignal;
+    scope?: TmuxServerScope;
+    diagnostic?: (
+      reason:
+        | "transport-state"
+        | "connection-epoch"
+        | "remote-identity"
+        | "forward-address"
+        | "identity-probe",
+    ) => void;
+  } = {},
 ): Promise<RemotePreviewRoute> {
   const parsedScope =
     options.scope === undefined ? null : TmuxServerScopeSchemaZ.safeParse(options.scope);
   if (parsedScope && !parsedScope.success) throw new RemoteRouteError("server-changed");
   const scope = parsedScope?.data;
+  const diagnostic = (reason: Parameters<NonNullable<typeof options.diagnostic>>[0]) => {
+    try {
+      options.diagnostic?.(reason);
+    } catch {
+      /* Diagnostics cannot change retirement. */
+    }
+  };
   const parentSignal = options.signal;
   const fetchRequest = options.request ?? fetch;
   const captured = owner.endpoint();
@@ -80,6 +101,17 @@ export async function createRemotePreviewRoute(
       next.remote !== captured.remote ||
       next.localBaseUrl !== captured.localBaseUrl
     ) {
+      if (!controller.signal.aborted && !parentSignal?.aborted) {
+        const reason =
+          next.state !== "ready"
+            ? "transport-state"
+            : next.epoch !== captured.epoch
+              ? "connection-epoch"
+              : next.remote !== captured.remote
+                ? "remote-identity"
+                : "forward-address";
+        diagnostic(reason);
+      }
       dispose();
       throw new RemoteRouteError("retired");
     }
@@ -129,6 +161,7 @@ export async function createRemotePreviewRoute(
           throw new RemoteRouteError("identity");
         assertCurrent();
       } catch (error) {
+        if (!controller.signal.aborted && !parentSignal?.aborted) diagnostic("identity-probe");
         dispose();
         if (error instanceof RemoteRouteError) throw error;
         throw new RemoteRouteError("unavailable");
@@ -161,6 +194,7 @@ export async function createRemotePreviewRoute(
       ownerToken: daemon.authToken,
       scope: { serverId: matches[0]!.serverId, generation: matches[0]!.generation },
     });
+    registerVerifiedVersion(host, daemon.productVersion, assertCurrent);
     Object.freeze(host.scope);
     Object.freeze(host);
     return { host, signal: controller.signal, assertCurrent, verify, dispose };

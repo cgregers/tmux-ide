@@ -25,6 +25,21 @@ export function createReplica(
   let assembler: TerminalDeliveryAssembler | null = null;
   let retired = false;
   return {
+    current() {
+      if (retired || !state.canonicalSnapshot || !state.incarnation || !state.appliedHash)
+        return null;
+      return {
+        snapshot: state.canonicalSnapshot,
+        proof: {
+          workspaceName: workspace,
+          semanticPaneId: pane,
+          generation: negotiated.generation,
+          incarnation: state.incarnation,
+          revision: state.appliedRevision,
+          stateHash: state.appliedHash,
+        },
+      };
+    },
     retire() {
       retired = true;
       assembler = null;
@@ -41,6 +56,8 @@ export function createReplica(
           assembler = new TerminalDeliveryAssembler(message);
           return;
         }
+        if (message.type !== "terminal.delivery.chunk")
+          throw new Error("Terminal projection was not negotiated by this receiver");
         state = admitTerminalDeliveryChunk(state, message);
         if (state.failed || !assembler) throw new Error("Invalid terminal chunk");
         assembler.write(message);

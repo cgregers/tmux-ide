@@ -1,3 +1,4 @@
+import { projectFleetDiagnostic, type NativeFleetDiagnostic } from "./fleet-diagnostic.ts";
 import {
   createFleetPreferencePublication,
   type FleetPreferenceOwner,
@@ -25,6 +26,7 @@ export interface NativeFleetPublication {
     id: string;
     label: string;
     state: "ready" | "connecting" | "disconnected";
+    diagnostic?: NativeFleetDiagnostic;
     conflict: boolean;
     retry: string | null;
     disconnect: string | null;
@@ -196,6 +198,7 @@ export function createNativeFleet(
           retry,
           label: group.label.slice(0, 256),
           state: group.state,
+          diagnostic: projectFleetDiagnostic(group.diagnostic),
           conflict: !!group.identityConflict,
           omittedSessions: Math.max(0, group.sessions.length - visible.length),
           sessions: visible.map((session) => {
@@ -389,6 +392,11 @@ export function createNativeFleet(
         },
       };
     },
+    /** Private cache incarnation proof; never expose endpoint identity in publications. */
+    retainedFrameProof(key: string): string | null {
+      const route = canonicalRoute(key);
+      return route ? JSON.stringify([route.key, route.instance, route.epoch]) : null;
+    },
     retainedTarget(key: string) {
       const route = canonicalRoute(key);
       if (!route) return null;
@@ -447,6 +455,38 @@ export function createNativeFleet(
         activity: row.activity,
         attention: row.attention,
       }));
+    },
+    // Retain identity, never a selection token or credentials. A new generation
+    // is admitted only through the fresh, conflict-free catalog of this handle.
+    recoveryRoute(key: string) {
+      const original = canonicalRoute(key);
+      if (!original) return null;
+      const machine = original.handle;
+      const environment = machine.read()?.environmentId;
+      const serverId = original.session.server!.serverId;
+      const liveSessionId = original.session.liveSessionId;
+      return () => {
+        if (
+          stopped ||
+          manager.getMachine(machine.id) !== machine ||
+          machine.read()?.environmentId !== environment
+        )
+          return null;
+        const matches = catalog
+          .getSnapshot()
+          .groups.filter(
+            (group) =>
+              group.id === machine.id && group.state === "ready" && !group.identityConflict,
+          )
+          .flatMap((group) => group.sessions)
+          .filter(
+            (session) =>
+              !session.disabled &&
+              session.server?.serverId === serverId &&
+              session.liveSessionId === liveSessionId,
+          );
+        return matches.length === 1 && canonicalRoute(matches[0]!.id) ? matches[0]!.id : null;
+      };
     },
     resolveCanonical(key: string) {
       return canonicalRoute(key) !== null;

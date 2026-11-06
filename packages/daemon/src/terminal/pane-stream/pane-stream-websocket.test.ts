@@ -1,6 +1,18 @@
+import * as compression from "../graphics/compress-chunk.ts";
+import { NativeSurfaceProviderRegistry } from "../graphics/native-surface-provider.ts";
+import { LocalImageOwner } from "../graphics/local-image-owner.ts";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtemp, readFile, lstat, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { deflateSync, inflateSync } from "node:zlib";
 import { OwnedSnapshotChannel } from "../mirror/__tests__/owned-snapshot-channel.ts";
 import { describe, expect, it, vi } from "vitest";
+import { _resetLogStateForTests, getLogBuffer } from "../../lib/log.ts";
 import {
+  decodeTerminalGraphicsBinary,
+  decodeTerminalGraphicsCompressed,
+  decodeTerminalDeliveryBinaryChunk,
   PANE_STREAM_PROTOCOL_VERSION,
   PANE_STREAM_REDEEM_PATH,
   PANE_STREAM_WEBSOCKET_SUBPROTOCOL,
@@ -45,6 +57,11 @@ import {
   type SessionRuntimePaneStreamTransportBinding,
 } from "./pane-stream-websocket.ts";
 
+vi.mock("node:zlib", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:zlib")>();
+  return { ...actual, inflateSync: vi.fn(actual.inflateSync) };
+});
+
 const INSTANCE = "00000000-0000-4000-8000-000000000099";
 const ORIGIN = "tmux-ide://app";
 const WS_URL = `ws://127.0.0.1:6070${PANE_STREAM_REDEEM_PATH}`;
@@ -61,6 +78,7 @@ class FakeSocket implements DirectTerminalSocket {
   sentBytes = 0;
   drainedBytes = 0;
   readonly frames: unknown[] = [];
+  readonly binaryFrames: Buffer[] = [];
   onTransmit: ((text: string) => void) | null = null;
   closed: { code?: number; reason?: string } | null = null;
   readonly #listeners = new Map<string, Set<(...args: never[]) => void>>();
@@ -69,7 +87,13 @@ class FakeSocket implements DirectTerminalSocket {
     return this.sentBytes - this.drainedBytes;
   }
 
-  send(data: string | Buffer): void {
+  send(data: string | Buffer, options?: { binary?: boolean }): void {
+    if (options?.binary) {
+      const bytes = Buffer.from(data);
+      this.sentBytes += bytes.length;
+      this.binaryFrames.push(bytes);
+      return;
+    }
     const text = typeof data === "string" ? data : data.toString("utf8");
     this.sentBytes += Buffer.byteLength(text, "utf8");
     this.frames.push(JSON.parse(text));
@@ -421,6 +445,8 @@ function testScheduler() {
 
 function harness(
   options: {
+    nativeSurfaces?: NativeSurfaceProviderRegistry;
+    localImages?: LocalImageOwner;
     panes?: string[];
     budgets?: ConstructorParameters<typeof PaneStreamAdmissionCoordinator>[0]["flowBudgets"];
     ticketTtlMs?: number;
@@ -433,6 +459,7 @@ function harness(
       typeof PaneStreamAdmissionCoordinator
     >[0]["bindSessionRuntime"];
     openTerminalDelivery?: SessionRuntimePaneStreamTransportBinding["openTerminalDelivery"];
+    graphics?: import("../session-runtime/terminal-delivery-hub.ts").TerminalDeliveryGraphics;
     observability?: SessionRuntimeObservability;
     diagnosticSharedNowMicros?: () => number;
     diagnosticAfterFrameParse?: () => void;
@@ -497,6 +524,8 @@ function harness(
     };
   });
   const coordinator = new PaneStreamAdmissionCoordinator({
+    nativeSurfaces: options.nativeSurfaces,
+    localImages: options.localImages,
     daemonInstanceId: INSTANCE,
     webSocketUrl: WS_URL,
     leaseManager,
@@ -555,6 +584,7 @@ function harness(
                   deliveryNonce: "00000000-0000-4000-8000-000000000098",
                 },
               },
+              graphics: options.graphics,
               ack: deliveryAcks,
               nack: deliveryNacks,
               setVisibility: deliveryVisibility,
@@ -599,6 +629,7 @@ async function connect(
     deliveryAcks?: boolean;
     hostClientId?: string;
     semanticDelivery?: boolean;
+    protocolVersions?: number[];
     allowStartupClose?: boolean;
     diagnosticCapabilities?: readonly ("causal-cell-v1" | "clock-bounds-v1")[];
   } = {},
@@ -613,7 +644,7 @@ async function connect(
       ...(options.semanticDelivery
         ? {
             terminalDelivery: {
-              protocolVersions: [1],
+              protocolVersions: options.protocolVersions ?? [1],
               encodings: ["semantic-v1"] as const,
               richPlacements: false,
             },
@@ -841,6 +872,52 @@ describe("PaneStreamAdmissionCoordinator", () => {
       authority: { generation: INSTANCE, incarnation: null },
       terminalDelivery: { paneStreamCloseCode: 1000, paneStreamCloseReason: "peer-closed" },
     });
+  });
+
+  it("logs every stream close with its code and reason", async () => {
+    _resetLogStateForTests();
+    const h = harness();
+    const { socket } = await connect(h, { semanticDelivery: true });
+    await vi.waitFor(() => expect(socket.framesOfType("terminal-delivery-ready")).toHaveLength(2));
+    socket.emit("close");
+    const closes = getLogBuffer().filter(
+      (entry) => entry.component === "pane-stream" && entry.msg === "stream closed",
+    );
+    expect(closes).toHaveLength(1);
+    expect(closes[0]!.level).toBe("info");
+    expect(closes[0]!.data).toMatchObject({ code: 1000, reason: "peer-closed", session: SESSION });
+  });
+
+  it("logs an admission closed before redemption with its code and reason", async () => {
+    _resetLogStateForTests();
+    const h = harness();
+    await h.coordinator.issue(
+      {
+        protocolVersion: PANE_STREAM_PROTOCOL_VERSION,
+        workspaceName: "workspace.alpha",
+        panes: ["pane.editor"],
+        viewerMode: "read-only",
+      },
+      {
+        requestId: freshRequestId(),
+        projectIdentity: "workspace.alpha",
+        sessionName: SESSION,
+        rendererOrigin: ORIGIN,
+      },
+    );
+    const decision = h.coordinator.reserveUpgrade({
+      path: PANE_STREAM_REDEEM_PATH,
+      protocols: [PANE_STREAM_WEBSOCKET_SUBPROTOCOL],
+      origin: ORIGIN,
+    });
+    if (!decision.accepted) throw new Error("upgrade rejected");
+    decision.admission.cancelBeforeBind();
+    const closes = getLogBuffer().filter(
+      (entry) => entry.component === "pane-stream" && entry.msg === "admission closed",
+    );
+    expect(closes.map((entry) => entry.data)).toEqual([
+      expect.objectContaining({ code: 1008, reason: "upgrade-rejected" }),
+    ]);
   });
 
   it("answers normalized clock probes only on the negotiated authenticated connection", async () => {
@@ -1478,6 +1555,48 @@ describe("PaneStreamAdmissionCoordinator", () => {
     expect(readOnly.socket.closed).not.toBeNull();
   });
 
+  it("advertises held lifetime admission only to offered capability and rejects unnegotiated fences", async () => {
+    const h = harness();
+    for (const offered of [false, true]) {
+      const { socket } = await connect(h, {
+        viewerMode: "interactive",
+        semanticDelivery: true,
+        protocolVersions: offered ? [1, 105] : [1],
+      });
+      expect(socket.framesOfType("ready")[0]?.inputLifetime).toBe(offered ? true : undefined);
+      if (!offered) {
+        socket.message({
+          type: "input",
+          kind: "key",
+          pane: "pane.editor",
+          seq: 1,
+          data: "Enter",
+          expectedLifetime: { generation: INSTANCE, incarnation: `${INSTANCE}:0` },
+        });
+        expect(socket.framesOfType("input-ack")).toHaveLength(0);
+        expect(socket.framesOfType("error")[0]?.code).toBe("input-rejected");
+      } else {
+        const expectedLifetime = { generation: INSTANCE, incarnation: `${INSTANCE}:0` };
+        socket.message({
+          type: "input",
+          kind: "key",
+          pane: "pane.editor",
+          seq: 1,
+          data: "Enter",
+          expectedLifetime,
+        });
+        expect(h.sendInput).toHaveBeenLastCalledWith(
+          "pane.editor",
+          { kind: "key", data: "Enter" },
+          undefined,
+          undefined,
+          undefined,
+          expectedLifetime,
+        );
+      }
+    }
+  });
+
   it("does not sample the observability clock for input when diagnostics are disabled", async () => {
     const nowMicros = vi.fn(() => {
       throw new Error("disabled observability clock was sampled");
@@ -1618,6 +1737,95 @@ describe("PaneStreamAdmissionCoordinator", () => {
     ]);
     expect(floodedConnection.socket.framesOfType("error")[0]!.code).toBe("input-rejected");
     expect(floodedConnection.socket.closed).not.toBeNull();
+  });
+
+  it("routes projection receipts and materialization separately from canonical ACKs", async () => {
+    const receipt = vi.fn();
+    const materialize = vi.fn();
+    const ack = vi.fn();
+    let emit:
+      | ((message: import("@tmux-ide/contracts").TerminalDeliveryServerMessage) => void)
+      | undefined;
+    const nonce = "00000000-0000-4000-8000-000000000098";
+    const h = harness({
+      openTerminalDelivery: async (_pane, _offer, listener) => {
+        emit = listener;
+        return {
+          negotiation: {
+            accepted: true,
+            negotiated: {
+              protocolVersion: 1,
+              encoding: "semantic-binary-v1",
+              richPlacements: false,
+              generation: INSTANCE,
+              deliveryNonce: nonce,
+              alternateScreenProjection: "deferred-history-v1",
+            },
+          },
+          ack,
+          nack: vi.fn(),
+          projectionReceipt: receipt,
+          materialize,
+          setVisibility: vi.fn(),
+          close: async () => undefined,
+        };
+      },
+    });
+    const { socket } = await connect(h, {
+      panes: ["pane.shell"],
+      semanticDelivery: true,
+      protocolVersions: [1, 111],
+    });
+    await vi.waitFor(() => expect(socket.framesOfType("terminal-delivery-ready")).toHaveLength(1));
+    const address = {
+      workspaceName: "workspace.alpha",
+      semanticPaneId: "pane.shell",
+      generation: INSTANCE,
+      incarnation: `${INSTANCE}:0`,
+      deliveryNonce: nonce,
+    };
+    const identity = {
+      ...address,
+      transactionId: freshRequestId(),
+      canonicalRevision: 0,
+      canonicalStateHash: "1111111111111111",
+      projectionStateHash: "2222222222222222",
+      representationHash: "3333333333333333",
+    };
+    emit!({
+      ...identity,
+      type: "terminal.projection",
+      protocolVersion: 1,
+      encoding: "alternate-projection-binary-v1",
+      frame: "seed",
+      baseRevision: null,
+      representationBytes: 1,
+      chunkCount: 1,
+      canonicalEquivalent: false,
+      history: "deferred",
+      richPlacements: false,
+    });
+    expect(socket.framesOfType("terminal-projection-envelope")).toHaveLength(1);
+    expect(socket.framesOfType("terminal-delivery-envelope")).toHaveLength(0);
+    const projectionReceipt = { ...identity, type: "terminal.projection.receipt" as const };
+    socket.message({ type: "terminal-projection-receipt", receipt: projectionReceipt });
+    expect(receipt).toHaveBeenCalledExactlyOnceWith(projectionReceipt);
+    const request = {
+      ...address,
+      type: "terminal.projection.materialize" as const,
+      requestId: freshRequestId(),
+      canonicalRevision: 0,
+      projectionStateHash: identity.projectionStateHash,
+    };
+    socket.message({ type: "terminal-projection-materialize", request });
+    expect(materialize).toHaveBeenCalledExactlyOnceWith(request);
+    expect(ack).not.toHaveBeenCalled();
+    socket.message({
+      type: "terminal-projection-receipt",
+      receipt: { ...projectionReceipt, deliveryNonce: freshRequestId() },
+    });
+    expect(receipt).toHaveBeenCalledTimes(1);
+    expect(socket.closed).not.toBeNull();
   });
 
   it("uses one session socket and one runtime binding for semantic delivery, layout and intents", async () => {
@@ -1938,8 +2146,15 @@ describe("PaneStreamAdmissionCoordinator", () => {
       performanceTraceId: pasteTrace,
     });
     expect(h.sendInput.mock.calls).toEqual([
-      ["pane.editor", { kind: "key", data: "Enter" }, keyTrace, undefined, undefined],
-      ["pane.editor", { kind: "text", data: bracketedPaste }, pasteTrace, undefined, undefined],
+      ["pane.editor", { kind: "key", data: "Enter" }, keyTrace, undefined, undefined, undefined],
+      [
+        "pane.editor",
+        { kind: "text", data: bracketedPaste },
+        pasteTrace,
+        undefined,
+        undefined,
+        undefined,
+      ],
     ]);
     expect(socket.framesOfType("input-ack").map((frame) => frame.seq)).toEqual([1, 2]);
     for (const traceId of [keyTrace, pasteTrace]) {
@@ -2006,6 +2221,25 @@ describe("PaneStreamAdmissionCoordinator", () => {
         authorityLease: geometryLease,
       },
     ]);
+  });
+
+  it("streams one native source pane while validating the complete session layout", async () => {
+    const h = harness({ panes: ["pane.one", "pane.two"] });
+    h.mirror.initialLayouts = [authoritativeLayout(["pane.one", "pane.two"])];
+    const { socket } = await connect(h, {
+      panes: ["pane.two"],
+      semanticDelivery: true,
+      allowStartupClose: true,
+    });
+    await vi.waitFor(() => expect(socket.framesOfType("terminal-delivery-ready")).toHaveLength(1));
+    expect(socket.framesOfType("error")).toHaveLength(0);
+    expect([...h.deliveryListeners.keys()]).toEqual(["pane.two"]);
+    expect(socket.framesOfType("layout-snapshot")[0]?.layouts).toHaveLength(1);
+    expect(
+      socket
+        .framesOfType("layout-snapshot")[0]
+        ?.layouts[0].panes.map((pane: { pane: string }) => pane.pane),
+    ).toEqual(["pane.one", "pane.two"]);
   });
 
   it("rejects stale semantic topology before any layout, delivery open, or seed escapes", async () => {
@@ -2541,9 +2775,13 @@ describe("PaneStreamAdmissionCoordinator", () => {
     socket.close();
   });
 
-  it.each(["drain", "close", "fault", "pre-negotiation"] as const)(
-    "preserves chunk order when live delivery arrives during staged seed drain: %s",
-    async (mode) => {
+  it.each(
+    (["drain", "close", "fault", "pre-negotiation"] as const).flatMap((mode) =>
+      [false, true].map((binary) => ({ mode, binary })),
+    ),
+  )(
+    "preserves chunk order when live delivery arrives during staged seed drain: $mode binary=$binary",
+    async ({ mode, binary }) => {
       const panes = ["pane.shell"];
       let releaseOpen!: () => void;
       const openGate = new Promise<void>((resolve) => {
@@ -2576,7 +2814,7 @@ describe("PaneStreamAdmissionCoordinator", () => {
             deliveryNonce: nonce,
             transactionId: "00000000-0000-4000-8000-000000000095",
             protocolVersion: 1,
-            encoding: "semantic-v1",
+            encoding: binary ? "semantic-binary-v1" : "semantic-v1",
             frame: "seed",
             baseRevision: null,
             canonicalRevision: 0,
@@ -2604,7 +2842,7 @@ describe("PaneStreamAdmissionCoordinator", () => {
               accepted: true,
               negotiated: {
                 protocolVersion: 1,
-                encoding: "semantic-v1",
+                encoding: binary ? "semantic-binary-v1" : "semantic-v1",
                 richPlacements: false,
                 generation: INSTANCE,
                 deliveryNonce: nonce,
@@ -2617,7 +2855,15 @@ describe("PaneStreamAdmissionCoordinator", () => {
           };
         },
       });
-      const { socket } = await connect(h, { panes, semanticDelivery: true });
+      const { socket } = await connect(h, {
+        panes,
+        semanticDelivery: true,
+        protocolVersions: binary ? [1, 109] : [1],
+      });
+      const chunks = () =>
+        binary
+          ? socket.binaryFrames.map((packet) => decodeTerminalDeliveryBinaryChunk(packet).header)
+          : socket.framesOfType("terminal-delivery-chunk");
       if (mode === "pre-negotiation") {
         try {
           expect(socket.framesOfType("terminal-delivery-ready")).toHaveLength(0);
@@ -2644,7 +2890,7 @@ describe("PaneStreamAdmissionCoordinator", () => {
           });
           // No credit has been returned: lifecycle truth cannot wait for bulk replay.
           expect(socket.framesOfType("terminal-delivery-fault")).toHaveLength(1);
-          expect(socket.framesOfType("terminal-delivery-chunk")).toHaveLength(0);
+          expect(chunks()).toHaveLength(0);
           return;
         }
         const live = emit(chunk(2));
@@ -2662,13 +2908,9 @@ describe("PaneStreamAdmissionCoordinator", () => {
           h.scheduler.runDue();
         }, 1);
         try {
-          await vi.waitFor(() =>
-            expect(socket.framesOfType("terminal-delivery-chunk")).toHaveLength(3),
-          );
+          await vi.waitFor(() => expect(chunks()).toHaveLength(3));
           await live;
-          expect(
-            socket.framesOfType("terminal-delivery-chunk").map((frame) => frame.index),
-          ).toEqual([0, 1, 2]);
+          expect(chunks().map((frame) => frame.index)).toEqual([0, 1, 2]);
           expect(socket.closed).toBeNull();
         } finally {
           clearInterval(draining);
@@ -3127,4 +3369,852 @@ describe("PaneStreamAdmissionCoordinator", () => {
     });
     expect(h.leaseManager.snapshot().leases).toHaveLength(0);
   });
+});
+
+describe("legacy graphics decompression bounds", () => {
+  it.each([
+    { name: "matching pixels", width: 1, height: 1, length: 4, accepted: true },
+    {
+      name: "oversized inflated payload",
+      width: 1,
+      height: 1,
+      length: 1024 * 1024,
+      accepted: false,
+    },
+    { name: "truncated pixels", width: 1, height: 1, length: 3, accepted: false },
+    {
+      name: "image beyond legacy limit",
+      width: 4096,
+      height: 2049,
+      length: 4096 * 2049 * 4,
+      accepted: false,
+    },
+  ])("serves only exact bounded pixels: $name", async ({ width, height, length, accepted }) => {
+    vi.mocked(inflateSync).mockClear();
+    const digest = "a".repeat(32);
+    const data = deflateSync(Buffer.alloc(length, 1));
+    const image = { imageId: 1, digest, width, height, format: "rgba-zlib" as const, data };
+    const h = harness({
+      openTerminalDelivery: async () => ({
+        negotiation: {
+          accepted: true as const,
+          negotiated: {
+            protocolVersion: 1 as const,
+            encoding: "semantic-v1" as const,
+            richPlacements: false,
+            generation: INSTANCE,
+            deliveryNonce: "00000000-0000-4000-8000-000000000098",
+          },
+        },
+        ack: () => undefined,
+        nack: () => undefined,
+        setVisibility: () => undefined,
+        close: async () => undefined,
+        graphics: {
+          subscribe(listener) {
+            listener({
+              revision: 1,
+              images: [{ ...image, bytes: data.length, placeholder: null }],
+              placements: [],
+            });
+            return () => undefined;
+          },
+          image: () => image,
+        },
+      }),
+    });
+    const { socket } = await connect(h, { panes: ["pane.editor"], semanticDelivery: true });
+    socket.drainAll();
+    socket.message({ type: "terminal-graphics-request", pane: "pane.editor", digests: [digest] });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    h.scheduler.runDue();
+    const blobs = socket.framesOfType("terminal-graphics-blob");
+    socket.close();
+    expect(blobs).toHaveLength(accepted ? 1 : 0);
+    if (width === 1) {
+      // Output rejection alone cannot prove the decoder avoided allocating the oversized data.
+      expect(inflateSync).toHaveBeenCalledWith(data, { maxOutputLength: 4 });
+    } else {
+      expect(inflateSync).not.toHaveBeenCalled();
+    }
+    if (accepted) {
+      expect(blobs[0]).toMatchObject({ blob: { total: 4, format: "rgba" } });
+      expect(Buffer.from(blobs[0]!.data as string, "base64")).toEqual(Buffer.alloc(4, 1));
+    }
+    socket.close();
+  });
+});
+
+describe("graphics geometry capability announcement", () => {
+  for (const announce of [false, true]) {
+    it.each([
+      { versions: [1, 101, 103], precise: false },
+      { versions: [1, 101, 102, 103, 104], precise: true },
+    ])(
+      `announces cell geometry before image delivery (subscription emitted: ${announce}, versions: $versions)`,
+      async ({ versions, precise }) => {
+        const h = harness({
+          graphics: {
+            subscribe(listener) {
+              if (announce) listener({ revision: 1, images: [], placements: [] });
+              return () => undefined;
+            },
+            image: () => null,
+          },
+        });
+        const { socket } = await connect(h, {
+          panes: ["pane.editor"],
+          semanticDelivery: true,
+          protocolVersions: versions,
+        });
+        const frames = socket.framesOfType("terminal-graphics");
+        socket.close();
+        expect(frames).toHaveLength(1);
+        expect(frames[0]!.state).toEqual({
+          revision: announce ? 1 : 0,
+          images: [],
+          placements: [],
+          cellPixels: true,
+          ...(precise ? { preciseCellPixels: true } : {}),
+        });
+      },
+    );
+  }
+});
+
+describe("exact byte input capability 106", () => {
+  it("advertises only an offered byte lane and preserves NUL/non-UTF8 without text conversion", async () => {
+    for (const offered of [false, true]) {
+      const h = harness();
+      const { socket } = await connect(h, {
+        viewerMode: "interactive",
+        semanticDelivery: true,
+        protocolVersions: offered ? [1, 105, 106] : [1, 105],
+      });
+      expect(socket.framesOfType("ready")[0]?.inputBytes).toBe(offered ? true : undefined);
+      const expectedLifetime = { generation: INSTANCE, incarnation: `${INSTANCE}:0` };
+      socket.message({
+        type: "input",
+        kind: "bytes",
+        pane: "pane.editor",
+        seq: 1,
+        data: "00ff80c3281b4d",
+        expectedLifetime,
+      });
+      if (offered) {
+        expect(h.sendInput).toHaveBeenLastCalledWith(
+          "pane.editor",
+          { kind: "bytes", data: "00ff80c3281b4d" },
+          undefined,
+          undefined,
+          undefined,
+          expectedLifetime,
+        );
+        expect(socket.framesOfType("input-ack")).toHaveLength(1);
+      } else {
+        expect(h.sendInput).not.toHaveBeenCalled();
+        expect(socket.framesOfType("input-ack")).toHaveLength(0);
+        expect(socket.framesOfType("error")[0]?.code).toBe("input-rejected");
+        expect(socket.closed).not.toBeNull();
+      }
+    }
+  });
+  it("rejects malformed and over-limit bytes before runtime admission", async () => {
+    for (const data of ["", "0", "zz", "ff".repeat(1025)]) {
+      const h = harness();
+      const { socket } = await connect(h, {
+        viewerMode: "interactive",
+        semanticDelivery: true,
+        protocolVersions: [1, 106],
+      });
+      socket.message({ type: "input", kind: "bytes", pane: "pane.editor", seq: 1, data });
+      expect(h.sendInput).not.toHaveBeenCalled();
+      expect(socket.framesOfType("input-ack")).toHaveLength(0);
+      expect(socket.closed).not.toBeNull();
+    }
+  });
+});
+
+describe("negotiated binary graphics", () => {
+  it.each([
+    { binary: false, format: "png" as const },
+    { binary: true, format: "png" as const },
+    { binary: true, format: "rgba-zlib" as const },
+    { binary: true, format: "png" as const, capability: 109 },
+    { binary: true, format: "png" as const, capability: 110 },
+  ])(
+    "preserves encoded bytes and legacy framing (binary $binary, format $format)",
+    async ({ binary, format, capability }) => {
+      const digest = "a".repeat(32);
+      const data =
+        format === "png"
+          ? Buffer.from([0, 128, 255, 13, 10])
+          : deflateSync(Buffer.from([0, 128, 255, 0]));
+      const image = { imageId: 1, digest, width: 1, height: 1, format, data };
+      const h = harness({
+        graphics: {
+          subscribe(listener) {
+            listener({
+              revision: 1,
+              images: [
+                {
+                  imageId: 1,
+                  digest,
+                  width: 1,
+                  height: 1,
+                  format,
+                  bytes: data.length,
+                  placeholder: null,
+                },
+              ],
+              placements: [],
+            });
+            return () => undefined;
+          },
+          image: () => image,
+        },
+      });
+      const { socket } = await connect(h, {
+        panes: ["pane.editor"],
+        semanticDelivery: true,
+        protocolVersions: binary ? [1, 101, 102, capability ?? 107] : [1, 101, 102],
+      });
+      socket.drainAll();
+      const beforeBlobBytes = socket.sentBytes;
+      socket.message({ type: "terminal-graphics-request", pane: "pane.editor", digests: [digest] });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      h.scheduler.runDue();
+      expect(socket.framesOfType("terminal-graphics")[0]).toMatchObject({
+        state: binary ? { binaryBlobs: true } : { revision: 1 },
+      });
+      expect(socket.framesOfType("terminal-graphics-blob")).toHaveLength(binary ? 0 : 1);
+      expect(socket.binaryFrames).toHaveLength(binary ? 1 : 0);
+      if (binary) {
+        expect(socket.sentBytes - beforeBlobBytes).toBe(socket.binaryFrames[0]!.length);
+        const decoded = decodeTerminalGraphicsBinary(socket.binaryFrames[0]!);
+        expect(decoded.header).toEqual({
+          pane: "pane.editor",
+          blob: { digest, format, width: 1, height: 1, total: data.length, offset: 0 },
+        });
+        expect(Buffer.from(decoded.bytes)).toEqual(data);
+      } else {
+        expect(socket.framesOfType("terminal-graphics")[0]!.state as object).not.toHaveProperty(
+          "binaryBlobs",
+        );
+        expect(
+          Buffer.from(socket.framesOfType("terminal-graphics-blob")[0]!.data as string, "base64"),
+        ).toEqual(data);
+      }
+      socket.close();
+    },
+  );
+});
+
+describe("negotiated local graphics leases", () => {
+  it.each([true, false])(
+    "uses exact owner files and inline fallback (offered %s)",
+    async (offered) => {
+      const root = await mkdtemp(join(tmpdir(), "pane-local-images-"));
+      const generation = randomUUID(); // Canonical owner differs from pane-stream scope INSTANCE.
+      const owner = await LocalImageOwner.create({
+        root,
+        generation,
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+      });
+      const data = Buffer.from([1, 2, 128, 255]);
+      const digest = createHash("sha256").update(data).digest("hex").slice(0, 32);
+      const image = { imageId: 1, digest, width: 1, height: 1, format: "rgba" as const, data };
+      const h = harness({
+        localImages: owner,
+        graphics: {
+          subscribe(listener) {
+            listener({
+              revision: 1,
+              images: [
+                {
+                  imageId: 1,
+                  digest,
+                  width: 1,
+                  height: 1,
+                  format: "rgba",
+                  bytes: data.length,
+                  placeholder: null,
+                },
+              ],
+              placements: [],
+            });
+            return () => {};
+          },
+          image: (requested) => (requested === digest ? image : null),
+        },
+      });
+      try {
+        const { socket } = await connect(h, {
+          panes: ["pane.editor"],
+          semanticDelivery: true,
+          protocolVersions: offered ? [1, 101, 102, 108] : [1, 101, 102, 107],
+        });
+        socket.drainAll();
+        socket.message({
+          type: "terminal-graphics-request",
+          pane: "pane.editor",
+          digests: [digest],
+        });
+        if (!offered) {
+          await vi.waitFor(() => expect(socket.binaryFrames).toHaveLength(1));
+          expect(socket.framesOfType("terminal-graphics-local")).toHaveLength(0);
+          expect(socket.framesOfType("terminal-graphics")[0]!.state).not.toHaveProperty(
+            "localFiles",
+          );
+        } else {
+          await vi.waitFor(() =>
+            expect(socket.framesOfType("terminal-graphics-local")).toHaveLength(1),
+          );
+          const local = socket.framesOfType("terminal-graphics-local")[0]!;
+          expect(local.generation).toBe(generation);
+          expect(local.path).toContain(`/local-images-${generation}/`);
+          expect(await readFile(local.path as string)).toEqual(data);
+          expect(socket.binaryFrames).toHaveLength(0);
+          socket.message({
+            type: "terminal-graphics-local-release",
+            pane: "pane.shell",
+            generation,
+            leaseId: local.leaseId,
+          });
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect((await lstat(local.path as string)).isFile()).toBe(true);
+          socket.message({
+            type: "terminal-graphics-local-release",
+            pane: "pane.editor",
+            generation,
+            leaseId: local.leaseId,
+          });
+          await vi.waitFor(async () => {
+            await expect(lstat(local.path as string)).rejects.toMatchObject({ code: "ENOENT" });
+          });
+          socket.message({
+            type: "terminal-graphics-request",
+            pane: "pane.editor",
+            digests: [digest],
+            preferInline: true,
+          });
+          await vi.waitFor(() => expect(socket.binaryFrames).toHaveLength(1));
+          expect(Buffer.from(decodeTerminalGraphicsBinary(socket.binaryFrames[0]!).bytes)).toEqual(
+            data,
+          );
+          vi.spyOn(owner, "acquire").mockRejectedValueOnce(new Error("storage unavailable"));
+          socket.message({
+            type: "terminal-graphics-request",
+            pane: "pane.editor",
+            digests: [digest],
+          });
+          await vi.waitFor(() => expect(socket.binaryFrames).toHaveLength(2));
+          expect(socket.framesOfType("terminal-graphics-local")).toHaveLength(1);
+          socket.message({
+            type: "terminal-graphics-request",
+            pane: "pane.editor",
+            digests: [digest],
+          });
+          await vi.waitFor(() =>
+            expect(socket.framesOfType("terminal-graphics-local")).toHaveLength(2),
+          );
+          const pending = socket.framesOfType("terminal-graphics-local")[1]!;
+          const second = await connect(h, {
+            panes: ["pane.editor"],
+            semanticDelivery: true,
+            protocolVersions: [1, 101, 102, 108],
+          });
+          second.socket.drainAll();
+          second.socket.message({
+            type: "terminal-graphics-request",
+            pane: "pane.editor",
+            digests: [digest],
+          });
+          await vi.waitFor(() =>
+            expect(second.socket.framesOfType("terminal-graphics-local")).toHaveLength(1),
+          );
+          const shared = second.socket.framesOfType("terminal-graphics-local")[0]!;
+          expect(shared.path).toBe(pending.path);
+          socket.close();
+          expect(await readFile(shared.path as string)).toEqual(data);
+          second.socket.message({
+            type: "terminal-graphics-local-release",
+            pane: "pane.editor",
+            generation,
+            leaseId: shared.leaseId,
+          });
+          await vi.waitFor(async () => {
+            await expect(lstat(pending.path as string)).rejects.toMatchObject({ code: "ENOENT" });
+          });
+          second.socket.close();
+          await h.coordinator.shutdown();
+        }
+        socket.close();
+      } finally {
+        await h.coordinator.shutdown();
+        await owner.dispose();
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
+});
+
+describe("negotiated raw pixel compression", () => {
+  it.each([107, 113, 114])("preserves bytes and requires capability %s", async (capability) => {
+    const data = Buffer.alloc(32 * 32 * 4, 42);
+    const digest = createHash("sha256").update(data).digest("hex").slice(0, 32);
+    const image = { imageId: 1, digest, width: 32, height: 32, format: "rgba" as const, data };
+    const h = harness({
+      graphics: {
+        subscribe(listener) {
+          listener({
+            revision: 1,
+            images: [{ ...image, bytes: data.length, placeholder: null }],
+            placements: [],
+          });
+          return () => undefined;
+        },
+        image: () => image,
+      },
+    });
+    const { socket } = await connect(h, {
+      panes: ["pane.editor"],
+      semanticDelivery: true,
+      protocolVersions: [1, 101, 102, capability],
+    });
+    try {
+      socket.drainAll();
+      socket.message({ type: "terminal-graphics-request", pane: "pane.editor", digests: [digest] });
+      await vi.waitFor(() => {
+        h.scheduler.runDue();
+        expect(socket.binaryFrames).toHaveLength(1);
+      });
+      const state = socket.framesOfType("terminal-graphics")[0]!.state as Record<string, unknown>;
+      expect(state.compressedBlobs).toBe(capability === 107 ? undefined : true);
+      const decoded =
+        capability === 107
+          ? decodeTerminalGraphicsBinary(socket.binaryFrames[0]!)
+          : decodeTerminalGraphicsCompressed(socket.binaryFrames[0]!);
+      expect(decoded.header.blob).toEqual({
+        digest,
+        width: 32,
+        height: 32,
+        format: "rgba",
+        total: data.length,
+        offset: 0,
+      });
+      expect(capability === 107 ? Buffer.from(decoded.bytes) : inflateSync(decoded.bytes)).toEqual(
+        data,
+      );
+    } finally {
+      socket.close();
+    }
+  });
+});
+
+describe("compression completion lifetime", () => {
+  it.each(["closed", "superseded"])("drops results after %s", async (reason) => {
+    const data = Buffer.alloc(4096, 42);
+    const digest = "a".repeat(32);
+    const image = { imageId: 1, digest, width: 32, height: 32, format: "rgba" as const, data };
+    let current: typeof image | undefined = image;
+    let finish!: (result: Uint8Array | null) => void;
+    const spy = vi.spyOn(compression, "compressGraphicsChunk").mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const h = harness({
+      graphics: {
+        subscribe(listener) {
+          listener({
+            revision: 1,
+            images: [
+              {
+                imageId: 1,
+                digest,
+                width: 32,
+                height: 32,
+                format: "rgba",
+                bytes: data.length,
+                placeholder: null,
+              },
+            ],
+            placements: [],
+          });
+          return () => undefined;
+        },
+        image: () => current,
+      },
+    });
+    const { socket } = await connect(h, {
+      panes: ["pane.editor"],
+      semanticDelivery: true,
+      protocolVersions: [1, 101, 102, 113],
+    });
+    try {
+      socket.drainAll();
+      socket.message({ type: "terminal-graphics-request", pane: "pane.editor", digests: [digest] });
+      await vi.waitFor(() => expect(spy).toHaveBeenCalledOnce());
+      if (reason === "closed") socket.close();
+      else current = undefined;
+      finish(Uint8Array.of(1, 2, 3));
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      h.scheduler.runDue();
+      expect(socket.binaryFrames).toHaveLength(0);
+    } finally {
+      finish?.(null);
+      spy.mockRestore();
+      socket.close();
+    }
+  });
+});
+
+describe("native surface negotiation with a registered provider", () => {
+  it("requires opt-in and routes retirement only to the original producer connection", async () => {
+    const nativeSurfaces = new NativeSurfaceProviderRegistry(INSTANCE);
+    const clients: Array<{
+      offer(value: unknown): boolean;
+      retire: ReturnType<typeof vi.fn>;
+      close: ReturnType<typeof vi.fn>;
+    }> = [];
+    const unregister = nativeSurfaces.register({
+      auditToken: [8, 7, 6, 5, 4, 3, 2, 1],
+      open: (context) => {
+        const client = { offer: context.offer, retire: vi.fn(), close: vi.fn() };
+        clients.push(client);
+        return { start() {}, retire: client.retire, fallback() {}, close: client.close };
+      },
+    });
+    const h = harness({ nativeSurfaces });
+    const receiver = () => ({
+      type: "terminal-surface-receiver",
+      version: 1,
+      generation: INSTANCE,
+      connectionNonce: randomUUID(),
+      challenge: randomUUID(),
+      pid: 123,
+      slot: 0,
+      auditToken: [1, 2, 3, 4, 5, 6, 7, 8],
+    });
+    try {
+      const unoffered = await connect(h, { semanticDelivery: true });
+      unoffered.socket.message(receiver());
+      expect(clients).toHaveLength(0);
+      expect(unoffered.socket.framesOfType("terminal-surface-fallback")).toHaveLength(1);
+      const first = await connect(h, {
+        semanticDelivery: true,
+        protocolVersions: [1, 101, 114, 102, 103, 104, 116, 105, 106],
+      });
+      const identity = receiver();
+      first.socket.message(identity);
+      first.socket.message(identity);
+      expect(clients).toHaveLength(1);
+      expect(first.socket.framesOfType("terminal-surface-peer")).toHaveLength(1);
+      expect(
+        clients[0]!.offer({
+          type: "terminal-surface-offer",
+          version: 1,
+          pane: "pane.editor",
+          generation: INSTANCE,
+          incarnation: "pane:1",
+          deliveryNonce: randomUUID(),
+          canonicalRevision: 1,
+          canonicalStateHash: "0000000000000001",
+          sequence: 1,
+          surfaceId: randomUUID(),
+          storageTicket: randomUUID(),
+          placement: { row: 0, column: 0, rows: 1, columns: 1 },
+          format: "bgra8-straight",
+          width: 16,
+          height: 16,
+          stride: 64,
+          allocationBytes: 1024,
+        }),
+      ).toBe(true);
+      expect(first.socket.framesOfType("terminal-surface-offer")).toHaveLength(1);
+      expect(first.socket.framesOfType("terminal-surface-offer")[0]).toMatchObject({
+        deliveryNonce: "00000000-0000-4000-8000-000000000098",
+        canonicalRevision: 1,
+        canonicalStateHash: "0000000000000001",
+        incarnation: "pane:1",
+      });
+      const second = await connect(h, {
+        semanticDelivery: true,
+        protocolVersions: [1, 101, 114, 102, 103, 104, 116, 105, 106],
+      });
+      const otherIdentity = receiver();
+      second.socket.message(otherIdentity);
+      expect(clients[1]!.offer(first.socket.framesOfType("terminal-surface-offer")[0])).toBe(true);
+      second.socket.message({
+        type: "terminal-surface-retired",
+        version: 1,
+        generation: INSTANCE,
+        connectionNonce: identity.connectionNonce,
+        sequence: 1,
+      });
+      expect(second.socket.closed).not.toBeNull();
+      expect(clients[0]!.retire).not.toHaveBeenCalled();
+      expect(clients[1]!.retire).not.toHaveBeenCalled();
+      unregister();
+      expect(first.socket.framesOfType("terminal-surface-fallback")).toHaveLength(1);
+      first.socket.message({
+        type: "terminal-surface-retired",
+        version: 1,
+        generation: INSTANCE,
+        connectionNonce: identity.connectionNonce,
+        sequence: 1,
+      });
+      expect(clients[0]!.retire).toHaveBeenCalledExactlyOnceWith(1);
+      expect(first.socket.closed).toBeNull();
+      first.socket.message({
+        type: "terminal-surface-retired",
+        version: 1,
+        generation: INSTANCE,
+        connectionNonce: identity.connectionNonce,
+        sequence: 1,
+      });
+      expect(first.socket.closed).not.toBeNull();
+    } finally {
+      await h.coordinator.shutdown();
+      nativeSurfaces.close();
+    }
+  });
+});
+
+describe("native surface negotiation without an enabled provider", () => {
+  const receiver = () => ({
+    type: "terminal-surface-receiver",
+    version: 1,
+    generation: INSTANCE,
+    connectionNonce: randomUUID(),
+    challenge: randomUUID(),
+    pid: 123,
+    slot: 0,
+    auditToken: [1, 2, 3, 4, 5, 6, 7, 8],
+  });
+  it("rejects native control before redemption", async () => {
+    const h = harness();
+    try {
+      await h.coordinator.issue(
+        {
+          protocolVersion: PANE_STREAM_PROTOCOL_VERSION,
+          workspaceName: "workspace.alpha",
+          panes: ["pane.editor"],
+          viewerMode: "read-only",
+        },
+        {
+          requestId: freshRequestId(),
+          projectIdentity: "workspace.alpha",
+          sessionName: SESSION,
+          rendererOrigin: ORIGIN,
+          hostClientId: "test-native-unredeemed",
+        },
+      );
+      const decision = h.coordinator.reserveUpgrade({
+        path: PANE_STREAM_REDEEM_PATH,
+        protocols: [PANE_STREAM_WEBSOCKET_SUBPROTOCOL],
+        origin: ORIGIN,
+      });
+      if (!decision.accepted) throw new Error("fixture upgrade refused");
+      const socket = new FakeSocket();
+      decision.admission.bind(socket);
+      socket.message(receiver());
+      expect(socket.closed).not.toBeNull();
+      expect(socket.framesOfType("terminal-surface-fallback")).toHaveLength(0);
+    } finally {
+      await h.coordinator.shutdown();
+    }
+  });
+  it.each(["legacy", "oversized"])("rejects %s native control", async (mode) => {
+    const h = harness();
+    const { socket } = await connect(h, { semanticDelivery: mode !== "legacy" });
+    try {
+      socket.message(
+        mode === "oversized" ? " ".repeat(16385) + JSON.stringify(receiver()) : receiver(),
+      );
+      expect(socket.closed).not.toBeNull();
+      expect(socket.framesOfType("terminal-surface-fallback")).toHaveLength(0);
+    } finally {
+      await h.coordinator.shutdown();
+    }
+  });
+  it("returns one scoped fallback and preserves the authenticated terminal stream", async () => {
+    const h = harness();
+    const { socket } = await connect(h, { semanticDelivery: true });
+    try {
+      const frame = receiver();
+      socket.message(frame);
+      socket.message(frame);
+      expect(socket.framesOfType("terminal-surface-fallback")).toEqual([
+        {
+          type: "terminal-surface-fallback",
+          version: 1,
+          generation: INSTANCE,
+          connectionNonce: frame.connectionNonce,
+          reason: "unsupported",
+        },
+      ]);
+      socket.message({
+        type: "terminal-surface-fallback",
+        version: 1,
+        generation: INSTANCE,
+        connectionNonce: frame.connectionNonce,
+        reason: "unsupported",
+      });
+      expect(socket.closed).toBeNull();
+      expect(socket.framesOfType("terminal-surface-peer")).toHaveLength(0);
+      expect(socket.framesOfType("terminal-surface-offer")).toHaveLength(0);
+    } finally {
+      await h.coordinator.shutdown();
+    }
+  });
+  it.each(["generation", "connectionNonce", "challenge", "pid", "slot", "auditToken"])(
+    "rejects receiver rebinding through %s",
+    async (field) => {
+      const h = harness();
+      const { socket } = await connect(h, { semanticDelivery: true });
+      try {
+        const frame = receiver();
+        socket.message(frame);
+        socket.message({
+          ...frame,
+          [field]:
+            field === "auditToken"
+              ? [2, 2, 2, 2, 2, 2, 2, 2]
+              : field === "pid"
+                ? 124
+                : field === "slot"
+                  ? 1
+                  : randomUUID(),
+        });
+        expect(socket.closed).not.toBeNull();
+        expect(socket.framesOfType("terminal-surface-fallback")).toHaveLength(1);
+      } finally {
+        await h.coordinator.shutdown();
+      }
+    },
+  );
+  it("rejects stale generation before returning a fallback", async () => {
+    const h = harness();
+    const { socket } = await connect(h, { semanticDelivery: true });
+    try {
+      socket.message({ ...receiver(), generation: randomUUID() });
+      expect(socket.closed).not.toBeNull();
+      expect(socket.framesOfType("terminal-surface-fallback")).toHaveLength(0);
+    } finally {
+      await h.coordinator.shutdown();
+    }
+  });
+  it("does not accept another socket's fallback scope or an unissued retirement", async () => {
+    const h = harness();
+    const first = await connect(h, { semanticDelivery: true });
+    const second = await connect(h, { semanticDelivery: true });
+    try {
+      const frame = receiver();
+      first.socket.message(frame);
+      second.socket.message(receiver());
+      second.socket.message({
+        type: "terminal-surface-fallback",
+        version: 1,
+        generation: INSTANCE,
+        connectionNonce: frame.connectionNonce,
+        reason: "storage",
+      });
+      expect(second.socket.closed).not.toBeNull();
+      expect(first.socket.closed).toBeNull();
+      first.socket.message({
+        type: "terminal-surface-retired",
+        version: 1,
+        generation: INSTANCE,
+        connectionNonce: frame.connectionNonce,
+        sequence: 1,
+      });
+      expect(first.socket.closed).not.toBeNull();
+    } finally {
+      await h.coordinator.shutdown();
+    }
+  });
+});
+
+describe("native availability on an existing terminal connection", () => {
+  it("announces a late provider without issuing another terminal ready frame", async () => {
+    const nativeSurfaces = new NativeSurfaceProviderRegistry(INSTANCE);
+    const h = harness({
+      nativeSurfaces,
+      graphics: { subscribe: () => () => undefined, image: () => null },
+    });
+    nativeSurfaces.demand.presence(SESSION, false);
+    const { socket } = await connect(h, {
+      semanticDelivery: true,
+      protocolVersions: [1, 101, 116],
+    });
+    try {
+      expect(nativeSurfaces.demand.required("pane.editor")).toBe(true);
+      const watch = { type: "terminal-surface-watch", version: 1, generation: INSTANCE };
+      socket.message(watch);
+      await Promise.resolve();
+      expect(socket.framesOfType("terminal-surface-available")).toEqual([
+        {
+          type: "terminal-surface-available",
+          version: 1,
+          generation: INSTANCE,
+          connectionNonce: null,
+        },
+      ]);
+      const start = vi.fn();
+      nativeSurfaces.register({
+        auditToken: [8, 7, 6, 5, 4, 3, 2, 1],
+        open: () => ({ start, retire() {}, fallback() {}, close() {} }),
+      });
+      await Promise.resolve();
+      const availability = socket.framesOfType("terminal-surface-available").at(-1)!;
+      socket.message({
+        type: "terminal-surface-receiver",
+        version: 1,
+        generation: INSTANCE,
+        connectionNonce: availability.connectionNonce,
+        challenge: randomUUID(),
+        pid: 123,
+        slot: 0,
+        auditToken: [1, 2, 3, 4, 5, 6, 7, 8],
+      });
+      expect(start).toHaveBeenCalledOnce();
+      expect(nativeSurfaces.demand.required("pane.editor")).toBe(false);
+      const terminal = await connect(h, { panes: ["pane.editor"] });
+      expect(nativeSurfaces.demand.required("pane.editor")).toBe(true);
+      expect(nativeSurfaces.demand.required("pane.shell")).toBe(false);
+      terminal.socket.close();
+      await vi.waitFor(() => expect(nativeSurfaces.demand.required("pane.editor")).toBe(false));
+      expect(socket.framesOfType("terminal-surface-peer")).toHaveLength(1);
+      socket.message(watch);
+      await Promise.resolve();
+      expect(socket.framesOfType("terminal-surface-available")).toHaveLength(2);
+      expect(socket.framesOfType("ready")).toHaveLength(1);
+      expect(socket.closed).toBeNull();
+    } finally {
+      await h.coordinator.shutdown();
+      nativeSurfaces.close();
+    }
+  });
+});
+
+it("delivers browser icons only to clients offering capability 117", async () => {
+  for (const offered of [false, true]) {
+    const h = harness();
+    const layout = authoritativeLayout(["pane.editor", "pane.shell"]);
+    layout.panes[0]!.browserIcon = "ff00807f".repeat(256);
+    h.mirror.initialLayouts = [layout];
+    const { socket } = await connect(h, {
+      semanticDelivery: true,
+      protocolVersions: offered ? [1, 117] : [1],
+    });
+    const frame = socket.framesOfType("layout-snapshot")[0];
+    expect(frame?.layouts[0]?.panes[0]?.browserIcon).toBe(
+      offered ? "ff00807f".repeat(256) : undefined,
+    );
+    socket.close();
+  }
 });

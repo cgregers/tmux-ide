@@ -135,6 +135,16 @@ test("malformed private config stays recoverable without leaking its contents", 
         "workspaceFleetAgentRejected",
         "sessionHistory",
         "sessionHistoryRejected",
+        "diagnostics",
+        "localSetup",
+        "localSessionCreate",
+        "nativeDiagnostics",
+        "nativeFrameScope",
+        "nativeRetainedPreview",
+        "selectionIdentity",
+        "inputTargetRejected",
+        "inputTargets",
+        "graphics",
       ].sort(),
     );
     assert.equal(event.homeAgentRecovery, null);
@@ -145,7 +155,12 @@ test("malformed private config stays recoverable without leaking its contents", 
     assert.equal(event.attentionSelectionRejected, null);
     assert.equal(child.exitCode, null);
     assert.equal(event.snapshot, null);
+    assert.equal(event.nativeFrameScope, null);
+    assert.equal(event.nativeDiagnostics, null);
+    assert.equal(event.nativeRetainedPreview, null);
     assert.equal(event.inputReady, false);
+    assert.equal(event.inputTargetRejected, false);
+    assert.deepEqual(event.inputTargets, []);
     assert.match(event.status, /unavailable/);
     assert.ok(!line.includes("PRIVATE_TEST_SENTINEL"));
     assert.equal(event.machines, null);
@@ -197,6 +212,16 @@ test("malformed private config stays recoverable without leaking its contents", 
         "workspaceFleetAgentRejected",
         "sessionHistory",
         "sessionHistoryRejected",
+        "diagnostics",
+        "localSetup",
+        "localSessionCreate",
+        "nativeDiagnostics",
+        "nativeFrameScope",
+        "nativeRetainedPreview",
+        "selectionIdentity",
+        "graphics",
+        "inputTargetRejected",
+        "inputTargets",
       ].sort(),
     );
     assert.equal(registryEvent.homeAgentRecovery, null);

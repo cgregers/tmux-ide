@@ -581,15 +581,19 @@ export async function applyTerminalReplicaUpdateCooperatively(
   }
   const authenticated = options.authenticatedFrameHash;
   const frameStart = readProfileClock(options.instrumentation);
-  const frameHash =
-    authenticated && /^[0-9a-f]{16}$/u.test(authenticated)
-      ? authenticated
-      : await hashCanonicalTerminalValueCooperatively(
-          { ...admitted, snapshot },
-          yieldControl,
-          // Bound frame hashing without scheduling a task per few cells.
-          32 * 1024,
-        );
+  const reuseAuthenticated = Boolean(authenticated && /^[0-9a-f]{16}$/u.test(authenticated));
+  if (!reuseAuthenticated) {
+    await primeTerminalReplicaRowsHashCooperatively(snapshot.grid, yieldControl);
+    await primeTerminalReplicaRowsHashCooperatively(snapshot.history, yieldControl);
+  }
+  const frameHash = reuseAuthenticated
+    ? authenticated!
+    : await hashCanonicalTerminalValueCooperatively(
+        terminalReplicaFrameIdentity({ ...admitted, snapshot }),
+        yieldControl,
+        // Bound frame hashing without scheduling a task per few cells.
+        32 * 1024,
+      );
   if (profile)
     profile.reusedAuthenticatedFrameHash = Boolean(
       authenticated && /^[0-9a-f]{16}$/u.test(authenticated),
@@ -704,6 +708,9 @@ function applyTerminalReplicaPatchProfiled(
     patch.placements === undefined &&
     patch.bootstrap === undefined;
   if (unchanged) return current;
+  Object.freeze(grid);
+  if (grid !== current.grid && cols === current.cols && rows === current.rows)
+    registerGridPatchHash(current.grid, grid, preparedRows, profile, instrumentation);
   let history: readonly TerminalReplicaRow[];
   if (patch.history) {
     history = Object.freeze(patch.history.map(freezeRow));
@@ -981,9 +988,41 @@ function resolveFrameHash(
     return authenticated;
   }
   const started = readProfileClock(options.instrumentation);
-  const hash = hashStable(update);
+  const hash = hashStable(terminalReplicaFrameIdentity(update));
   addProfileDuration(profile, "updateHash", started, options.instrumentation);
   return hash;
+}
+
+/**
+ * What a frame hash covers. A seed's rows enter as their row-sequence hashes,
+ * which the replica caches per frozen row, so a seed carrying a pane's whole
+ * history is not walked cell by cell a second time (#706). Every other field
+ * enters as is. The cooperative and ordinary paths must agree: a redelivered
+ * seed whose frame hash differs is a protocol conflict, not idempotent.
+ */
+function terminalReplicaFrameIdentity(update: CanonicalTerminalReplicaUpdate): unknown {
+  if (update.type === "terminal.patch") {
+    // #708: a flood patch appends many history rows the interpreter has just
+    // hashed; enter them, and the changed screen rows, by their row hashes.
+    const { rows, history, historyDelta, ...rest } = update.patch;
+    return [
+      "terminal-replica-patch-frame-v2",
+      { ...update, patch: rest },
+      rows.map(({ index, row }) => [index, hashTerminalReplicaRow(row)]),
+      history === undefined ? null : hashTerminalReplicaRows(history),
+      historyDelta === undefined
+        ? null
+        : [historyDelta.trim, hashTerminalReplicaRows(historyDelta.append)],
+    ];
+  }
+  if (update.type !== "terminal.seed") return update;
+  const { grid, history, ...rest } = update.snapshot;
+  return [
+    "terminal-replica-frame-v2",
+    { ...update, snapshot: rest },
+    hashTerminalReplicaRows(grid),
+    hashTerminalReplicaRows(history),
+  ];
 }
 
 function readProfileClock(
@@ -1048,7 +1087,7 @@ function hashTerminalReplicaRow(
   return hash;
 }
 
-function hashTerminalReplicaRows(
+export function hashTerminalReplicaRows(
   rows: readonly TerminalReplicaRow[],
   profile?: MutableTerminalReplicaApplyProfile,
   instrumentation?: TerminalReplicaApplyOptions["instrumentation"],
@@ -1084,6 +1123,36 @@ export async function primeTerminalReplicaRowsHashCooperatively(
   }
   if (Object.isFrozen(rows) && rows.every(isTerminalReplicaRowDeeplyFrozen))
     ROW_ARRAY_HASH_CACHE.set(rows, { hash, length: rows.length });
+}
+
+function registerGridPatchHash(
+  previous: readonly TerminalReplicaRow[],
+  next: readonly TerminalReplicaRow[],
+  changes: readonly { readonly index: number; readonly row: TerminalReplicaRow }[],
+  profile?: MutableTerminalReplicaApplyProfile,
+  instrumentation?: TerminalReplicaApplyOptions["instrumentation"],
+): void {
+  const prior = ROW_ARRAY_HASH_CACHE.get(previous);
+  // A cached sequence proves that every retained row is deeply immutable.
+  // Without that proof (including cold or external snapshots), hash normally.
+  // Dense scrolling is cheaper as one linear fold than repeated polynomial
+  // replacements; preserve that path when more than a quarter of rows change.
+  if (!prior || changes.length > previous.length / 4) return;
+  let hash = prior.hash;
+  for (const { index } of changes) {
+    const row = next[index]!;
+    if (row === previous[index]) continue;
+    if (!isTerminalReplicaRowDeeplyFrozen(row)) return;
+    const before = BigInt(`0x${hashTerminalReplicaRow(previous[index]!)}`);
+    const after = BigInt(`0x${hashTerminalReplicaRow(row, profile, instrumentation)}`);
+    hash = BigInt.asUintN(
+      64,
+      hash + (after - before) * pow64(ROW_SEQUENCE_BASE, prior.length - 1 - index),
+    );
+  }
+  // applyTerminalReplicaPatch owns/froze this array and validates unique indices.
+  // The polynomial is unchanged: replace only each changed row's contribution.
+  ROW_ARRAY_HASH_CACHE.set(next, { hash, length: next.length });
 }
 
 export function registerTerminalReplicaRowsDeltaHash(

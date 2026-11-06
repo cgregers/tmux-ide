@@ -4,10 +4,10 @@ const configuredUrl = process.env.NEXT_PUBLIC_SITE_URL?.trim();
 
 export const SITE_URL = (configuredUrl || "https://tmux-ide.com").replace(/\/+$/u, "");
 export const SITE_NAME = "tmux-ide";
-export const SITE_TAGLINE = "The open-source workspace for coding agents.";
-export const SITE_TITLE = "tmux-ide: open-source tmux for coding agents";
+export const SITE_TAGLINE = "The open-source tmux workspace for coding agents.";
+export const SITE_TITLE = "tmux-ide: terminal multiplexer workspace for coding agents";
 export const SITE_DESCRIPTION =
-  "tmux for coding agents. Run Claude Code, Codex and other agents in your tmux sessions, see live agent status, and jump to the pane that needs you.";
+  "tmux for coding agents: run Claude Code and Codex in the terminal multiplexer you already use, see each agent's status and jump to the one that needs you.";
 export const SITE_IMAGE = "/og-image.png";
 export const SITE_REPOSITORY = "https://github.com/wavyrai/tmux-ide";
 export const SOFTWARE_DOWNLOAD_URL = "https://www.npmjs.com/package/tmux-ide";
@@ -19,8 +19,17 @@ export const PUBLISHER_URL = "https://www.prototyper.co";
 export const PUBLISHER_ID = `${PUBLISHER_URL}/#organization`;
 export const INSTALL_COMMAND = "curl -fsSL https://tmux-ide.com/install.sh | sh";
 export const APP_COMMAND = "tmux-ide app";
-export const CURRENT_RELEASE_PATH = "/docs/release-2-9-4";
+/** check:product-docs fails the build when this version has no release page. */
+export const CURRENT_RELEASE_PATH = `/docs/release-${SOFTWARE_VERSION.replaceAll(".", "-")}`;
 
 export function absoluteUrl(path = "/"): string {
   return new URL(path, `${SITE_URL}/`).toString();
+}
+
+/**
+ * The canonical URL of a site page, as its HTML `<link rel="canonical">` writes
+ * it. Next renders the homepage's as the bare origin, with no trailing slash.
+ */
+export function canonicalUrl(path: string): string {
+  return path === "/" ? SITE_URL : absoluteUrl(path);
 }

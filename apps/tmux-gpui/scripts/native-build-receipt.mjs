@@ -71,10 +71,35 @@ export async function snapshotNativeSources(workspace) {
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
+  // Fixed sibling dependency only; never walk arbitrary parent/vendor contents.
+  const vendor = "../vendor",
+    apple = `${vendor}/bezel-gpui-apple`;
+  let hasVendor = false;
+  try {
+    const parent = await lstat(join(root, vendor));
+    if (parent.isSymbolicLink() || !parent.isDirectory()) throw new Error("Invalid vendor root");
+    hasVendor = true;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+  if (hasVendor) {
+    const packageRoot = await lstat(join(root, apple));
+    if (packageRoot.isSymbolicLink() || !packageRoot.isDirectory())
+      throw new Error("Invalid Apple vendor root");
+    for (const path of ["Cargo.toml", "build.rs", "LICENSE-APACHE", "src", "gpui"])
+      await walk(`${apple}/${path}`);
+    await walk(`${vendor}/bezel-gpui-apple-provenance.json`);
+  }
   files.sort((a, b) => a.path.localeCompare(b.path, "en"));
   return { version: 1, files, sha256: digest(JSON.stringify(files)) };
 }
 function validate(receipt) {
+  // Retain historical receipts; new builds bound compiler concurrency to one.
+  const command = receipt?.build?.command;
+  const normalizedCommand =
+    Array.isArray(command) && command[3] === "--jobs" && command[4] === "1"
+      ? [...command.slice(0, 3), ...command.slice(5)]
+      : command;
   if (
     !receipt ||
     Object.keys(receipt).sort().join() !== "binary,build,kind,sources,version" ||
@@ -99,16 +124,17 @@ function validate(receipt) {
     typeof receipt.build.hostTarget !== "string" ||
     receipt.build.hostTarget.length > 256 ||
     !Array.isArray(receipt.build.command) ||
-    JSON.stringify(receipt.build.command) !==
+    JSON.stringify(normalizedCommand) !==
       JSON.stringify([
         "build",
         "--locked",
         "--offline",
         "-p",
-        "herdr-gpui",
+        "tmux-ide-gpui",
         "--bin",
         "tmux-ide-gpui",
-        "--release",
+        "--profile",
+        "dist",
         "--message-format=json-render-diagnostics",
       ])
   )

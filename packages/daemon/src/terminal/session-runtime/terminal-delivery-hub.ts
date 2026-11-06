@@ -1,4 +1,18 @@
+import { prepareProjection, type ProjectionBaseline } from "./terminal-projection-delivery.ts";
+import {
+  TerminalProjectionEnvelopeSchemaZ,
+  TerminalProjectionReceiptSchemaZ,
+  TerminalProjectionMaterializeSchemaZ,
+  type TerminalProjectionEnvelope,
+  type TerminalProjectionReceipt,
+  type TerminalProjectionMaterialize,
+  type TerminalProjectionPayload,
+} from "@tmux-ide/contracts";
+import { encodeTerminalProjectionCooperatively } from "@tmux-ide/core";
+type DeliveryEnvelope = TerminalDeliveryEnvelope | TerminalProjectionEnvelope;
+import type { KittyImage } from "../graphics/kitty-graphics.ts";
 import { StockCaptureTabUnavailableError } from "./stock-capture-fidelity.ts";
+import { logger } from "../../lib/log.ts";
 import {
   MAX_RETAINED_NATIVE_BACKING_BYTES,
   takeNativeSeedBacking,
@@ -8,6 +22,8 @@ import {
 } from "./native-seed-backing.ts";
 import {
   WorkspaceIdSchemaZ,
+  TERMINAL_GRAPHICS_CAPABILITY_VERSION,
+  type TerminalGraphicsState,
   TERMINAL_DELIVERY_PATCH_TO_SEED_BYTES,
   TERMINAL_DELIVERY_MAX_REPRESENTATION_BYTES,
   TerminalDeliveryEnvelopeSchemaZ,
@@ -34,6 +50,8 @@ import {
   applyTerminalReplicaUpdate,
   applyTerminalReplicaUpdateCooperatively,
   terminalReplicaUpdateNeedsCooperativeReduction,
+  encodeBinarySemanticTerminalUpdate,
+  encodeBinarySemanticTerminalUpdateCooperatively,
   encodeCompactSemanticTerminalUpdate,
   encodeCompactSemanticTerminalUpdateCooperatively,
   terminalSemanticUpdateNeedsCooperativeEncoding,
@@ -121,9 +139,22 @@ export interface TerminalDeliveryConnection {
   readonly closed: Promise<"closed" | "sink-failed">;
   readonly negotiation: TerminalDeliveryNegotiationResult;
   ack(ack: TerminalDeliveryAck): void;
+  projectionReceipt?(receipt: TerminalProjectionReceipt): void;
+  materialize?(request: TerminalProjectionMaterialize): void;
   nack(nack: TerminalDeliveryNack): void;
   setVisibility(visibility: TerminalDeliveryVisibility): void;
   close(): Promise<void>;
+  /**
+   * Kitty graphics side channel, present only when the client offered
+   * TERMINAL_GRAPHICS_CAPABILITY_VERSION. Delivery is independent of the
+   * canonical FIFO: renderers resolve state against cells they already hold.
+   */
+  readonly graphics?: TerminalDeliveryGraphics;
+}
+
+export interface TerminalDeliveryGraphics {
+  subscribe(listener: (state: TerminalGraphicsState) => void): () => void;
+  image(digest: string): KittyImage | null;
 }
 
 interface NativeBackingLease {
@@ -173,6 +204,8 @@ export interface TerminalDeliverySourceOwner {
     ) => void,
     onRaw: (record: TerminalReplicaCommittedRaw) => void,
   ): Promise<TerminalReplicaSourceSubscription>;
+  subscribeGraphics?(listener: (state: TerminalGraphicsState) => void): () => void;
+  graphicsImage?(digest: string): KittyImage | null;
 }
 
 interface ClientState {
@@ -189,9 +222,14 @@ interface ClientState {
   visibility: TerminalDeliveryVisibility;
   baselineRevision: number;
   baselineHash: string | null;
+  projectionBaseline: ProjectionBaseline | null;
+  materializeRequested: boolean;
+  lastProjectionReceipt: TerminalProjectionReceipt | null;
+  lastMaterialize: TerminalProjectionMaterialize | null;
   reseedRequired: boolean;
   inFlight: {
-    envelope: TerminalDeliveryEnvelope;
+    envelope: DeliveryEnvelope;
+    projection: ProjectionBaseline | null;
     deliveryOrdinal: number;
     bytes: Uint8Array;
     nextChunk: number;
@@ -210,7 +248,7 @@ interface ClientState {
   captureUnavailable: boolean;
   lastAck: TerminalDeliveryAck | null;
   /** Delivery displaced by authoritative source close; its racing ACK is benign. */
-  sourceClosedFlight: TerminalDeliveryEnvelope | null;
+  sourceClosedFlight: DeliveryEnvelope | null;
   backgroundTimer: SessionRuntimeTimer | null;
 }
 
@@ -230,6 +268,11 @@ interface PendingClientEncoding {
   readonly reseedRequired: boolean;
   readonly traceStarted: number;
 }
+class DeferredProjectionEncoding extends Error {
+  constructor(readonly payload: TerminalProjectionPayload) {
+    super("Deferred projection encoding");
+  }
+}
 class DeferredSeedEncoding extends Error {
   constructor(readonly payload: TerminalSemanticDeliveryPayload) {
     super("Deferred compact seed encoding");
@@ -238,10 +281,16 @@ class DeferredSeedEncoding extends Error {
 
 interface CachedRepresentation {
   readonly bytes: Uint8Array;
-  readonly encoding?: "semantic-v1" | "semantic-compact-v1";
+  readonly encoding?:
+    | "semantic-v1"
+    | "semantic-compact-v1"
+    | "semantic-binary-v1"
+    | "alternate-projection-binary-v1";
+  readonly projection?: ProjectionBaseline;
+  readonly projectionBaseRevision?: number | null;
   readonly frame: "seed" | "patch" | "tombstone";
   readonly canonicalEquivalent: boolean;
-  readonly history: "complete" | "truncated" | "not-applicable";
+  readonly history: "complete" | "truncated" | "not-applicable" | "deferred";
   readonly representationHash?: string;
   /** Internal reachability metadata; never serialized onto the wire. */
   readonly cachePaneId?: string;
@@ -258,7 +307,7 @@ interface CachedRepresentation {
     attemptedLegacySeedSizeCapped: boolean;
     attemptedCompactPatchBytes: number | null;
     attemptedCompactSeedBytes: number | null;
-    selectedEncoding: "semantic-v1" | "semantic-compact-v1";
+    selectedEncoding: "semantic-v1" | "semantic-compact-v1" | "semantic-binary-v1";
     selectionStatus:
       | "patch-preferred"
       | "seed-preferred"
@@ -416,6 +465,10 @@ export class SessionRuntimeTerminalDeliveryHub {
         visibility: "visible",
         baselineRevision: -1,
         baselineHash: null,
+        projectionBaseline: null,
+        materializeRequested: false,
+        lastProjectionReceipt: null,
+        lastMaterialize: null,
         reseedRequired: false,
         inFlight: null,
         latestRevision: pane.latest?.update.revision ?? null,
@@ -440,6 +493,8 @@ export class SessionRuntimeTerminalDeliveryHub {
         negotiation,
         closed,
         ack: (ack) => this.#ack(client, ack),
+        projectionReceipt: (receipt) => this.#projectionReceipt(client, receipt),
+        materialize: (request) => this.#materialize(client, request),
         nack: (nack) => this.#nack(client, nack),
         setVisibility: (visibilityInput) => {
           if (client.closed) return;
@@ -451,10 +506,18 @@ export class SessionRuntimeTerminalDeliveryHub {
           this.#recordDeliveryStatus(client, this.#panes.get(client.paneId));
         },
         close: async () => this.#closeClient(client),
+        ...(offer.protocolVersions.includes(TERMINAL_GRAPHICS_CAPABILITY_VERSION)
+          ? { graphics: this.#graphicsFor(semanticPaneId, client, closed) }
+          : {}),
       };
     } catch (error) {
       if (!(error instanceof StockCaptureTabUnavailableError)) throw error;
       // Negotiation still settles this pane; no invented canonical seed is published.
+      logDeliveryFault(
+        { paneId: semanticPaneId, deliveryWorkspaceName: address },
+        "source-closed",
+        "capture-unavailable",
+      );
       await accept({
         type: "terminal.delivery.fault",
         reason: "source-closed",
@@ -472,6 +535,25 @@ export class SessionRuntimeTerminalDeliveryHub {
     } finally {
       this.#pendingClients.delete(key);
     }
+  }
+
+  #graphicsFor(
+    semanticPaneId: string,
+    client: ClientState,
+    closed: Promise<unknown>,
+  ): TerminalDeliveryGraphics {
+    const owner = this.#ownerForPane(semanticPaneId);
+    return {
+      subscribe: (listener) => {
+        if (client.closed || !owner.subscribeGraphics) return () => {};
+        const unsubscribe = owner.subscribeGraphics((state) => {
+          if (!client.closed) listener(state);
+        });
+        void closed.then(unsubscribe);
+        return unsubscribe;
+      },
+      image: (digest) => (client.closed ? null : (owner.graphicsImage?.(digest) ?? null)),
+    };
   }
 
   /** Retire only this pane's delivery owners before its canonical owner is disposed. */
@@ -621,6 +703,7 @@ export class SessionRuntimeTerminalDeliveryHub {
       this.#cancelEncoding(client);
       client.outgoing.length = 0;
       client.inFlight = null;
+      logDeliveryFault(client, "source-closed", "source-restarted");
       this.#enqueue(client, {
         type: "terminal.delivery.fault",
         reason: "source-closed",
@@ -918,7 +1001,10 @@ export class SessionRuntimeTerminalDeliveryHub {
         client.lifecycleOpenRecorded = this.#recordDeliveryLifecycle(client, pane, "open");
       if (
         update.type === "terminal.tombstone" &&
-        (client.inFlight !== null || client.encoding !== null || client.visibility !== "visible")
+        (client.inFlight !== null ||
+          client.encoding !== null ||
+          client.visibility !== "visible" ||
+          client.projectionBaseline !== null)
       ) {
         this.#fault(client, "source-closed", "Terminal source closed before final state delivery");
         continue;
@@ -1041,15 +1127,22 @@ export class SessionRuntimeTerminalDeliveryHub {
     let deferred = false;
     let encodedRepresentation: CachedRepresentation | null = null;
     let failedSelectionObservation: SemanticSelectionObservation | null = null;
-    let deliveryEnvelope: TerminalDeliveryEnvelope | null = null;
+    let deliveryEnvelope: DeliveryEnvelope | null = null;
     let deliveryOrdinal: number | null = null;
     try {
       const representation = this.#representation(client, pane, target, completed?.outcome);
       encodedRepresentation = representation;
       const transactionId = this.#scheduler.createId();
       const chunkCount = Math.max(1, Math.ceil(representation.bytes.byteLength / (256 * 1024)));
-      const envelope = TerminalDeliveryEnvelopeSchemaZ.parse({
-        type: "terminal.delivery",
+      const envelope = (
+        representation.projection
+          ? TerminalProjectionEnvelopeSchemaZ
+          : TerminalDeliveryEnvelopeSchemaZ
+      ).parse({
+        type: representation.projection ? "terminal.projection" : "terminal.delivery",
+        ...(representation.projection
+          ? { projectionStateHash: representation.projection.hash }
+          : {}),
         workspaceName: client.deliveryWorkspaceName,
         semanticPaneId: target.update.semanticPaneId,
         generation: target.update.generation,
@@ -1060,7 +1153,11 @@ export class SessionRuntimeTerminalDeliveryHub {
         protocolVersion: 1,
         encoding: representation.encoding ?? client.negotiated.encoding,
         frame: representation.frame,
-        baseRevision: representation.frame === "seed" ? null : Math.max(0, client.baselineRevision),
+        baseRevision: representation.projection
+          ? representation.projectionBaseRevision
+          : representation.frame === "seed"
+            ? null
+            : Math.max(0, client.baselineRevision),
         canonicalRevision: target.update.revision,
         canonicalStateHash: target.update.stateHash,
         representationHash:
@@ -1077,6 +1174,7 @@ export class SessionRuntimeTerminalDeliveryHub {
       registerTerminalDeliveryObservationOrdinal(envelope, deliveryOrdinal);
       client.inFlight = {
         envelope,
+        projection: representation.projection ?? null,
         deliveryOrdinal,
         bytes: representation.bytes,
         nextChunk: 0,
@@ -1087,9 +1185,16 @@ export class SessionRuntimeTerminalDeliveryHub {
       if (target.trace?.traceId === pane.pendingDeliveryTrace?.traceId)
         pane.pendingDeliveryTrace = null;
     } catch (error) {
-      if (error instanceof DeferredSeedEncoding) {
+      if (error instanceof DeferredSeedEncoding || error instanceof DeferredProjectionEncoding) {
         deferred = true;
-        this.#startEncoding(client, pane, target, error.payload, traceStarted);
+        this.#startEncoding(
+          client,
+          pane,
+          target,
+          error.payload,
+          traceStarted,
+          error instanceof DeferredProjectionEncoding,
+        );
         return;
       }
       failedSelectionObservation = semanticSelectionObservationFromError(error);
@@ -1167,8 +1272,9 @@ export class SessionRuntimeTerminalDeliveryHub {
     client: ClientState,
     pane: PaneState,
     target: RevisionRecord,
-    payload: TerminalSemanticDeliveryPayload,
+    payload: TerminalSemanticDeliveryPayload | TerminalProjectionPayload,
     traceStarted: number,
+    projection = false,
   ): void {
     const key = cacheKey([
       target.update.workspaceName,
@@ -1179,6 +1285,9 @@ export class SessionRuntimeTerminalDeliveryHub {
       target.update.stateHash,
       client.negotiated.encoding,
       client.negotiated.richPlacements ? "rich" : "plain",
+      projection
+        ? `projection:${client.projectionBaseline?.revision ?? -1}:${client.projectionBaseline?.hash ?? "none"}`
+        : "complete",
     ]);
     let job = this.#pendingEncodings.get(key);
     let created = false;
@@ -1212,10 +1321,19 @@ export class SessionRuntimeTerminalDeliveryHub {
     };
     owned.clients.add(client);
     if (!created) return;
-    void encodeCompactSemanticTerminalUpdateCooperatively(payload, {
-      signal: owned.abort.signal,
-      yieldControl: () => this.#yieldEncoding(owned),
-    }).then(
+    const options = { signal: owned.abort.signal, yieldControl: () => this.#yieldEncoding(owned) };
+    const result = projection
+      ? encodeTerminalProjectionCooperatively(payload as TerminalProjectionPayload, options)
+      : client.negotiated.encoding === "semantic-binary-v1"
+        ? encodeBinarySemanticTerminalUpdateCooperatively(
+            payload as TerminalSemanticDeliveryPayload,
+            options,
+          )
+        : encodeCompactSemanticTerminalUpdateCooperatively(
+            payload as TerminalSemanticDeliveryPayload,
+            options,
+          );
+    void result.then(
       (bytes) => this.#completeEncoding(owned, { bytes }),
       (error) => this.#completeEncoding(owned, { error }),
     );
@@ -1290,6 +1408,32 @@ export class SessionRuntimeTerminalDeliveryHub {
     target: RevisionRecord,
     seedOutcome?: SeedEncodingOutcome,
   ): CachedRepresentation {
+    const snapshotForProjection = target.state.snapshot;
+    if (
+      client.negotiated.alternateScreenProjection &&
+      !client.materializeRequested &&
+      (client.baselineRevision < 0 || client.projectionBaseline !== null) &&
+      snapshotForProjection?.modes.alternateScreen &&
+      snapshotForProjection.history.length > 0
+    ) {
+      const { payload, retained } = prepareProjection(
+        snapshotForProjection,
+        target.update.revision,
+        target.update.incarnation,
+        client.reseedRequired ? null : client.projectionBaseline,
+      );
+      if (!seedOutcome) throw new DeferredProjectionEncoding(payload);
+      if ("error" in seedOutcome) throw seedOutcome.error;
+      return {
+        bytes: seedOutcome.bytes,
+        encoding: "alternate-projection-binary-v1",
+        frame: payload.frame,
+        history: "deferred",
+        canonicalEquivalent: false,
+        projection: retained,
+        projectionBaseRevision: payload.frame === "seed" ? null : payload.baseRevision,
+      };
+    }
     const key = cacheKey([
       target.update.workspaceName,
       target.update.semanticPaneId,
@@ -1313,17 +1457,27 @@ export class SessionRuntimeTerminalDeliveryHub {
     let result: CachedRepresentation | null = null;
     if (
       client.negotiated.encoding === "semantic-v1" ||
-      client.negotiated.encoding === "semantic-compact-v1"
+      client.negotiated.encoding === "semantic-compact-v1" ||
+      client.negotiated.encoding === "semantic-binary-v1"
     ) {
       const encodeSemantic = (payload: TerminalSemanticDeliveryPayload): Uint8Array => {
-        if (client.negotiated.encoding !== "semantic-compact-v1")
+        if (
+          client.negotiated.encoding !== "semantic-compact-v1" &&
+          client.negotiated.encoding !== "semantic-binary-v1"
+        )
           return encodeSemanticTerminalUpdate(payload);
-        if (terminalSemanticUpdateNeedsCooperativeEncoding(payload)) {
+        if (
+          payload.frame === "seed" &&
+          (client.negotiated.encoding === "semantic-binary-v1" ||
+            terminalSemanticUpdateNeedsCooperativeEncoding(payload))
+        ) {
           if (!seedOutcome) throw new DeferredSeedEncoding(payload);
           if ("error" in seedOutcome) throw seedOutcome.error;
           return seedOutcome.bytes;
         }
-        return encodeCompactSemanticTerminalUpdate(payload);
+        return client.negotiated.encoding === "semantic-binary-v1"
+          ? encodeBinarySemanticTerminalUpdate(payload)
+          : encodeCompactSemanticTerminalUpdate(payload);
       };
       if (client.reseedRequired) {
         const payload = semanticSeed(target);
@@ -1655,6 +1809,10 @@ export class SessionRuntimeTerminalDeliveryHub {
       return;
     }
     const envelope = flight.envelope;
+    if (envelope.type !== "terminal.delivery") {
+      this.#fault(client, "protocol-violation", "Canonical ACK cannot acknowledge a projection");
+      return;
+    }
     if (
       flight.nextChunk !== envelope.chunkCount ||
       ack.workspaceName !== envelope.workspaceName ||
@@ -1674,6 +1832,8 @@ export class SessionRuntimeTerminalDeliveryHub {
       this.#maxSlowClientMs,
       this.#scheduler.nowMs() - flight.sentAt,
     );
+    client.projectionBaseline = null;
+    client.lastProjectionReceipt = null;
     client.baselineRevision = ack.canonicalRevision;
     client.baselineHash = ack.canonicalStateHash;
     client.reseedRequired = false;
@@ -1731,6 +1891,85 @@ export class SessionRuntimeTerminalDeliveryHub {
     this.#recordDeliveryStatus(client, this.#panes.get(client.paneId));
   }
 
+  #projectionReceipt(client: ClientState, input: TerminalProjectionReceipt): void {
+    const receipt = TerminalProjectionReceiptSchemaZ.parse(input);
+    if (
+      client.lastProjectionReceipt &&
+      JSON.stringify(client.lastProjectionReceipt) === JSON.stringify(receipt)
+    )
+      return;
+    const flight = client.inFlight;
+    const envelope = flight?.envelope;
+    if (
+      !flight ||
+      !flight.projection ||
+      envelope?.type !== "terminal.projection" ||
+      flight.nextChunk !== envelope.chunkCount ||
+      receipt.workspaceName !== envelope.workspaceName ||
+      receipt.semanticPaneId !== envelope.semanticPaneId ||
+      receipt.generation !== envelope.generation ||
+      receipt.incarnation !== envelope.incarnation ||
+      receipt.deliveryNonce !== envelope.deliveryNonce ||
+      receipt.transactionId !== envelope.transactionId ||
+      receipt.canonicalRevision !== envelope.canonicalRevision ||
+      receipt.canonicalStateHash !== envelope.canonicalStateHash ||
+      receipt.projectionStateHash !== envelope.projectionStateHash ||
+      receipt.representationHash !== envelope.representationHash
+    ) {
+      this.#fault(
+        client,
+        "protocol-violation",
+        "Projection receipt does not identify the in-flight projection",
+      );
+      return;
+    }
+    client.projectionBaseline = flight.projection;
+    client.lastProjectionReceipt = receipt;
+    client.reseedRequired = false;
+    client.inFlight = null;
+    if (client.latestRevision === receipt.canonicalRevision) client.latestRevision = null;
+    if (client.materializeRequested)
+      client.latestRevision = this.#panes.get(client.paneId)?.latest?.update.revision ?? null;
+    this.#pruneCanonicalRevisions(client.paneId);
+    this.#schedule(client);
+    this.#recordDeliveryStatus(client, this.#panes.get(client.paneId));
+  }
+
+  #materialize(client: ClientState, input: TerminalProjectionMaterialize): void {
+    const request = TerminalProjectionMaterializeSchemaZ.parse(input);
+    if (
+      client.lastMaterialize &&
+      JSON.stringify(client.lastMaterialize) === JSON.stringify(request)
+    )
+      return;
+    const baseline = client.projectionBaseline;
+    if (
+      !client.negotiated.alternateScreenProjection ||
+      !baseline ||
+      request.workspaceName !== client.deliveryWorkspaceName ||
+      request.semanticPaneId !== client.paneId ||
+      request.generation !== client.negotiated.generation ||
+      request.incarnation !== baseline.incarnation ||
+      request.deliveryNonce !== client.negotiated.deliveryNonce ||
+      request.canonicalRevision !== baseline.revision ||
+      request.projectionStateHash !== baseline.hash
+    ) {
+      this.#fault(
+        client,
+        "protocol-violation",
+        "History request does not identify the retained projection",
+      );
+      return;
+    }
+    client.lastMaterialize = request;
+    client.materializeRequested = true;
+    this.#cancelEncoding(client);
+    client.latestRevision = this.#panes.get(client.paneId)?.latest?.update.revision ?? null;
+    // A queued projection still owns its transaction until its receipt arrives.
+    // The following complete seed then supersedes it, including at the same revision.
+    this.#schedule(client);
+  }
+
   #nack(client: ClientState, input: TerminalDeliveryNack): void {
     const nack = TerminalDeliveryNackSchemaZ.parse(input);
     const closed = client.sourceClosedFlight;
@@ -1776,6 +2015,7 @@ export class SessionRuntimeTerminalDeliveryHub {
     message: string,
     selectionObservation: SemanticSelectionObservation | null = null,
   ): void {
+    logDeliveryFault(client, reason);
     if (this.#observability.enabled)
       try {
         const atMicros = this.#observability.nowMicros();
@@ -2186,7 +2426,7 @@ export function selectExactSemanticRepresentation<T extends { readonly frame: st
 
 function completeSemanticSelectionObservation(
   observation: ExactSemanticSelectionObservation,
-  selectedEncoding: "semantic-v1" | "semantic-compact-v1",
+  selectedEncoding: "semantic-v1" | "semantic-compact-v1" | "semantic-binary-v1",
   legacyAttempts: Readonly<{ patchBytes: number | null; seedBytes: number | null }> | null,
 ): SemanticSelectionObservation {
   const compact = selectedEncoding === "semantic-compact-v1";
@@ -2461,4 +2701,21 @@ function joinBytes(chunks: readonly Uint8Array[]): Uint8Array {
     offset += chunk.byteLength;
   }
   return joined;
+}
+
+/**
+ * One info line per fault a client is sent, so a client's drop has a daemon-side
+ * record. Ids and fixed reasons only: the fault message can carry source text.
+ */
+function logDeliveryFault(
+  client: Pick<ClientState, "paneId" | "deliveryWorkspaceName">,
+  reason: "state-too-large" | "source-closed" | "protocol-violation",
+  cause?: "source-restarted" | "capture-unavailable",
+): void {
+  logger.info("terminal-delivery", "fault sent to client", {
+    reason,
+    ...(cause ? { cause } : {}),
+    pane: client.paneId,
+    workspace: client.deliveryWorkspaceName,
+  });
 }

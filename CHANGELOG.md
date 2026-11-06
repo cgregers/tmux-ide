@@ -2,6 +2,122 @@
 
 All notable changes to this project will be documented in this file.
 
+## 2.9.17
+
+- Fix `tmux-ide update` on slow connections, below about 1 MB/s on macOS and 1.6 MB/s on Linux. The runtime download had 30 s for the whole transfer; it now aborts only after about 30 s with no data, within a 15-minute budget, with up to 3 attempts per file for transient failures. Stalls and network errors no longer blame the release assets.
+- Say so when `tmux-ide update --tui-binary` or `tmux-ide app` waits behind another download of the same version.
+- Give up on stalled downloads, not slow ones, in `install.sh`. It allowed 180 s per attempt, and Node.js alone is over 50 MB, so it needed about 300 KB/s. It now allows 900 s per attempt and aborts after about 30 s with no data. The native alpha installer gets the same per-attempt limits, without retries, up from 300 s for a 144.6 MB archive.
+- Queue fewer concurrent daemon requests: 8 concurrent `/api/v1/tmux-servers` requests take about 2× one request instead of 7×, because callers share a refresh that is still queued, and `/api/resources/fleet-catalog` about 2× instead of 8×, because it no longer blocks on tmux.
+- Hash terminal rows more cheaply in the daemon during heavy output, with the same digests. Large floods do not finish faster.
+- Wake the Mac app's UI when new app state arrives, instead of on the next 16 ms tick. This ships in native alpha 0.1.13.
+- Fix a `daemon service restart` race that could report a daemon that was shutting down, followed by a stale record in `daemon info`.
+- Use the new tmux-ide icon in the notifier, the website and the README. The Mac app gets it in native alpha 0.1.13, with light and dark versions on macOS 26. The website's browser tab icon follows the system appearance.
+- Point the website's release pill, release metadata and retired-page redirects at the current version. They still linked to 2.9.4.
+
+## 2.9.16
+
+- Keep the Mac app connected when one pane's update is rejected: the daemon re-sends that pane alone, the other panes keep updating, and the "Input interrupted — reselect pane" failure no longer takes every pane down.
+- Reconnect only the terminal stream after a drop. The last frame stays on screen, read-only, with a "Reconnecting… attempt N" badge and a Retry button. Retries continue with backoff for as long as it is the same daemon. Keys typed during a drop are refused with a notice and never replayed.
+- Recover typing after a daemon freeze, as during a Mac sleep, and keep a pane whose source closed on screen with an "unavailable" badge.
+- Reconnect with the session's current panes when a pane is split in or closed from outside the app, in about 0.5–1 s, keeping the frame on screen.
+- Open sessions whose panes tmux paused (a stalled daemon, as during a Mac sleep) faster: frame identity reuses cached row hashes, so after a 5 s stall 8 panes open in about 1 s instead of 2–4 s.
+- Keep the app's session catalog alive after a single error instead of closing it; it reconnects or shows a notice with backoff.
+- Push the session catalog and agent state from the daemon instead of polling. An idle Home makes 3 requests a minute instead of 291, and Home appears after 8–9 requests instead of 16 in the same test.
+- Cache the daemon identity check per daemon instance, behind a live-process check and a re-check every 5 s, so a dead daemon's port doesn't receive credentials.
+- Keep agent rows on screen while they refresh and update only the rows that change. The daemon reads agent state every 500 ms, so state changes show within about 1 s in the app and the TUI.
+- Redesign Home: one table of sessions grouped by machine, with each project's own favicon, windows and panes, last activity, "attached", and the agent's state on its session's row. A "needs input" pill filters to sessions waiting on you. The separate Agents section is gone.
+- Add a v2 sessions resource with favicons, window counts and last activity. Favicons are read only from fixed names in the session's folder, without following symlinks, capped at 32 KB and cached. Older apps and daemons keep working.
+- Check every favicon before decoding it: images over 1024 px a side (SVG over 512) or about 4 MB decoded are refused, and SVGs that reference anything outside themselves are refused. A refused favicon shows the terminal icon.
+- Remove the tab-style pane titles and shrink the pane margins to 8 pt.
+- Log the cause of every stream drop on both sides: the app names the rejecting check and pane, and the daemon logs each fault and stream close.
+- Print a notice when `tmux-ide open` falls back to a browser that has no native controls. The check is bounded to 2 s and never applies to the bundled browser.
+- Fix a startup crash when the Mac app binary runs without arguments.
+
+## 2.9.15
+
+- Discover the browser bundled with the managed Mac app when running `tmux-ide open`, while preserving explicit browser overrides and PATH fallback.
+- Add scoped native browser navigation with back, forward, reload/stop and a Cmd-L address editor. Browser commands validate the live pane and browser instance before execution.
+- Add Cmd-T for terminal windows, Cmd-D / Cmd-Shift-D for splits, Cmd-W for close confirmation and Cmd-Shift-[ / ] for window switching.
+- Preserve the previous frame briefly during verified window transitions, and stabilize divider dragging while terminal output changes.
+- Put window tabs in the top bar, reduce sidebar typography and remove excess pane padding.
+
+Native changes require the separately distributed alpha **0.1.10, build 2026102801** and the updated daemon. The Mac app includes the managed terminal browser; native assets remain outside npm. The browser's optional `action` automation helper is not bundled. This release makes no measured GUI/TUI performance-parity claim.
+
+## 2.9.14
+
+- Add `tmux-ide open [url]` to open an installed terminal-browser in an explicitly targeted tmux pane or window, with safe argument handling and clear missing-browser errors.
+- Redesign the native workspace with rounded pane cards, continuous header/content surfaces, compact session navigation, and window tabs. Remove duplicate session tabs and the connected footer.
+- Fix pane divider activation and terminal content sizing, and add pane focus and zoom shortcuts with keyboard badges in menus.
+- Carry bounded browser favicon updates to native pane headers and window tabs when using the prepared terminal-browser integration.
+- Keep native browser image observers scoped to their pane and discard stale surface handoffs during resizing without tearing down the image connection.
+
+Native UI changes require the separately distributed alpha `0.1.9`, build `2026102701`. Updating npm alone does not update the GUI. Terminal-browser remains a separate installation; native pixel surfaces and favicon support require the prepared development integration. Native browser navigation controls are not part of this release.
+
+## 2.9.13
+
+- Move native GUI discovery, session catalogs, agent operations and SSH connections into Rust. The normal native path no longer starts the Node metadata helper.
+- Update terminal state hashes incrementally when rows change, and negotiate bounded lossless image compression for compatible remote clients.
+- Keep image delivery responsive when the native window is backgrounded and restored, without disconnecting on a full image queue.
+- Add authenticated local macOS pixel surfaces with bounded frame retention, GPU retirement and Kitty fallback. A separate development patch integrates terminal-browser; the external browser is not bundled or automatically updated.
+
+The native GUI changes require the separately distributed native alpha `0.1.8`, build `2026102601`, and the matching updated daemon. Updating npm alone does not update the GUI. Existing tmux sessions are preserved. No physical typing-latency or GUI/TUI performance-parity claim is made.
+
+## 2.9.12
+
+- Add opt-in binary terminal and image delivery, byte input, and alternate-screen projections for clients that negotiate those capabilities. Existing clients retain their current delivery path.
+- Add bounded, expiring local image leases with inline fallback. Reuse unchanged ownership journals instead of flushing them for every shared lease, and verify immutable file metadata before cleanup.
+- Keep deferred-history receipts separate from complete-state acknowledgements, and reject unsolicited projections in existing complete-state clients.
+
+- Move the native GUI terminal stream and input into Rust, keeping the Node broker for discovery, SSH setup and application metadata. Retain unchanged terminal rows and apply changed rows directly.
+- Preserve queued typing and paste through terminal recapture during resize. Reject commands admitted while backgrounded, including stale resize requests during rapid refocus.
+- Preview divider movement locally and commit the exact terminal geometry on release. Improve initial pane selection and add Cmd-click links in GUI terminals.
+
+The matching native macOS alpha is `0.1.8`, distributed separately from CLI/daemon `2.9.12`. Updating the CLI does not update the native app. Existing tmux sessions are preserved. This release makes no measured typing/scrolling speedup or TUI-parity claim.
+
+## 2.9.11
+
+- Add negotiated compact and binary terminal frames to the native GUI bridge, with incremental row updates and full-frame recovery when a delta cannot be applied. Older peers keep the existing snapshot path.
+- Bound frame and image ingestion, consolidate the live helper into the browser process, and reuse immutable terminal rows to avoid repeated serialization and validation work.
+- Stage pane-divider and window sizing changes until geometry settles. Keep transient native status messages from resizing the terminal grid.
+- Hold immediate typing during a same-window pane switch until the selected pane is confirmed. Preserve input order, reject changed target lifetimes, and require explicit recovery after rejection without replaying uncertain input.
+- Use the selected pane's content height for native history page navigation, and admit newly created panes after verified discovery catches up.
+- Preserve an agent pane selection across a bounded terminal UI rebind without redispatching an uncertain selection command.
+
+The matching native macOS alpha is `0.1.7`, build `2026102201`, distributed separately from CLI/daemon `2.9.11`. Check the native release page for availability; updating the CLI does not update the native app. Existing tmux sessions are preserved. This release makes no measured speedup or native-parity claim. A direct Rust daemon client and zero-copy local images remain deferred.
+
+## 2.9.10
+
+- Improve native GUI typing over SSH by keeping terminal input responsive while earlier input is still in flight.
+
+The typing fix requires native app 0.1.6, distributed separately, and CLI/daemon 2.9.10. Check the native release page for availability. Existing tmux sessions are preserved.
+
+## 2.9.9
+
+- Preserve terminal pane dimensions when the native GUI loses focus or a viewer releases control. Background viewers still release input authority, and other attached tmux clients can take over sizing.
+
+Existing tmux sessions are preserved. Update the running daemon to use the fix; the native app is distributed separately.
+
+## 2.9.8
+
+- Let pane discovery settle across a concurrent window creation or split instead of rejecting a valid new pane after one changing inventory read.
+- Answer kitty graphics file and shared-memory probes with an unsupported-media response so clients fall back to inline images. Preserve placements across image redraws and apply root-frame edits.
+- Keep deflated image frames compressed until the native app decodes them off its UI thread, discard superseded redraws, and retain the last decoded frame while its replacement loads. Placeholder cells paint blank beneath transparent image pixels.
+- Report fractional native cell dimensions to supported tmux servers so graphics clients size their images without accumulated rounding error. Clip partially visible cursor images and retain anchors across capture reseeds only when their coordinates remain valid.
+- Bound legacy image decompression and enforce image-memory and placement limits after redraws.
+- Document graphics setup for existing shells and the distinction between an updated CLI and an older running tmux server.
+
+The native app is distributed separately. Existing tmux sessions are preserved.
+
+## 2.9.7
+
+- Support stock tmux 3.8 capture output without requiring users to replace or restart their tmux server. Detect its textual raw grid format and use the existing stock capture path instead of repeatedly closing terminal streams.
+- Observe daemon retirement after concurrent shutdown transport failure.
+- Never leave session input authority with a viewer whose connection has gone: a refused controller handoff or a failed release could leave every other viewer waiting for input. A viewer asking for input now reclaims a controller whose holder lost its lease; live holders still hand off normally, so only one client types at a time.
+- Forward kitty graphics protocol images from tmux panes to the native alpha through a separate daemon side channel; the bundled tmux acknowledges them. Disable with `TMUX_IDE_KITTY_GRAPHICS=0`.
+- The installer restarts a running older daemon on the new release and, on macOS, repoints launchd jobs that start an older tmux-ide copy at the managed launcher, keeping a backup. It names a shadowing tmux-ide on PATH with its version and removal command. Opt out with `--no-daemon-upgrade` or `TMUX_IDE_NO_DAEMON_UPGRADE=1`.
+
+The separate native alpha also recovers terminal streams after pane splits. Existing tmux sessions are preserved.
+
 ## 2.9.6
 
 - Drop Intel macOS (darwin-x64) support: no bundled tmux or compiled app runtime is published for Intel Macs, and the installer refuses them. Apple Silicon macOS and glibc Linux x64/ARM64 remain supported.

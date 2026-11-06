@@ -1,7 +1,7 @@
 ---
 title: Getting started
-metaTitle: Install tmux-ide and run your first agent
-description: Install tmux-ide with one command, open your first agent-aware tmux session, and learn every key that moves between agents, sessions and panes.
+metaTitle: Install tmux-ide on macOS and Linux
+description: Install tmux-ide with one command on macOS or Linux, no sudo. Open your first agent-aware tmux session and learn the keys that move between agents.
 ---
 
 This guide installs tmux-ide 2.9.4, opens your first session in the app, and
@@ -38,6 +38,14 @@ bundle tmux 3.7c.
 The installer prints a PATH instruction if your shell needs one. It installs
 under `~/.local`, verifies the Node.js and app runtime downloads, and preserves existing tmux
 sessions. To inspect it before running, download `install.sh` and read it first.
+
+Rerun the same command to upgrade. A running older daemon restarts on the new
+release while your tmux sessions keep running. On macOS, a launchd job that still
+starts an older tmux-ide copy is repointed at `~/.local/bin/tmux-ide`, with a
+backup of its definition. To keep the running daemon and update it yourself, pass
+`--no-daemon-upgrade` or set `TMUX_IDE_NO_DAEMON_UPGRADE=1`. If an older tmux-ide,
+such as a global npm install, comes first on your PATH, the installer names it and
+prints the command that removes it.
 
 To choose a version or a different user-owned location:
 

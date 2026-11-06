@@ -11,6 +11,13 @@ import { verifyNativeBuildReceipt } from "../scripts/native-build-receipt.mjs";
 import { validateBundleMetadata, developmentMetadata } from "../scripts/app-bundle-metadata.mjs";
 const run = promisify(execFile);
 const app = process.env.TMUX_GPUI_TEST_APP;
+const nodeFiles = ["node", "NODE-LICENSE", "bridge"];
+const bundlesNode = async (root) =>
+  JSON.parse(
+    await readFile(join(root, "Contents/Resources/development-manifest.json"), "utf8").catch(() =>
+      readFile(join(root, "Contents/Resources/assembly-manifest.json"), "utf8"),
+    ),
+  ).nodeSha256 !== undefined;
 test("local app retains binary identity and refuses replacement", { skip: !app }, async () => {
   const root = resolve(app);
   const resources = join(root, "Contents/Resources");
@@ -35,6 +42,7 @@ test("local app retains binary identity and refuses replacement", { skip: !app }
       manifests[0] === "assembly-manifest.json" ? "tmux-ide Preview" : "tmux-ide Development",
     LSMinimumSystemVersion: "14.2",
     CFBundleIconFile: "AppIcon.icns",
+    CFBundleIconName: "AppIcon",
   })) {
     assert.equal(
       (
@@ -55,6 +63,11 @@ test("local app retains binary identity and refuses replacement", { skip: !app }
     await readFile(join(resources, "AppIcon.icns")),
     await readFile(new URL("../assets/AppIcon.icns", import.meta.url)),
   );
+  assert.equal(manifest.icon.catalog.file, "Assets.car");
+  assert.deepEqual(
+    await readFile(join(resources, "Assets.car")),
+    await readFile(new URL("../assets/Assets.car", import.meta.url)),
+  );
   const upstream = fileURLToPath(new URL("../upstream/", import.meta.url));
   assert.equal(manifest.nativeBuild.file, "native-build-receipt.json");
   await verifyNativeBuildReceipt(
@@ -65,8 +78,6 @@ test("local app retains binary identity and refuses replacement", { skip: !app }
   for (const [name, source] of Object.entries({
     "HERDR-PROTOCOL-LICENSE": "crates/herdr-protocol/LICENSE-APACHE",
     "HERDR-PROTOCOL-NOTICE": "crates/herdr-protocol/NOTICE.md",
-    "HERDR-SOUND-NOTICE": "crates/herdr-gpui/SOUND-NOTICE.md",
-    "HERDR-GITHUB-NOTICE": "crates/herdr-gpui/GITHUB-NOTICE.md",
     "OCTICONS-LICENSE": "assets/icons/LICENSE-octicons",
   })) {
     assert.deepEqual(await readFile(join(resources, name)), await readFile(join(upstream, source)));
@@ -78,10 +89,15 @@ test("local app retains binary identity and refuses replacement", { skip: !app }
     .digest("hex");
   assert.ok(rustReport.includes(`Cargo.lock SHA-256: ${lockHash}`));
   assert.match(rustReport, /Packages \(including workspace\): [1-9][0-9]*/);
+  const withNode = manifest.nodeSha256 !== undefined;
+  assert.equal(manifest.nodeLicenseSha256 !== undefined, withNode);
+  const present = (await readdir(resources)).filter((name) => nodeFiles.includes(name));
+  assert.deepEqual(present.sort(), withNode ? [...nodeFiles].sort() : []);
   for (const [path, hash] of [
     [join(root, "Contents/MacOS/tmux-ide-gpui"), manifest.nativeSha256],
-    [join(resources, "node"), manifest.nodeSha256],
+    ...(withNode ? [[join(resources, "node"), manifest.nodeSha256]] : []),
     [join(resources, "AppIcon.icns"), manifest.icon.sha256],
+    [join(resources, "Assets.car"), manifest.icon.catalog.sha256],
     [join(resources, manifest.nativeBuild.file), manifest.nativeBuild.sha256],
     [join(resources, manifest.rustNotices.file), manifest.rustNotices.sha256],
   ]) {
@@ -97,10 +113,11 @@ test("local app retains binary identity and refuses replacement", { skip: !app }
     run(process.execPath, [
       builder,
       join(root, "Contents/MacOS/tmux-ide-gpui"),
-      join(resources, "node"),
-      join(resources, "NODE-LICENSE"),
       join(resources, manifest.nativeBuild.file),
       root,
+      ...(withNode
+        ? ["--node", join(resources, "node"), "--node-license", join(resources, "NODE-LICENSE")]
+        : []),
     ]),
     /EEXIST/,
   );
@@ -146,10 +163,16 @@ test(
           [
             builder,
             candidate,
-            candidate,
-            join(resolve(app), "Contents/Resources/NODE-LICENSE"),
             join(resolve(app), "Contents/Resources/native-build-receipt.json"),
             join(temp, "Rejected.app"),
+            ...((await bundlesNode(resolve(app)))
+              ? [
+                  "--node",
+                  candidate,
+                  "--node-license",
+                  join(resolve(app), "Contents/Resources/NODE-LICENSE"),
+                ]
+              : []),
           ],
           { env: { ...process.env, GPUI_RECEIPT_MARKER: marker }, timeout: 15000 },
         ),
@@ -160,5 +183,27 @@ test(
     } finally {
       await rm(temp, { recursive: true, force: true });
     }
+  },
+);
+
+test(
+  "an app without Node reports the legacy helper route as development-only",
+  { skip: !app },
+  async (t) => {
+    if (await bundlesNode(resolve(app))) return t.skip("development bundle includes Node");
+    // The launcher names the path it resolved; join() would fold its "..".
+    const node = `${join(resolve(app), "Contents/MacOS")}/../Resources/node`;
+    await assert.rejects(
+      run(join(resolve(app), "Contents/MacOS/tmux-ide-launcher"), ["private-host.json"], {
+        env: { HOME: tmpdir(), PATH: "/usr/bin:/bin" },
+        timeout: 15000,
+      }),
+      (error) =>
+        error.code === 1 &&
+        error.stdout === "" &&
+        error.stderr ===
+          `the legacy helper route needs a Node.js runtime at ${node}, which this app does not ` +
+            "bundle; it is available only in development bundles assembled with --node\n",
+    );
   },
 );

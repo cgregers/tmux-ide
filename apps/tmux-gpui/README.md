@@ -1,7 +1,12 @@
 # tmux-gpui — experimental native client
 
 This work lives in the **tmux-ide monorepo**. It is not a separate repository,
-submodule, npm package, or released application.
+submodule or npm package. A separate [public native alpha](../../docs/content/docs/native-alpha.mdx)
+is available: version 0.1.1, build 2026101410, published as
+[`native-alpha-2026101410`](https://github.com/wavyrai/tmux-ide/releases/tag/native-alpha-2026101410).
+That Developer ID signed, notarized build is distinct from the current branch's
+unsigned development candidate. Its release acceptance does not transfer to later
+source changes; fresh second-Mac qualification remains outstanding.
 
 ## Current state
 
@@ -10,8 +15,10 @@ Cargo workspace, tests, assets, documentation, Apache-2.0 license and third-part
 notices. `upstream-provenance.json` records the source commit and SHA-256 digest
 of every imported file. Upstream crate names are retained for comparison.
 The adapter renders snapshots and the selected live window’s pane arrangement
-through the upstream painter. Keyboard input targets one selected pane. The browser preview supports authenticated keyboard input and bounded Cmd-V text paste. A local TypeScript helper reuses the existing daemon delivery validator;
-Rust reads bounded, complete publications off the UI thread. Window resizing uses daemon geometry authority. Source and exact-packaged helper tests qualify two-viewer controller handoff and geometry restoration on background/close; simultaneous geometry-claim denial and native-client competition remain unqualified (see `evidence/competing-viewers-2026-10-10/README.md`). Automatic reconnect is not implemented. Native text composition is
+through the upstream painter. Keyboard input targets one selected pane. The browser preview supports authenticated keyboard input and bounded Cmd-V text paste. Rust receives and validates daemon pane-stream patches directly, applies changed
+rows, and prepares painting off the UI thread. Newly assembled apps use Rust for
+local discovery, fleet metadata/actions and SSH ownership; explicit legacy private-host
+configurations retain the TypeScript metadata broker. Window resizing uses daemon geometry authority. Production Rust-worker journeys cover two-viewer handoff, pane replacement, background geometry, input during resize, daemon replacement and sustained output. These are headless ownership/transport checks, not physical GUI latency or native-client competition measurements (see `evidence/competing-viewers-2026-10-10/README.md` for the historical helper baseline). Verified fleet terminals now retry transport retirement automatically with fresh session and pane authority; protocol/replica faults still require explicit recovery. Native text composition is
 implemented with further IME qualification pending. If you click or type before
 keyboard input is ready, the preview keeps input interrupted until you click the
 ready terminal again and retype. It never replays discarded input. This also
@@ -24,23 +31,32 @@ The root MIT license does not replace the imported source's license. Preserve
 `upstream/LICENSE`, `upstream/NOTICE`, nested notices and attribution; identify
 modified upstream files when adapting them.
 
+The opt-in native discovery path now persists favorite and collapsed-group
+controls through the verified local daemon, including while viewing SSH. Action
+revisions and private owner stamps reject stale writes. Recent visits are recorded only after a verified live attachment, with bounded
+owner-fenced writes. Back/forward navigation now resolves destinations through the current verified
+catalog and commits on live attachment, including restored scrollback. Previously visited saved machines can now be re-verified and rediscovered for
+cross-machine history navigation. Concurrent multi-route fleet aggregation and
+persistent cached route discovery remain pending. See [research progress](research/README.md).
+
 ## Development boundary
 
-The production CLI, daemon and OpenTUI client remain the release surface. This
-Cargo workspace is outside pnpm and npm publication. Native validation will be
-separate until the first adapter is qualified. No Rust rewrite of the daemon is
+The production CLI, daemon and OpenTUI client remain the npm release surface. This
+Cargo workspace is outside pnpm and npm publication; native alpha distribution
+and validation are separate. No Rust rewrite of the daemon is
 required.
 
-Use the dedicated `tmux-ide-gpui` binary. Do not launch the retained `herdr-gpui`
-reference binary against personal state: it still has Herdr
-connection/bootstrap behavior, update endpoints, branding, and product actions.
+The crate builds one binary, `tmux-ide-gpui`. The Herdr reference binary and the
+Herdr modules only it used were removed; git history keeps them.
 Do not run its installer, release scripts, or hook setup in this monorepo.
 Some upstream scripts resolve the Git root and must be adapted before use here.
 Nested `.github` workflows are source reference only; GitHub does not run them.
 
-The root GPUI CI workflow includes a macOS ARM64 packaging gate. It assembles an
-unsigned development app from the native build receipt and runs artifact checks
-plus source and exact-packaged daemon compatibility checks. To run that gate locally with the pinned Rust toolchain,
+The root GPUI CI workflow includes a macOS ARM64 packaging gate. From one native
+build receipt it assembles two unsigned apps: the default app, which ships without
+Node, and a development app with the supplied Node 24 runtime. It runs the artifact
+checks on both, and the source and exact-packaged daemon compatibility checks on the
+development app. To run that gate locally with the pinned Rust toolchain,
 packaging dependencies and cargo-about 0.9.2 available:
 
 ```bash
@@ -80,35 +96,41 @@ and installed-symbol fallback resolution. Preferences are saved in
 `$HOME/.config/tmux-ide/gpui-fonts.json` when no absolute XDG config directory is
 set. A save failure is shown in the picker and retains the previous setting.
 
+Installed fonts are listed in the background once the window has drawn its
+first frame, not during app start, and every launch lists them afresh, so a
+Nerd Font installed since the last launch is used for terminal icons. If that
+listing comes back empty, the saved font stays in use and opening the picker
+lists fonts again.
+
 These preferences belong to the GPUI client; they do not change tmux, the TUI,
 Herdr, or another terminal application's settings. Ghostty configuration/theme
 import is not implemented. A private native save/restart test verified Menlo 15
 restoration with no terminal input leakage and surviving source processes; see
-`evidence/terminal-font-2026-10-12/`. Broader font/IME and geometry qualification
+[`evidence/terminal-font-2026-10-12/`](https://github.com/wavyrai/tmux-ide/tree/a0cff52add18dfdf9d4acbf3ec40a44c7542b7cd/apps/tmux-gpui/evidence/terminal-font-2026-10-12). Broader font/IME and geometry qualification
 remains open.
 
 ## Agent indicators and pane headers
 
 Home, the workspace agent list, and matching pane headers use the TUI's status
 vocabulary: Working (animated marker), Needs input, Done, Failed, Idle, and
-Unknown/Unavailable. Animation is presentation-only: one shared clock updates
-visible working markers without polling the daemon. Native reduced-motion
-preference wiring remains pending; the indicator supports a static rendering.
+Unknown/Unavailable. Animation is presentation-only: one small overlay view
+redraws the working markers every 80 ms without polling the daemon or repainting
+the terminal, and it stops while the window is hidden or minimised. While the
+window is inactive or a picker or menu is open, a working marker shows a still
+spinner frame. Native reduced-motion preference wiring remains pending.
 
-Use **⋯** in a pane header for Rename, Zoom/Restore, Split right/down, and Close.
+Panes are separate rounded cards with 34-pixel headers, 10-pixel content padding and 10-pixel gutters. Each header shares its terminal background; Close sits at the far right. Painting, pointer input, selection, links, IME placement and divider dragging use the same card coordinate map. Chrome is deducted from the terminal fit before resizing, rather than covering terminal cells. Expand/restore and Close have direct labeled icon buttons; Close always asks for confirmation. Narrow headers keep these actions in **⋯**, alongside Rename and Split right/down.
 Opening another pane's menu first selects that exact pane and waits for its
 current action capability. Close keeps its confirmation. **Back to live** and
-**Restore** appear in the selected pane header when applicable. Compact headers
-reserve control space; lower headers use verified separator cells and preserve
-the remaining divider drag area. The footer continues to show connection status.
+**Restore** appear in the selected pane header when applicable (Restore uses the icon when space allows). Compact headers
+reserve control space; headers occupy dedicated space outside terminal cells, and dividers live in the gutters. Normal mode has no connection footer. Exceptional notices temporarily occupy the titlebar context area without covering terminal cells or changing their geometry. Developer mode retains its diagnostic footer.
 
 ## Preview release gates
 
 See [INTEGRATION.md](INTEGRATION.md). Native session/pane selection, multi-pane
 rendering, keyboard/paste, bounded history navigation, whole-pane copy and initial
 text composition are implemented. Read-only local daemon discovery is available.
-Primary Home/Terminals tabs are separate from tmux window tabs. The workspace
-sidebar lists sessions; each selected session has one window strip above its panes.
+The compact titlebar contains the sidebar toggle, Home, horizontally scrolling tmux window tabs, and a new-window button. On Home, the + button creates a local session. The sidebar switches sessions. Rounded pane cards sit directly on the application background with compact gutters; there is no extra workspace background or second tab row.
 Home uses a full-width layout with the current session catalog and loading, empty
 and unavailable states. It hides the workspace sidebar unless a picker is open.
 The native switcher and theme picker are implemented. Remaining release gates include physical comparison
@@ -177,10 +199,10 @@ canonical replica, not that the GPU has painted. This prototype has not been ben
 ## Isolated live smoke test
 
 ```sh
-node --import tsx apps/tmux-gpui/bridge/live-smoke.mjs
+node --import tsx apps/tmux-gpui/bridge/manual/live-smoke.mjs
 # Include the real native window after building it:
 TMUX_GPUI_TEST_BINARY="$PWD/apps/tmux-gpui/upstream/target/debug/tmux-ide-gpui" \
-  node --import tsx apps/tmux-gpui/bridge/live-smoke.mjs
+  node --import tsx apps/tmux-gpui/bridge/manual/live-smoke.mjs
 ```
 
 Use the repository's supported Node/Bun/tmux toolchain on PATH. The existing product
@@ -209,15 +231,94 @@ against its private daemon and confirms that the daemon remains available.
 
 ## Dedicated native entry
 
-`cargo build --locked -p herdr-gpui --bin tmux-ide-gpui` builds the native preview.
+`cargo build --locked -p tmux-ide-gpui --bin tmux-ide-gpui` builds the native preview.
 The upstream package name is retained for provenance; the executable name is
 `tmux-ide-gpui`. No arguments opens the disconnected preview window. `--help`
 describes supported modes; `--version` identifies an unreleased development
 preview rather than copying upstream's version as a tmux-ide release.
 
-The original `herdr-gpui` executable remains for reference checks only. Shared
-modules currently compile through a library; this isolates startup dispatch but
-does not constitute dependency trimming or a signed application package.
+Only the tmux path and the few helpers it shares remain in the crate's library;
+the Herdr window, settings, browser tabs, updater and cloud modules were removed
+with their dependencies.
+
+## Native terminal data path
+
+The source browser uses the direct Rust terminal route by default. Use an
+explicit private host configuration for isolated tests. This source change
+does not change an already installed release.
+
+Newly assembled apps use `--tmux-native-local` when launched without arguments.
+Rust derives the canonical daemon record from the validated local runtime namespace,
+then owns discovery, saved-machine registry/catalog operations, SSH connections,
+agent observations and selection, tab state, and authenticated metadata/actions.
+Rust also owns terminal WebSockets, ordered input and acknowledgements, geometry,
+grid patches, history, and graphics. The normal app launch does not start Node.
+This source change does not update an installed release.
+
+Passing an explicit legacy private-host configuration to the packaged launcher
+uses the Rust-owned Node metadata helper. That compatibility path and the
+development preview supervisor are development-only: the default app does not
+bundle Node or the bridge, and there the legacy route exits with one message that
+names the missing runtime. Development apps assembled with `--node` keep the route.
+The normal path has no automatic helper fallback.
+Native startup, first-run setup and actual-window behavior still require final
+packaged qualification before release. See the research log for scoped evidence.
+
+Authenticated local pixel surfaces are available to compatible providers; see
+[the shared-storage integration](research/pixel-surfaces/README.md). Ordinary
+terminal applications retain the Kitty graphics path. [Sparse grid hashing measurements](research/daemon-hashing/README.md)
+cover reducer work only, not interactive latency.
+
+Canonical rows retain immutable shared identity. The native projection converts
+changed rows and recomposes affected canvas rows, while retaining unchanged rows
+for painting. Cursor-only updates reuse cell rows. Regression tests count converted
+and copied cells, but those counts are not a measured latency or frame-rate claim.
+
+The direct native client offers binary cells and deferred alternate-screen history through capability 111, or capability
+112 when canonical discovery proves same-host image access. These bundles include
+binary graphics (107); 112 also includes local image leases (108). The request
+keeps the existing `semantic-compact-v1` encoding string so older daemons accept
+it and use compact JSON cells plus capability-101 graphics. A new daemon selects
+`semantic-binary-v1` only for an explicit binary-cell offer. The broker records
+that offer in the native handoff; Rust must reject an unsolicited binary upgrade.
+Binary representation hashes cover the encoded bytes; canonical state hashes and
+acknowledgements continue to cover the same decoded terminal state.
+
+Interactive panes need tmux-ide 2.9.11 or later. The fallbacks above and below
+cover optional capabilities only. Input lifetime (capability 105, first released
+in 2.9.11) has no fallback: without it, typed input could reach a pane that was
+respawned. When a daemon's interactive `ready` frame omits `inputLifetime`, the
+app stops that terminal and shows "This tmux-ide daemon (2.9.7) is too old for
+the Mac app. Update tmux-ide to 2.9.11 or later: tmux-ide update", with the
+daemon's own version, instead of reconnecting.
+
+Cold alternate-screen subscriptions may negotiate `deferred-history-v1`. Their
+TCP1 projection contains visible rows and a history commitment, with a separate
+receipt that never acknowledges a complete terminal state. Leaving the alternate
+screen or requesting history loads a complete snapshot before history-dependent
+interaction resumes. Existing complete subscriptions retain their history.
+
+Graphics capability 107 negotiates bounded binary image chunks directly from the
+daemon to Rust. PNG and already-compressed image bytes remain unchanged; older
+daemons retain JSON/base64 delivery. Both paths use the same lifetime, ordering,
+size and digest checks.
+
+On proven same-host connections, capability 108 supersedes 107 and negotiates
+immutable file leases instead of sending image bytes through the socket. The
+broker derives the permitted directory from canonical daemon discovery; a
+loopback URL or copied host configuration does not grant file access. Rust reads
+bounded chunks on a dedicated worker, rejects symlinks and unexpected metadata,
+verifies the full file digest, and releases the lease. Expired or unavailable
+files fall back to inline binary delivery. Old daemons retain JSON graphics;
+SSH and Windows use network delivery. File transfer removes base64 and socket
+copies, but image decoding and GPU upload still require memory and work.
+
+## Opening terminal links
+
+Use **Cmd-click** on macOS or **Ctrl-click** to open a visible HTTP or HTTPS URL
+in the selected terminal pane. Ordinary clicks retain terminal selection and
+application mouse behavior. Link activation requires a current painted pane;
+stale retained previews cannot open links.
 
 ## Transitional session picker
 
@@ -288,6 +389,13 @@ pane in its current window, then displays that window's pane feeds in tmux's arr
 If the current window or active pane cannot be identified uniquely, choose a window
 explicitly. Opening a session does not replay input: click the ready terminal before typing.
 Click another pane directly on the canvas to select it and focus keyboard input.
+On macOS, **Cmd-Option-arrow** focuses an adjacent visible pane without wrapping;
+**Cmd-Shift-Return** zooms or restores the focused pane. **Cmd-D** splits right,
+**Cmd-Shift-D** splits down, **Cmd-T** creates a terminal window, and **Cmd-W**
+opens the close-pane confirmation. **Cmd-Shift-[ / ]** switches to the previous
+or next window in the current session. Pane menus show these
+shortcuts in key badges; the zoom button also names its shortcut on hover.
+These shortcuts leave text fields, dialogs and active composition in control.
 Clicks in separator gaps are ignored; layout changes must be painted before a
 click can select a pane. Current subscriptions are limited to 24 panes across the
 session. Window tabs and session navigation use verified daemon metadata. Native
@@ -331,10 +439,18 @@ Physical editor-launch qualification is still pending.
 Project presentation remains future work. Other catalog updates are explicit through Refresh. After a daemon replacement, select Refresh sessions,
 then choose a session and pane again. For explicit files, update connection details
 first. The browser process stays open. Recovery is explicit through Refresh and
-reselection; it does not automatically reconnect. Switching clears the displayed
-frame immediately, retires the previous pane connection, and only admits responses
-for the new selection. Each pane uses the canonical delivery helper with an interactive capability and
+reselection for private host-file connections; verified fleet terminals use the bounded recovery described below. Selecting another pane in the same window retains its painted
+frame and live session, while gating input until the new selection is qualified.
+Switching windows retires the previous presentation and only admits responses
+for the new selection. Each pane uses canonical delivery with an interactive capability and
 explicit daemon input authority. The GUI receives display state, never the daemon owner token.
+
+The browser supplies control/catalog metadata while Rust consumes terminal
+delivery directly, as described above. The older helper binary protocol remains
+a diagnostic surface, not the native browser's terminal route.
+See [binary protocol](bridge/binary-protocol.md) for diagnostic bounds and
+[visible-response qualification](bridge/performance/README.md) for measurement
+requirements. These mechanisms alone do not establish GUI/TUI latency parity.
 
 The native browser is local-only. If it says Window inactive, activate the app
 through macOS first. Once its status says Keyboard ready, click the terminal to
@@ -354,12 +470,13 @@ or UI test driver to select panes in both fixture sessions, then click the termi
 and type `echo gpui` followed by Enter. The test checks the exact output row. It uses private fixture
 state and cleans up only its own processes and tmux server.
 
-The sidebar highlights the selected session. Window tabs appear only above the
-terminal canvas; selected-pane context and connection status appear below it.
-The titlebar follows Home or the selected session. Switch, Theme and Refresh live
-in the workspace sidebar footer, with Browse/Theme/Refresh actions on Home.
-Terminals returns to the last selected session only after a live catalog confirms
-its exact identity; otherwise it opens the picker. Broader TUI Home agent-roster
+The sidebar highlights the selected session and owns session navigation. Window tabs
+switch tmux windows within that session, with a separate + to create a window.
+On Home, the titlebar + opens local session creation; in a workspace it creates a tmux window. **Cmd+P** opens the session picker.
+**F9 / Shift+F9** cycle retained sessions using verified activation capabilities.
+Switch, Theme and Refresh remain in the workspace sidebar footer. Routine
+Connected status is shown with the machine in the sidebar; workspace notices
+appear only when there is actionable status. Broader TUI Home agent-roster
 parity remains part of INTEGRATION.md.
 
 Cmd-V pastes up to 64 KiB of UTF-8 text into the focused terminal. Empty,
@@ -420,16 +537,15 @@ without `tsx`, `node_modules`, or a source checkout. Existing output directories
 are rejected. `bridge-manifest.json` records file sizes and SHA-256 hashes;
 these hashes are not a signature or runtime trust check.
 
-This is only the bridge payload. A distributable application must still include
-the qualified Node runtime, native executable, license notices, source provenance,
+This is only the bridge payload, for development apps assembled with `--node`. A
+distributable application must still include the native executable, license notices, source provenance,
 signing/notarization, and the install/update flow. No native release is produced
 by this command.
 
 ## Local macOS development app
 
 Build the ARM64 native executable with a local integrity receipt, then assemble it
-and an explicit Node 24 runtime into a
-new `.app` directory (macOS only). Python 3 and the workspace Rust toolchain
+into a new `.app` directory (macOS only). The default app has no Node runtime. Python 3 and the workspace Rust toolchain
 must be on PATH, with `cargo-about 0.9.2` installed (`cargo install cargo-about
 --version 0.9.2 --locked --features cli`). Notice generation may need network
 access to fetch dependency sources. The native wrapper builds offline; populate
@@ -440,14 +556,16 @@ if needed:
 node apps/tmux-gpui/scripts/build-native-release.mjs /absolute/path/native-build.json
 # Use the native executable path printed by the build command.
 node apps/tmux-gpui/scripts/assemble-local-app.mjs \
-  /absolute/path/tmux-ide-gpui /absolute/path/node \
-  /absolute/path/node-LICENSE /absolute/path/native-build.json \
+  /absolute/path/tmux-ide-gpui /absolute/path/native-build.json \
   '/absolute/path/Tmux IDE Development.app'
 ```
 
+Add `--node /absolute/path/node --node-license /absolute/path/node-LICENSE` (Node 24)
+to bundle Node, its license and the bridge for the legacy helper routes.
+`--browser-payload` needs no Node: its launcher runs on the browser engine's own
+Node mode (`ELECTRON_RUN_AS_NODE=1`).
 The assembler rejects existing destinations, wrong architectures and non-system
-linked libraries. It includes the bundled bridge, Node license and project/Herdr
-notices. Each assembly generates `RUST-THIRD-PARTY-NOTICES.txt` from the locked
+linked libraries. It includes the project/Herdr notices. Each assembly generates `RUST-THIRD-PARTY-NOTICES.txt` from the locked
 workspace and records its hash. Generation failure aborts assembly and removes
 only the newly created app. The report covers all features and the configured
 platform union, including build/dev dependencies; it is a conservative superset,
@@ -461,23 +579,33 @@ attestation. Compiler/dependency caches and the host SDK remain outside that
 claim. Set CARGO_HOME/RUSTUP_HOME explicitly when using a separate toolchain.
 The launcher discovers an already running local canonical daemon; it
 does not install or start one. Its optional argument is a private host JSON file.
-It clears inherited `NODE_OPTIONS` and `NODE_PATH` and uses bundled runtime paths.
+It clears inherited `NODE_OPTIONS` and `NODE_PATH` and uses bundled runtime paths;
+without a bundled Node the private-host form fails with the development-only message.
 
-This is a development app, not a distributable release. Signing, notarization,
-complete dependency notices, source provenance, clean-machine qualification and
-installation/update remain outstanding. The manifest explicitly records that
-qualification is incomplete; its hashes are not signatures.
+The app produced by the command above is an unsigned development candidate, not
+the published alpha. Each new release candidate still requires signing, notarization,
+notice/provenance review, clean-machine qualification and installation/update checks.
+The manifest explicitly records that qualification is incomplete; its hashes are not signatures.
 
 If initial host discovery/configuration is unavailable, the browser helper stays
 open with input disabled. Start the supported daemon (or correct the explicit
 private host file), then use Refresh sessions and select the fresh session/pane.
 A failed refresh clears the old frame and input authority. This is explicit
-recovery; automatic reconnect is not implemented.
+recovery for initial discovery and private host-file previews. Once a fleet terminal has
+accepted a live frame, transport or machine-route retirement triggers bounded automatic
+recovery of that exact machine/server/live-session/pane. A fresh catalog and input grant
+are required; input is never replayed, and a same-name replacement is never selected.
+Navigation or explicit disconnect cancels pending recovery. Protocol/replica validation
+faults remain explicit failures. Exhaustion asks for refresh/reselection.
+
+CI covers this recovery headlessly with `bridge/startup-recovery-smoke.mjs` and
+`bridge/discovery-recovery-smoke.mjs`. That does not replace native GUI or real
+remote SSH qualification.
 
 To repeat the physical daemon-replacement check, set `TMUX_GPUI_TEST_APP` to an
 explicit freshly assembled app and `TMUX_GPUI_RECOVERY_SIGNAL` to a new absolute
 signal-file path, then run
-`node --import tsx apps/tmux-gpui/bridge/native-recovery-smoke.mjs`
+`node --import tsx apps/tmux-gpui/bridge/manual/native-recovery-smoke.mjs`
 from the repository root with the
 fixture's supported tmux runtime on PATH. Follow its printed UI steps. Create the
 signal file only after observing the unavailable/blank terminal. The fixture owns
@@ -492,11 +620,12 @@ to an explicitly assembled app; a headless green result does not qualify packagi
 
 `.github/workflows/gpui-preview.yml` defines an independent preview lane: Linux
 bridge checks and isolated startup/replacement/session journeys using supported
-system tmux, plus macOS Rust formatting, file-size checks, both Clippy and test
-feature configurations, the dedicated release executable build and its isolated
-CLI integration tests. Run those release checks from `upstream/` with
-`cargo build --locked --release -p herdr-gpui --bin tmux-ide-gpui` and
-`cargo test --locked --release -p herdr-gpui --test tmux_cli`. The lane does
+system tmux, plus macOS Rust formatting, file-size checks, both Clippy feature
+configurations, one `--all-features` test run (which includes the isolated CLI
+integration tests) and the dedicated release executable build. It runs only when
+a pull request or push changes a path in the workflow's `paths:` list. Run the
+release build from `upstream/` with
+`cargo build --locked --release -p tmux-ide-gpui --bin tmux-ide-gpui`. The lane does
 not publish artifacts, sign, install, or operate production sessions. Physical UI,
 bundled runtime, display-scale and release/install/update qualification remain
 separate required evidence. A local check does not establish a hosted CI pass.
@@ -543,8 +672,9 @@ verification. Supply trusted `teamId`, `bundleId`, `architecture` and
 `minimumMacOS` policy from the release configuration, never from the candidate.
 It checks Developer ID signatures on the app and both bundled binaries, enabled
 Gatekeeper, architecture and macOS deployment requirements without running them.
-The current unsigned development app deliberately fails this verifier. Signed
-acceptance and the public installer entry are not yet qualified; see VALIDATION.md.
+The unsigned development app deliberately fails this verifier. The published alpha
+has a separate signed install path; see the [native alpha guide](../../docs/content/docs/native-alpha.mdx).
+Current-branch acceptance must be recorded separately in VALIDATION.md.
 
 ### Local staged-app install/update command
 
@@ -580,9 +710,10 @@ An interrupted first install with no selected app can be recovered with
 `keep-current` after verifying and quarantining its candidate, then retried.
 Recovery retains orphan bytes under `.recovered-*` for inspection.
 This is the local staged-app flow, not the public download/bootstrap
-installer. A signed positive install and clean-machine qualification remain open.
+installer. The published alpha uses this staged-app interface after pinned download
+verification; a fresh second-Mac qualification remains open.
 
-### Release-download components (not a public installer)
+### Experimental authenticated release-download components
 
 `preview-release-manifest.mjs` authenticates exact manifest bytes using an
 independently supplied Ed25519 public key. `preview-release-download.mjs` uses
@@ -599,8 +730,10 @@ this format. Callers own successful staging cleanup. These staging modules do no
 macOS verifier, including authenticated CFBundleShortVersionString binding on
 the copied candidate. Cancellation during verification prevents activation;
 cleanup errors explicitly distinguish a confirmed activation from an uncertain
-transaction outcome. The same installer CLI now exposes explicit-version release mode; publisher trust and a live endpoint are not configured yet.
-Signed positive installation remains unqualified; see VALIDATION.md.
+transaction outcome. The same installer CLI exposes an experimental explicit-version
+release mode. Its Ed25519 manifest endpoint and publisher trust are not the public
+alpha's delivery mechanism: `docs/public/install-native-alpha.sh` pins the published
+archive and installer checksums and uses the staged-app interface instead.
 
 ### Standalone installer payload (local preparation)
 
@@ -614,10 +747,18 @@ node /absolute/new-output-directory/tmux-ide-install.mjs --help
 The payload includes the MIT license and a SHA-256 inventory. It needs an existing
 Node24 runtime and independently trusted policy, but no checkout or node_modules.
 It preserves the same install/update/rollback commands and mandatory macOS
-verification. This is not a published bootstrap installer; the inventory is not
-a signature or a trust root. Signed installation and public delivery remain open.
+verification. This build command alone does not create a bootstrap installer, and
+its inventory is not a signature or a trust root. The published alpha bootstrap
+uses `install.sh --native-alpha` and verifies the pinned native installer. Exact
+CLI prerequisites, release URLs and checksums are defined in
+[`docs/public/install.sh`](../../docs/public/install.sh). Building or qualifying a
+new CLI/native candidate does not update those pins or publish a release. Activate
+new pins only after the corresponding artifacts are available and the isolated
+install/update journey passes. The native installer manages the
+`~/Applications/Tmux IDE Alpha.app` entry and explicit update/rollback/uninstall
+flow documented in the [native alpha guide](../../docs/content/docs/native-alpha.mdx).
 
-### Explicit-version release install/update (not published yet)
+### Experimental explicit-version manifest install/update
 
 With Node24, the same installer accepts release mode by omitting `--app`:
 
@@ -643,12 +784,14 @@ confirmed activation is not rolled back by subsequent cancellation/cleanup failu
 SIGKILL/power loss remain separate interruption cases. Rollback accepts either
 trusted policy form; detach preserves stored versions/configuration.
 
-No native release endpoint or publisher policy is available yet, and successful
-Apple-signed installation remains unqualified. Install/update/rollback return
+No public endpoint or publisher key is configured for this experimental manifest
+flow. Use the public alpha guide for the published pinned-download flow.
+Install/update/rollback return
 `launchPath`, the stable `<prefix>/TmuxIDE.app` alias. New stored versions retain
 a named `.app` bundle; detach removes the alias and current link but keeps versions.
-Foundation metadata inspection passes; physical Finder/LaunchServices launch is
-still pending. Do not treat these commands as a released user flow.
+Foundation metadata inspection passes; physical Finder/LaunchServices acceptance
+must be verified for each candidate. These manifest-mode examples are not the
+published alpha user flow.
 
 ### Prepare an archive (packaging only)
 
@@ -708,15 +851,16 @@ It is not full Herdr palette or integration parity.
 
 ### Application and tmux navigation (source preview)
 
-Home and Terminals are separate application tabs. Home uses the full window;
-the workspace sidebar lists sessions, while a single strip above the terminal
-canvas lists tmux windows. The selected pane and connection status sit below
-the canvas. Cmd+K can select individual panes. Exact daemon identities, rather
-than labels, determine the target; stale catalog callbacks are rejected.
+Home and tmux window tabs share one titlebar row. Home uses the full window;
+the workspace sidebar lists sessions. Pane cards sit directly below the titlebar,
+without a second tab row or workspace wrapper. Normal mode has no connection
+footer; exceptional notices use a bounded titlebar area. Cmd+K can select
+individual panes. Exact daemon identities, rather than labels, determine the
+target; stale catalog callbacks are rejected.
 
-Returning to Terminals reuses the previous session only after a live catalog
-verifies it. The earlier nested sidebar prototype is superseded. See
-`evidence/native-structure-2026-10-09/` for native layout and packaged checks.
+The titlebar keeps Home, the sidebar toggle and the new-window button accessible
+while tmux window tabs scroll horizontally. On Home, the + button creates a
+local session. Earlier session-tab and two-row navigation previews are superseded.
 
 The source window strip now reveals the selected tmux window after semantic
 selection, tab order/label or width changes. Ordinary redraws preserve manual
@@ -735,37 +879,28 @@ accounting and no terminal input leakage. The exact artifact, screenshots and
 remaining nested-layout limits are in `evidence/native-divider-2026-10-10/`.
 This is scoped evidence, not qualification of every later app build.
 
-Drag a separator to resize the actual tmux layout continuously. The cursor
-identifies available handles. The bridge reuses the TUI resize transaction: one
-request in flight, only the latest desired size retained, and the exact final
-target sent on release. Daemon receipts and coherent layout/surface geometry
-govern progress; the client renders the verified updated layout. It does
-not stretch terminal pixels or create a separate local pane layout.
+The direct Rust client previews separator movement locally and commits one exact
+canonical split boundary on release. Terminal processes keep their geometry during
+the drag, avoiding repeated reflow. The final daemon layout remains authoritative;
+preview guides do not stretch terminal pixels or alter the terminal replica.
 
-Output can continue during a drag. Session, topology, pane lifetime, focus or
-coordinate changes cancel the gesture; Escape cancels it too. Divider dragging
-is isolated from text selection and terminal input. Outer tmux pane-status rows
-are accounted for when requesting a content height.
+Canonical split-tree handles identify the exact boundary, including nested splits.
+Session, topology, pane lifetime, focus or coordinate changes cancel the gesture;
+Escape cancels it too. Divider dragging is isolated from text selection and terminal
+input. Pane-status rows are accounted for when requesting a content height.
 
-Simple splits and unambiguous T-shaped segments are supported. Some deeper
-nested outer dividers intentionally have no handle: a pane-size request can
-move an inner edge instead. Those need exact split-tree targeting before being
-enabled. Continuous resizing is implemented in the current local preview; older
-helpers without gesture support retain release-only behavior. The client never
-predicts terminal geometry. Current source and packaged bridge tests verify
-changes before release, final target preservation and presence cancellation on
-both axes. Physical smoothness of this build remains unqualified; see
-`evidence/continuous-resize-2026-10-10/`.
-
-The isolated real-tmux check is:
+The production-worker fixture verifies unchanged geometry before release, exact
+column and row targets, status-row accounting and focus cancellation. Use the
+bundled tmux build on PATH and the opt-in native journey driver:
 
 ```bash
-node --import tsx apps/tmux-gpui/bridge/pane-resize-smoke.mjs
-node --import tsx apps/tmux-gpui/bridge/pane-resize-gesture-smoke.mjs
+TMUX_GPUI_JOURNEY_PROBE=/absolute/path/to/tmux_native_journey \
+  node --import tsx apps/tmux-gpui/bridge/pane-resize-gesture-smoke.mjs
 ```
 
-Set `TMUX_GPUI_TEST_BINARY` to an explicit native executable for the interactive
-fixture. It opens only disposable sessions and asks for two divider drags.
+The historical continuous-resize evidence in
+`evidence/continuous-resize-2026-10-10/` describes the older helper route; it does
+not qualify physical smoothness of this direct Rust build.
 
 ### Shared tmux-ide themes (source preview)
 
@@ -793,10 +928,12 @@ appearance and macOS System transitions remain unverified.
 
 ### Native sidebar material (source preview)
 
-The source preview now uses Apple's actual `NSGlassEffectView` for the sidebar
-on supported macOS versions, with the active theme's tint and appearance. The
-terminal remains opaque. Older systems and Reduce Transparency/Increase Contrast
-use opaque chrome; runtime accessibility notifications request a redraw.
+The sidebar and title bar sit on Bezel's chrome material: the window blurs the
+desktop behind it and the palette's frost, tinted with the theme's surface,
+covers it in dark themes. Light themes keep opaque chrome. Text on the chrome is
+inked to 4.5:1 over any desktop. The terminal remains opaque. Reduce
+Transparency/Increase Contrast use opaque chrome; runtime accessibility
+notifications request a redraw.
 
 A separate synthetic debug window verified native activation, clickable theme
 selection, dark/light changes, narrow-width clipping and clean exit. This is
@@ -862,9 +999,9 @@ original pane remains selected; the new pane becomes selectable after verified
 daemon inventory and layout refresh. A background transition, changed selection,
 or uncertain result cancels the follow-up rather than replaying the split.
 Both split directions were physically qualified on the local macOS preview; see
-`evidence/native-pane-split-2026-10-10/`. Session pane counts refresh from canonical
+[`evidence/native-pane-split-2026-10-10/`](https://github.com/wavyrai/tmux-ide/tree/a0cff52add18dfdf9d4acbf3ec40a44c7542b7cd/apps/tmux-gpui/evidence/native-pane-split-2026-10-10). Session pane counts refresh from canonical
 metadata after splitting; the follow-up qualification is recorded in
-`evidence/split-session-count-2026-10-10/`.
+[`evidence/split-session-count-2026-10-10/`](https://github.com/wavyrai/tmux-ide/tree/a0cff52add18dfdf9d4acbf3ec40a44c7542b7cd/apps/tmux-gpui/evidence/split-session-count-2026-10-10).
 
 Run the isolated real-tmux path with:
 
@@ -881,3 +1018,116 @@ See [SIGNING.md](SIGNING.md) for the explicit existing-identity notarization com
 Node entitlement review, pre/post-signing provenance, and remaining release gates.
 The producer does not import credentials or publish artifacts. Its tool-injected
 checks do not establish successful Developer ID signing or clean-machine installation.
+
+### Precise graphics dimensions
+
+Graphics capability 104 extends capability 103's rounded device-pixel cell
+metrics with optional `precise: { width, height }` thousandths of a device pixel
+in `terminal-cell-pixels`. The daemon advertises `preciseCellPixels: true` before
+the bridge sends this extension. Older daemons continue receiving rounded
+metrics only; interactive panes still need 2.9.11 or later (see input
+lifetime above). Patched tmux accepts `refresh-client -C COLSxROWS/WxH/MWxMH`;
+older patched servers ignore the second suffix. CSI 14t and PTY pixel dimensions
+round the full pane span once, avoiding accumulated cell rounding, while CSI 16t
+keeps its integer cell size. Fractional origins may differ from snapped endpoint
+spans by one device pixel. The reported PTY dimensions saturate at 65535 pixels.
+
+Cursor image placements clip at pane edges and survive capture replay when cell
+dimensions, history origin and active buffer remain unchanged. Reflow, changed
+history origins, buffer switches and authoritative stream resets drop these
+best-effort anchors; Unicode placeholder placements remain the durable option.
+
+### Direct Rust journey drivers
+
+The metadata broker no longer publishes terminal cells or input readiness. The
+session-open fixture connects the production Rust controller to its handoff pipe:
+
+```bash
+cargo build --locked --manifest-path apps/tmux-gpui/upstream/Cargo.toml \
+  -p herdr-client --example tmux_journey_probe
+export TMUX_GPUI_JOURNEY_PROBE="$PWD/apps/tmux-gpui/upstream/target/debug/examples/tmux_journey_probe"
+node --import tsx apps/tmux-gpui/bridge/session-open-smoke.mjs
+```
+
+The window-creation, close-pane and browser-history fixtures use the actual native
+worker, including its input, action, history and presentation owners. On macOS:
+
+```bash
+cargo build --locked --manifest-path apps/tmux-gpui/upstream/Cargo.toml \
+  -p tmux-ide-gpui --features integration-test --example tmux_native_journey
+export TMUX_GPUI_JOURNEY_PROBE="$PWD/apps/tmux-gpui/upstream/target/debug/examples/tmux_native_journey"
+node scripts/build-cli.mjs --outfile "$PWD/.tasks/gpui-journey/cli.mjs"
+export TMUX_GPUI_TEST_CLI="$PWD/.tasks/gpui-journey/cli.mjs"
+node --import tsx apps/tmux-gpui/bridge/new-window-smoke.mjs
+node --import tsx apps/tmux-gpui/bridge/browser-history-smoke.mjs
+node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs
+```
+
+Adjust the executable paths if using `CARGO_TARGET_DIR`. These drivers use bounded
+pipes and isolated fixture daemons. The native worker driver is opt-in through
+`integration-test`; it exposes fixture state and text for assertions and must not
+be attached to personal sessions. It does not exercise OS keyboard delivery, GPU
+painting, physical scrolling or SSH latency and is not a performance benchmark.
+
+### Native catalog development entries
+
+The development binary can use Rust catalog and SSH ownership directly:
+
+```bash
+tmux-ide-gpui --tmux-native-daemon /absolute/private/daemon.json
+tmux-ide-gpui --tmux-native-ssh user@host
+# Optionally pin a previously verified remote environment UUID:
+tmux-ide-gpui --tmux-native-ssh user@host --environment UUID
+# Retain a separately verified local registry while starting on SSH:
+tmux-ide-gpui --tmux-native-ssh user@host --local-daemon /absolute/private/daemon.json
+```
+
+These entries require an existing compatible daemon; they do not install or start
+one. SSH uses noninteractive OpenSSH authentication and existing host trust.
+The SSH entry shares one owned forward between independent foreground and layout
+HTTP lanes and verifies the peer on each terminal socket before redemption.
+Interrupted terminals now use bounded automatic rediscovery, preserving the
+preferred pane. Recovery reopens the same server generation and session, or,
+after a local daemon restart, the session with the identical live session id
+on the same tmux server, when the catalog came from the same private daemon
+record. A restart gives the daemon a new generation, but the live session id
+hashes the tmux server pid, the session id and its creation time, so an
+identical id is the same tmux session incarnation. SSH recovery and any other
+mismatch fall back to "select a session". While the daemon is unreachable
+(connection refused, or its record missing), recovery retries with backoff
+from 250 ms doubling to a 4 s cap, for up to 30 s, under "Connection lost.
+Reconnecting…", then shows "Couldn't reconnect. Refresh sessions to try
+again.". Identity failures and a too-old daemon stop at once. Recovery
+defers while backgrounded; navigation cancels it, and mutations are never
+automatically replayed. Saved-profile selection and return-to-Local retain a separate local registry
+worker. The local entry provides that worker automatically; the SSH entry
+requires the explicit `--local-daemon` record for registry operations.
+Recovery and manual refresh revalidate saved-profile authority before replacement
+SSH discovery. An authenticated local registry watch also invalidates changed
+profiles during healthy connections. Disabling, removing or retargeting the
+selected profile retires its SSH route and returns to Local; unchanged heartbeat
+responses do not republish UI state. This watch requires the matching daemon
+watch endpoint. Native Add machine now saves through the local owner, preserves
+existing identity pins, and reconciles uncertain saves without replaying them.
+The client also supports add-only registry imports. The packaged launcher now
+uses native local discovery by default; the metadata helper remains available
+only through the explicit compatibility entry. See `research/README.md` for
+evidence and remaining work; these entries are not a performance-parity claim.
+
+### Native crate identity and session sidebar
+
+The application crate is `tmux-ide-gpui` in `upstream/crates/tmux-ide-gpui`.
+Release builds select `--bin tmux-ide-gpui`, the crate's only binary. Original
+provenance hashes retain their upstream `crates/herdr-gpui` paths. The `NOTICE` and the
+crate's attribution files continue to credit the original sources.
+
+The workspace sidebar leads with sessions beneath compact machine headings.
+Session rows have compact padding, neutral selection fills, and stable
+favorite/name ordering rather than jumping to the top when selected.
+A single populated server does not add a redundant heading; empty, offline,
+and multiple servers remain visible. Agent activity is nested only when the
+native observation carries the same machine, server generation and live
+session identity. Unmatched activity remains separately accessible. Titles,
+project names, activity and attention counts use observed metadata; branch,
+cwd and free-form task summaries require a future scoped display projection.
+No Git processes, terminal scraping or extra polling are used for sidebar rendering.

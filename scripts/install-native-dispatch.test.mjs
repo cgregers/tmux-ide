@@ -14,6 +14,10 @@ import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 const source = readFileSync(resolve("docs/public/install.sh"), "utf8");
+const nativeBootstrapDigest = source.match(
+  /\[ "\$\(digest "\$native_stage\/install\.sh"\)" = ([a-f0-9]{64}) \]/,
+)?.[1];
+assert.ok(nativeBootstrapDigest, "Native bootstrap checksum pin must exist");
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "native-dispatch-"));
@@ -44,7 +48,7 @@ function fixture(t) {
     entry,
     source
       .replace("# Native alpha is explicit;", override + "# Native alpha is explicit;")
-      .replace("586cdd1b094169bbc07373bc36974a234893f3221fa85e3cc1584591857b20f4", digest),
+      .replace(nativeBootstrapDigest, digest),
   );
   const paths = {
     TEST_NATIVE_ARGS: join(root, "native-args"),
@@ -59,13 +63,16 @@ function fixture(t) {
       encoding: "utf8",
       timeout: 10000,
     });
-  const runtime = (version = "2.9.5") => {
+  const runtime = (version = "2.9.17") => {
     const dir = join(home, ".local/share/tmux-ide/current/node/bin");
     mkdirSync(dir, { recursive: true });
     script(join(dir, "node"), "exit 0");
     const launcherDir = join(home, ".local/bin");
     mkdirSync(launcherDir, { recursive: true });
-    script(join(launcherDir, "tmux-ide"), `printf '%s\\n' 'tmux-ide v${version}'`);
+    script(
+      join(launcherDir, "tmux-ide"),
+      `[ -z "\${TEST_VERSION_FAIL:-}" ] || exit 12\n[ -z "\${TEST_VERSION_EMPTY:-}" ] || exit 0\nprintf '%s\\n' 'tmux-ide v${version}'`,
+    );
   };
   return { run, runtime, temp, paths, home };
 }
@@ -114,7 +121,7 @@ test("bootstrap failure is propagated before native fetch and runs subshell clea
   const f = fixture(t);
   assert.equal(f.run([], { TEST_CLI_FAIL: "1" }).status, 19);
   const args = readFileSync(f.paths.TEST_CLI_ARGS, "utf8").trimEnd().split("\n");
-  assert.ok(args.includes("2.9.5"));
+  assert.ok(args.includes("2.9.17"));
   assert.ok(args.includes("--no-claude-agent-teams"));
   assert.ok(existsSync(f.paths.TEST_MAIN_CLEANED));
   assert.ok(!existsSync(f.paths.TEST_FETCHED));
@@ -141,7 +148,7 @@ test("successful CLI prerequisite runs its own cleanup then continues native boo
   assert.ok(existsSync(f.paths.TEST_MAIN_CLEANED));
   assert.ok(existsSync(f.paths.TEST_NATIVE_ARGS));
   const args = readFileSync(f.paths.TEST_CLI_ARGS, "utf8").trimEnd().split("\n");
-  assert.equal(args[args.indexOf("--version") + 1], "2.9.5");
+  assert.equal(args[args.indexOf("--version") + 1], "2.9.17");
   assert.ok(args.includes("--no-claude-agent-teams"));
   assert.deepEqual(readdirSync(f.temp), []);
 });
@@ -150,7 +157,8 @@ test("dispatcher pin matches the maintained native bootstrap bytes", () => {
   const digest = createHash("sha256")
     .update(readFileSync(resolve("docs/public/install-native-alpha.sh")))
     .digest("hex");
-  assert.ok(source.includes(digest));
+  assert.equal(nativeBootstrapDigest, digest);
+  assert.ok(source.includes("native-alpha-2026110402/install-native-alpha-v10.sh"));
 });
 
 for (const args of [[], ["--update"]]) {
@@ -159,7 +167,7 @@ for (const args of [[], ["--update"]]) {
     f.runtime("2.9.4");
     assert.equal(f.run(args).status, 0);
     const bootstrap = readFileSync(f.paths.TEST_CLI_ARGS, "utf8").trimEnd().split("\n");
-    assert.equal(bootstrap[bootstrap.indexOf("--version") + 1], "2.9.5");
+    assert.equal(bootstrap[bootstrap.indexOf("--version") + 1], "2.9.17");
     assert.equal(bootstrap[bootstrap.indexOf("--prefix") + 1], join(f.home, ".local"));
     assert.ok(existsSync(f.paths.TEST_NATIVE_ARGS));
   });
@@ -181,11 +189,70 @@ test("old CLI bootstrap failure prevents native installation", (t) => {
 });
 
 for (const args of [[], ["--update"]]) {
-  test(`qualified CLI 2.9.6 is preserved before native ${args[0] || "install"}`, (t) => {
+  test(`qualified CLI 2.9.17 is preserved before native ${args[0] || "install"}`, (t) => {
     const f = fixture(t);
-    f.runtime("2.9.6");
+    f.runtime("2.9.17");
     assert.equal(f.run(args).status, 0);
     assert.ok(!existsSync(f.paths.TEST_CLI_ARGS));
     assert.ok(existsSync(f.paths.TEST_NATIVE_ARGS));
+  });
+}
+
+for (const version of [
+  "2.9.8",
+  "2.9.9",
+  "2.9.10",
+  "2.9.11",
+  "2.9.12",
+  "2.9.13",
+  "2.9.14",
+  "2.9.16",
+  "2.9.18",
+  "2.10.0",
+  "3.0.0",
+  "2.9.12-beta.1",
+  "unknown",
+]) {
+  test(`native install handles managed CLI ${version} without silent downgrade`, (t) => {
+    const f = fixture(t);
+    f.runtime(version);
+    const result = f.run();
+    if (
+      [
+        "2.9.8",
+        "2.9.9",
+        "2.9.10",
+        "2.9.11",
+        "2.9.12",
+        "2.9.13",
+        "2.9.14",
+        "2.9.15",
+        "2.9.16",
+      ].includes(version)
+    ) {
+      assert.equal(result.status, 0);
+      const args = readFileSync(f.paths.TEST_CLI_ARGS, "utf8").trimEnd().split("\n");
+      assert.equal(args[args.indexOf("--version") + 1], "2.9.17");
+      assert.ok(existsSync(f.paths.TEST_NATIVE_ARGS));
+    } else {
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /preserved.*not qualified/);
+      assert.ok(!existsSync(f.paths.TEST_CLI_ARGS));
+      assert.ok(!existsSync(f.paths.TEST_FETCHED));
+      assert.ok(!existsSync(f.paths.TEST_NATIVE_ARGS));
+    }
+  });
+}
+
+for (const extra of [{ TEST_VERSION_FAIL: "1" }, { TEST_VERSION_EMPTY: "1" }]) {
+  test(`unreadable existing CLI is preserved (${Object.keys(extra)[0]})`, (t) => {
+    const f = fixture(t);
+    f.runtime("2.9.17");
+    const result = f.run([], extra);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Existing CLI preserved.*could not be read/);
+    assert.ok(!existsSync(f.paths.TEST_CLI_ARGS));
+    assert.ok(!existsSync(f.paths.TEST_FETCHED));
+    assert.ok(!existsSync(f.paths.TEST_NATIVE_ARGS));
   });
 }

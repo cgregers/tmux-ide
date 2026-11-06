@@ -29,6 +29,10 @@ const execute = promisify(execFile);
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const native = "Contents/MacOS/tmux-ide-gpui";
 const node = "Contents/Resources/node";
+const browserExecutables = [
+  "Contents/Resources/browser/browser/node_modules/@zenbu-labs/pixel-native-darwin-arm64/pixel.node",
+  "Contents/Resources/browser/bin/native-scroll-helper",
+];
 const historical = [
   "Contents/Resources/native-build-receipt.json",
   "Contents/Resources/assembly-manifest.json",
@@ -120,8 +124,20 @@ export async function signPreviewApp(
       throw new Error("Trusted policy required");
     const entitlements = await boundedFile(options.nodeEntitlements, 64 * 1024);
     const before = await inventory(source);
-    for (const name of [native, node, ...historical])
+    for (const name of [native, ...historical])
       if (!before.some((r) => r[0] === name && r[2])) throw new Error("Missing assembly input");
+    // Default apps ship without Node; a bundled one must be a regular file and is signed.
+    const nodeEntry = before.find((r) => r[0] === node);
+    if (nodeEntry && !nodeEntry[2]) throw new Error("Missing assembly input");
+    const bundledNode = nodeEntry ? [node] : [];
+    const hasBrowser = before.some(
+      (r) => r[0] === "Contents/Resources/browser/terminal-browser" && r[2],
+    );
+    const browserCode = hasBrowser ? browserExecutables : [];
+    for (const name of browserCode)
+      if (!before.some((r) => r[0] === name && r[2]))
+        throw new Error("Missing browser assembly input");
+    const executables = [native, ...bundledNode, ...browserCode];
     await mkdir(destination, { mode: 0o700 });
     output = destination;
     outputIdentity = await lstat(output);
@@ -192,12 +208,18 @@ export async function signPreviewApp(
     const signing = ["--force", "--sign", options.identity, "--options", "runtime", "--timestamp"];
     await run("/usr/bin/codesign", [...signing, join(app, native)]);
     stage = "sign-node";
-    await run("/usr/bin/codesign", [
-      ...signing,
-      "--entitlements",
-      entitlementPath,
-      join(app, node),
-    ]);
+    for (const path of bundledNode)
+      await run("/usr/bin/codesign", [
+        ...signing,
+        "--entitlements",
+        entitlementPath,
+        join(app, path),
+      ]);
+    stage = "sign-browser";
+    for (const path of browserCode) {
+      await run("/usr/bin/codesign", [...signing, join(app, path)]);
+      await run("/usr/bin/codesign", ["--verify", "--strict", join(app, path)]);
+    }
     stage = "sign-bundle";
     await run("/usr/bin/codesign", [...signing, app]);
     await run("/usr/bin/codesign", ["--verify", "--deep", "--strict", app]);
@@ -309,7 +331,7 @@ export async function signPreviewApp(
         sha256: before.find((row) => row[0] === path)[2],
       })),
       executables: await Promise.all(
-        [native, node].map(async (path) => ({
+        executables.map(async (path) => ({
           path,
           beforeSha256: before.find((r) => r[0] === path)[2],
           afterSha256: hash(await readFile(join(app, path))),

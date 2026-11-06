@@ -1,8 +1,13 @@
+---
+name: tmux-ide
+description: "Use tmux-ide from a coding agent to report your own working/blocked/done status, read the agent fleet, message other panes, restore sessions after a crash, and set up worktrees and workspace layouts."
+---
+
 # tmux-ide — Claude Code Skill
 
 <!-- tmux-ide-skill-version: 2.6.0 -->
 
-tmux-ide is **the open-source workspace for coding agents**, built on tmux. The
+tmux-ide is **the open-source tmux workspace for coding agents**. The
 app (`tmux-ide app`) shows every agent across local and SSH machines with
 ground-truth working/blocked/done status, and drives the live tmux session.
 `tmux-ide adopt` adds the same status to plain tmux clients as tmux chrome: a

@@ -27,10 +27,11 @@ const build = {
     "--locked",
     "--offline",
     "-p",
-    "herdr-gpui",
+    "tmux-ide-gpui",
     "--bin",
     "tmux-ide-gpui",
-    "--release",
+    "--profile",
+    "dist",
     "--message-format=json-render-diagnostics",
   ],
   cargo: { path: "/test/cargo", sha256: "a".repeat(64), version: "cargo test" },
@@ -73,6 +74,24 @@ test("local receipt accepts copied native and excludes target and unrelated priv
     assert.equal(result.sources.files.length, 5);
     assert.ok(!JSON.stringify(result).includes("private-secret"));
     await assert.rejects(record(f), { code: "EEXIST" });
+  });
+});
+test("single-job builds preserve their exact command and reject unrelated overrides", async () => {
+  await fixture(async (f) => {
+    const command = [...build.command.slice(0, 3), "--jobs", "1", ...build.command.slice(3)];
+    await writeNativeBuildReceipt({
+      ...f,
+      before: await snapshotNativeSources(f.workspace),
+      build: { ...build, command },
+    });
+    const receipt = await verifyNativeBuildReceipt(f.receiptPath, f.native, f.workspace);
+    assert.deepEqual(receipt.build.command, command);
+    receipt.build.command.splice(5, 0, "--features", "unreviewed");
+    await writeFile(f.receiptPath, JSON.stringify(receipt));
+    await assert.rejects(
+      verifyNativeBuildReceipt(f.receiptPath, f.native, f.workspace),
+      /Malformed/,
+    );
   });
 });
 test("binary tampering and edited/new/deleted Rust or asset inputs invalidate receipt", async () => {
@@ -158,4 +177,33 @@ test("Cargo failure preserves bounded rendered errors rather than unrelated arti
     "error: actual failure\n",
   );
   assert.equal(cargoDiagnosticTail(message("x".repeat(9000))).length, 8192);
+});
+
+test("Apple renderer source and shaders participate in native build integrity", async () => {
+  await fixture(async (f) => {
+    const vendor = join(f.root, "vendor"),
+      apple = join(vendor, "bezel-gpui-apple");
+    await mkdir(join(apple, "src"), { recursive: true });
+    await mkdir(join(apple, "gpui"));
+    for (const name of [
+      "Cargo.toml",
+      "build.rs",
+      "LICENSE-APACHE",
+      "src/shaders.metal",
+      "gpui/scene.rs",
+    ])
+      await writeFile(join(apple, name), name);
+    await writeFile(join(vendor, "bezel-gpui-apple-provenance.json"), "{}");
+    await writeFile(join(vendor, "unrelated-private-file"), "not a build input");
+    const receipt = await record(f);
+    assert.ok(!JSON.stringify(receipt).includes("unrelated-private-file"));
+    await writeFile(join(apple, "src/shaders.metal"), "changed renderer shader");
+    await assert.rejects(verifyNativeBuildReceipt(f.receiptPath, f.native, f.workspace));
+  });
+});
+test("native snapshot rejects a redirected sibling vendor root", async () => {
+  await fixture(async (f) => {
+    await symlink(f.workspace, join(f.root, "vendor"));
+    await assert.rejects(snapshotNativeSources(f.workspace), /vendor root/);
+  });
 });

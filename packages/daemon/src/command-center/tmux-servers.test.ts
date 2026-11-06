@@ -12,6 +12,8 @@ const base = "/api/v1/tmux-servers";
 const token = "private-owner-token";
 async function fixture() {
   const ownersCreated: {
+    surfaceContext: ReturnType<typeof vi.fn>;
+    nativeBrowser: ReturnType<typeof vi.fn>;
     splitRead: ReturnType<typeof vi.fn>;
     catalog: ReturnType<typeof vi.fn>;
     discover: ReturnType<typeof vi.fn>;
@@ -60,8 +62,27 @@ async function fixture() {
       }));
       const discover = vi.fn(async () => null);
       const discoverShell = vi.fn(async () => null);
-      ownersCreated.push({ splitRead, catalog, mutate, dispose, issue, discover, discoverShell });
+      const surfaceContext = vi.fn(async () => ({
+        generation: scope.generation,
+        workspaceName: "workspace.alias",
+        liveSessionId: `live-session.${"a".repeat(20)}`,
+        pane: "pane.same",
+      }));
+      const nativeBrowser = vi.fn(async () => null);
+      ownersCreated.push({
+        nativeBrowser,
+        surfaceContext,
+        splitRead,
+        catalog,
+        mutate,
+        dispose,
+        issue,
+        discover,
+        discoverShell,
+      });
       return {
+        nativeBrowser,
+        resolveNativeSurfaceContext: surfaceContext,
         readWindowSplitLayout: splitRead,
         catalog,
         terminalInventoryRuntime: {
@@ -102,6 +123,43 @@ async function fixture() {
   return { app, manager, request, a, b, scope, mutation, ownersCreated };
 }
 describe("owner-only scoped tmux server routes", () => {
+  it("resolves launch context only for the authenticated current owner", async () => {
+    const f = await fixture();
+    const target = {
+      socketPath: "/tmp/t.sock",
+      serverPid: "123",
+      sessionId: "$1",
+      runtimePaneId: "%2",
+    };
+    const path = f.scope(f.a) + "/native-surface-context";
+    expect((await f.request(path, "POST", target, null)).status).toBe(401);
+    expect(
+      (await f.request(path, "POST", { ...target, runtimePaneId: "%2; kill-server" })).status,
+    ).toBe(400);
+    expect(
+      (await f.request(`/${f.a.serverId}/${randomUUID()}/native-surface-context`, "POST", target))
+        .status,
+    ).toBe(409);
+    expect(f.ownersCreated[0]!.surfaceContext).not.toHaveBeenCalled();
+    const result = await f.request(path, "POST", target);
+    expect(result.status).toBe(200);
+    expect(result.headers.get("cache-control")).toBe("no-store");
+    expect(await result.json()).toMatchObject({
+      version: 1,
+      server: { serverId: f.a.serverId, generation: f.a.generation },
+      context: { generation: f.a.generation, pane: "pane.same" },
+    });
+    expect(f.ownersCreated[0]!.surfaceContext).toHaveBeenCalledWith(
+      target,
+      expect.any(AbortSignal),
+    );
+    expect(f.ownersCreated[1]!.surfaceContext).not.toHaveBeenCalled();
+    f.ownersCreated[0]!.surfaceContext.mockRejectedValue(new Error("private socket or credential"));
+    const failed = await f.request(path, "POST", target);
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).not.toContain("private");
+  });
+
   it("requires owner bearer before registering or removing, even with no ordinary auth middleware", async () => {
     const f = await fixture();
     for (const auth of [null, "wrong"]) {
@@ -362,4 +420,36 @@ describe("split layout reads", () => {
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({ error: { code: "split-layout-stale" } });
   });
+});
+
+it("native browser operations require owner auth and current scope before dispatch", async () => {
+  const f = await fixture();
+  const body = {
+    target: {
+      generation: f.a.generation,
+      workspaceName: "same",
+      liveSessionId: `live-session.${"a".repeat(20)}`,
+      semanticPaneId: "pane.same",
+    },
+    command: null,
+  };
+  const path = f.scope(f.a) + "/native-browser";
+  for (const auth of [null, "wrong"]) {
+    expect((await f.request(path, "POST", body, auth)).status).toBe(401);
+  }
+  expect(
+    (await f.request(`/${f.a.serverId}/${randomUUID()}/native-browser`, "POST", body)).status,
+  ).toBe(409);
+  expect((await f.request(path, "POST", "x".repeat(25 * 1024))).status).toBe(400);
+  expect(f.ownersCreated[0]!.nativeBrowser).not.toHaveBeenCalled();
+  const result = await f.request(path, "POST", body);
+  expect(result.status).toBe(200);
+  expect(result.headers.get("cache-control")).toBe("no-store");
+  expect(await result.json()).toEqual({ version: 1, state: null });
+  expect(f.ownersCreated[0]!.nativeBrowser).toHaveBeenCalledWith(body, expect.any(AbortSignal));
+  expect(f.ownersCreated[1]!.nativeBrowser).not.toHaveBeenCalled();
+  f.ownersCreated[0]!.nativeBrowser.mockRejectedValue(new Error("private credential"));
+  const failed = await f.request(path, "POST", body);
+  expect(failed.status).toBe(503);
+  expect(await failed.text()).not.toContain("private credential");
 });

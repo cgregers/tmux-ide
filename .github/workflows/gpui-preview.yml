@@ -2,8 +2,28 @@ name: GPUI preview correctness
 
 on:
   pull_request:
+    paths: &app-paths
+      - apps/tmux-gpui/**
+      - native/tmux/**
+      # The journeys build the CLI from bin/ and packages/, and import scripts/lib fixtures.
+      - bin/**
+      - packages/**
+      - scripts/build-cli.mjs
+      - scripts/build-bundled-tmux.mjs
+      - scripts/lib/**
+      - docs/app/icon.png
+      # The packaged app ships the root license.
+      - LICENSE
+      - package.json
+      - pnpm-lock.yaml
+      - pnpm-workspace.yaml
+      - tsconfig.json
+      - .bun-version
+      - .github/actions/setup-tmux/**
+      - .github/workflows/gpui-preview.yml
   push:
     branches: [main]
+    paths: *app-paths
   workflow_dispatch:
 
 permissions:
@@ -36,6 +56,12 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Bridge typecheck and deterministic tests
         run: bash apps/tmux-gpui/scripts/check-bridge.sh
+      - name: Build direct Rust session journey driver
+        working-directory: apps/tmux-gpui/upstream
+        run: |
+          rustup show
+          cargo build --locked -p herdr-client --example tmux_journey_probe
+          echo "TMUX_GPUI_JOURNEY_PROBE=$PWD/target/debug/examples/tmux_journey_probe" >> "$GITHUB_ENV"
       - name: Home and fleet source journeys
         shell: bash
         run: |
@@ -45,12 +71,9 @@ jobs:
           export TMUX_GPUI_TEST_CLI="$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
           node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/server.log"
           node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/home.log"
-          node --import tsx apps/tmux-gpui/bridge/new-window-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/new-window.log"
-          node --import tsx apps/tmux-gpui/bridge/browser-history-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/browser-history.log"
-          node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/close-pane.log"
-          TMUX_GPUI_CLOSE_LAYOUT=windows node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-fleet-source/close-window.log"
       - name: Preserve Home and fleet source evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: gpui-fleet-source-evidence
@@ -61,23 +84,14 @@ jobs:
           node --import tsx apps/tmux-gpui/bridge/session-create-smoke.mjs
           node --import tsx apps/tmux-gpui/bridge/session-open-smoke.mjs
           node --import tsx apps/tmux-gpui/bridge/editor-context-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/editor-action-smoke.mjs
           TMUX_GPUI_TEST_LONG_SESSION_NAME=1 node --import tsx apps/tmux-gpui/bridge/session-open-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/startup-recovery-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/discovery-recovery-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/sustained-output-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/pane-resize-gesture-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/competing-viewers-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/pane-replacement-smoke.mjs
           node --import tsx apps/tmux-gpui/bridge/history-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/home-agents-smoke.mjs
-          node --import tsx apps/tmux-gpui/bridge/workspace-agents-smoke.mjs
-          TMUX_GPUI_TEST_DISCOVERY=1 node --import tsx apps/tmux-gpui/bridge/browser-smoke.mjs
 
   native:
     name: macOS Rust correctness (no physical UI claim)
     runs-on: macos-26
-    timeout-minutes: 60
+    # Headroom over the longest green run; the dist prebuild alone takes 15-22 min.
+    timeout-minutes: 120
     defaults:
       run:
         working-directory: apps/tmux-gpui/upstream
@@ -95,7 +109,16 @@ jobs:
         working-directory: .
         run: pnpm install --frozen-lockfile
       - name: Load repository-pinned Rust toolchain
-        run: rustup show
+        run: |
+          # Some hosted images put rustup outside CARGO_HOME. The release
+          # wrapper deliberately resolves tools from this private bin directory.
+          cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+          rustup_binary="$(command -v rustup)"
+          mkdir -p "$cargo_home/bin"
+          if [[ ! -e "$cargo_home/bin/rustup" ]]; then
+            ln -s "$rustup_binary" "$cargo_home/bin/rustup"
+          fi
+          "$cargo_home/bin/rustup" show
       - name: Formatting and file size
         run: |
           cargo fmt --all -- --check
@@ -106,12 +129,20 @@ jobs:
           cargo clippy --locked --workspace --all-targets --no-default-features -- -D warnings
       - name: Workspace tests
         run: |
-          cargo test --locked --workspace
           cargo test --locked --workspace --all-features
-      - name: Build and check the release preview executable
-        run: |
-          cargo build --locked --release -p herdr-gpui --bin tmux-ide-gpui
-          cargo test --locked --release -p herdr-gpui --test tmux_cli
+      - name: Build the release preview executable
+        run: cargo build --locked --release -p tmux-ide-gpui --bin tmux-ide-gpui
+      # The packaging wrapper builds the shipped dist profile at --jobs 1. Build it
+      # here in parallel first, with the wrapper's HERDR_BUILD_PR_NUMBER, so the
+      # wrapper finds every crate current instead of compiling them one at a time.
+      - name: Prebuild the shipped dist executable
+        env:
+          HERDR_BUILD_PR_NUMBER: ""
+        run: cargo build --locked --profile dist -p tmux-ide-gpui --bin tmux-ide-gpui
+      # The bridge job runs these on Linux, where they skip: they need macOS codesign.
+      - name: Browser launcher signature and cleanup checks
+        working-directory: .
+        run: node --test apps/tmux-gpui/scripts/browser-launch.test.mjs
       - name: Install pinned license-report generator
         run: cargo install cargo-about --version 0.9.2 --locked --features cli
       # Offline metadata reads the full lockfile, including non-macOS dependencies.
@@ -141,6 +172,30 @@ jobs:
           git -C "$RUNNER_TEMP/gpui-tmux-source" checkout --detach FETCH_HEAD
           export PKG_CONFIG_PATH="$(brew --prefix libevent)/lib/pkgconfig:$(brew --prefix ncurses)/lib/pkgconfig:$(brew --prefix utf8proc)/lib/pkgconfig"
           node scripts/build-bundled-tmux.mjs --source "$RUNNER_TEMP/gpui-tmux-source" --output "$RUNNER_TEMP/gpui-tmux-bundle" --jobs 2 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/tmux-build.log"
+      - name: Build production native worker journey driver
+        run: |
+          cargo build --locked -p tmux-ide-gpui --features integration-test --example tmux_native_journey
+          echo "TMUX_GPUI_JOURNEY_PROBE=$PWD/target/debug/examples/tmux_native_journey" >> "$GITHUB_ENV"
+      - name: Direct Rust source terminal journeys (no physical UI claim)
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/build-cli.mjs --outfile "$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
+          export PATH="$RUNNER_TEMP/gpui-tmux-bundle:$PATH"
+          export TMUX_GPUI_TEST_CLI="$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
+          node --import tsx apps/tmux-gpui/bridge/pane-actions-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-pane-actions.log"
+          node --import tsx apps/tmux-gpui/bridge/native-viewport-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-native-viewport.log"
+          TMUX_GPUI_TEST_DISCOVERY=1 node --import tsx apps/tmux-gpui/bridge/browser-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-browser.log"
+          node --import tsx apps/tmux-gpui/bridge/pane-resize-gesture-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-pane-resize-gesture.log"
+          node --import tsx apps/tmux-gpui/bridge/workspace-agents-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-workspace-agents.log"
+          node --import tsx apps/tmux-gpui/bridge/home-agents-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-home-agents.log"
+          node --import tsx apps/tmux-gpui/bridge/sustained-output-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-sustained-output.log"
+          node --import tsx apps/tmux-gpui/bridge/discovery-recovery-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-discovery-recovery.log"
+          node --import tsx apps/tmux-gpui/bridge/startup-recovery-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-startup-recovery.log"
+          node --import tsx apps/tmux-gpui/bridge/pane-replacement-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-pane-replacement.log"
+          node --import tsx apps/tmux-gpui/bridge/competing-viewers-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-competing-viewers.log"
+          node --import tsx apps/tmux-gpui/bridge/editor-action-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/source-editor-action.log"
       - name: Exact packaged Home and fleet journeys (no GUI)
         working-directory: .
         shell: bash
@@ -149,7 +204,9 @@ jobs:
           node scripts/build-cli.mjs --outfile "$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
           export PATH="$RUNNER_TEMP/gpui-tmux-bundle:$PATH"
           export TMUX_GPUI_TEST_CLI="$GITHUB_WORKSPACE/.tasks/gpui-ci/cli.mjs"
-          export TMUX_GPUI_TEST_APP="$RUNNER_TEMP/gpui-package-check/Tmux IDE CI.app"
+          # These journeys drive the legacy helper bridge, which only the --node development
+          # app carries; check-packaged-app.sh covers the Node-free default app.
+          export TMUX_GPUI_TEST_APP="$RUNNER_TEMP/gpui-package-check/Tmux IDE CI Development.app"
           node --import tsx apps/tmux-gpui/bridge/fleet-server-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/fleet-server.log"
           node --import tsx apps/tmux-gpui/bridge/home-machine-filter-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/home-machine-filter.log"
           node --import tsx apps/tmux-gpui/bridge/new-window-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/new-window.log"
@@ -158,6 +215,7 @@ jobs:
           TMUX_GPUI_CLOSE_LAYOUT=windows node --import tsx apps/tmux-gpui/bridge/close-pane-smoke.mjs 2>&1 | tee "$RUNNER_TEMP/gpui-package-check/close-window.log"
       - name: Preserve packaging evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: gpui-macos-packaging-evidence
@@ -167,3 +225,6 @@ jobs:
             ${{ runner.temp }}/gpui-package-check/*.log
             ${{ runner.temp }}/gpui-package-check/native-build.json
             ${{ runner.temp }}/gpui-package-check/Tmux IDE CI.app/Contents/Resources/development-manifest.json
+            ${{ runner.temp }}/gpui-package-check/Tmux IDE CI Development.app/Contents/Resources/development-manifest.json
+            # Symbolicates crash reports from the packaged dist binary.
+            apps/tmux-gpui/upstream/target/dist/tmux-ide-gpui.dSYM

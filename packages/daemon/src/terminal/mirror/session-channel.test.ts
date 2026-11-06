@@ -58,6 +58,7 @@ async function startedRig(
     nativeBirth?: string;
     executeWindowLinkGuard?: (args: string[]) => Promise<{ status: number | null; stdout: string }>;
     onNativeClientActivity?: () => void;
+    onNativeClientPresence?: (present: boolean | null) => void;
     onOutputObserved?: (
       semanticPaneId: string,
       ageMs: number | null,
@@ -261,6 +262,7 @@ async function startedRig(
         }
       : {}),
     onNativeClientActivity: options.onNativeClientActivity,
+    onNativeClientPresence: options.onNativeClientPresence,
     onOutputObserved: options.onOutputObserved,
     onFlowRecoveryObserved: options.onFlowRecoveryObserved,
   });
@@ -433,6 +435,58 @@ function completeSeed(rig: Rig, lines: readonly string[], cursor: string): void 
 }
 
 describe("native client activity", () => {
+  it("distinguishes proven absence from native presence and malformed inventory", async () => {
+    const presence = vi.fn();
+    const rig = await startedRig({ onNativeClientPresence: presence });
+    expect(presence).toHaveBeenLastCalledWith(null);
+    rig.sim.reply(["1\t123"]);
+    await vi.waitFor(() => expect(presence).toHaveBeenLastCalledWith(false));
+    rig.sim.feedLines("%subscription-changed tmux-ide-native-clients $1 @1 0 %1 : 2");
+    expect(presence).toHaveBeenLastCalledWith(null);
+    rig.sim.reply(["1\t123", "0\t124"]);
+    await vi.waitFor(() => expect(presence).toHaveBeenLastCalledWith(true));
+    rig.sim.feedLines("%subscription-changed tmux-ide-native-clients $1 @1 0 %1 : 1");
+    rig.sim.reply(["malformed"]);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(presence).toHaveBeenLastCalledWith(null);
+    await rig.channel.dispose();
+  });
+
+  it("rechecks changes during inventory without publishing stale absence", async () => {
+    const presence = vi.fn();
+    const rig = await startedRig({ onNativeClientPresence: presence });
+    const probes = () => rig.sim.written.filter((command) => command.startsWith("list-clients "));
+    expect(probes()).toHaveLength(1);
+    for (let i = 0; i < 8; i++)
+      rig.sim.feedLines("%subscription-changed tmux-ide-native-clients $1 @1 0 %1 : 2");
+    expect(probes()).toHaveLength(1);
+    rig.sim.reply(["1\t123"]);
+    await vi.waitFor(() => expect(probes()).toHaveLength(2));
+    expect(presence).not.toHaveBeenCalledWith(false);
+    rig.sim.reply(["0\t124"]);
+    await vi.waitFor(() => expect(presence).toHaveBeenLastCalledWith(true));
+    await rig.channel.dispose();
+    expect(presence).toHaveBeenLastCalledWith(null);
+  });
+
+  it("invalidates presence when the control channel exits", async () => {
+    const presence = vi.fn();
+    const rig = await startedRig({ onNativeClientPresence: presence });
+    rig.sim.reply(["1\t123"]);
+    await vi.waitFor(() => expect(presence).toHaveBeenLastCalledWith(false));
+    rig.sim.feedLines("%exit");
+    expect(presence).toHaveBeenLastCalledWith(null);
+    await rig.channel.dispose();
+  });
+
+  it("does not publish a pending inventory after disposal", async () => {
+    const presence = vi.fn();
+    const rig = await startedRig({ onNativeClientPresence: presence });
+    await rig.channel.dispose();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(presence.mock.calls.every(([value]) => value === null)).toBe(true);
+  });
+
   it("subscribes to attached-client changes and proves native presence from inventory", async () => {
     const onNativeClientActivity = vi.fn();
     const rig = await startedRig({ onNativeClientActivity });
@@ -2088,6 +2142,62 @@ describe("layout push", () => {
     }
   });
 
+  it("survives twenty layout supersessions before committing a current snapshot", async () => {
+    const rig = await startedRig({ borderReply: "manual" });
+    const events = collect();
+    try {
+      const pending = await beginPendingLayout(rig, events);
+      let old = pending.old;
+      for (let i = 0; i < 20; i++) {
+        expect(events.events.filter((e) => e.type === "fault")).toEqual([]);
+        rig.sim.reply(["off"]);
+        drainRetiredAtomicCollector(rig, old.nonce);
+        rig.pendingSyncs.shift()!();
+        await vi.waitFor(() => expect(rig.armedAtomicCollectors.at(-1)?.kind).toBe("pause"));
+        if (i === 19) break;
+        completeStockPause(rig, "%1");
+        old = rig.armedAtomicCollectors.at(-1)!;
+        rig.sim.feedLines(`%layout-change @1 ${FIXTURE.layoutW1} ${FIXTURE.layoutW1} 0`);
+        completeAtomicRecoveryPhase(rig, nativeBootstrapLines(), "0 0 100 50");
+        expect(events.events.some((e) => e.type === "seed")).toBe(false);
+      }
+      completeSeed(rig, nativeBootstrapLines(), "0 0 100 50");
+      expect(events.events.filter((e) => e.type === "seed")).toHaveLength(1);
+      expect(events.events.filter((e) => e.type === "fault")).toEqual([]);
+      expect(rig.pendingRecoveries.filter((t) => !t.cancelled)).toEqual([]);
+    } finally {
+      await rig.channel.dispose();
+    }
+  });
+
+  it("preserves genuine failures across repeated notifications for one superseded capture", async () => {
+    const rig = await startedRig({ borderReply: "manual" });
+    const events = collect();
+    try {
+      rig.channel.subscribePane("pane.alpha", events.onEvent, undefined, true);
+      rig.sim.reply(nativeBootstrapLines());
+      for (let i = 0; i < 3; i++) {
+        completeSeed(rig, nativeBootstrapLines(), "not-a-cursor");
+      }
+      completeStockPause(rig, "%1");
+      const old = rig.armedAtomicCollectors.at(-1)!;
+      for (let i = 0; i < 5; i++) {
+        rig.sim.feedLines(`%layout-change @1 ${FIXTURE.layoutW1} ${FIXTURE.layoutW1} 0`);
+      }
+      completeAtomicRecoveryPhase(rig, nativeBootstrapLines(), "0 0 100 50");
+      expect(events.events.filter((e) => e.type === "fault")).toEqual([]);
+      for (let i = 0; i < 5; i++) rig.sim.reply(["off"]);
+      drainRetiredAtomicCollector(rig, old.nonce);
+      rig.pendingSyncs.shift()!();
+      await vi.waitFor(() => expect(rig.armedAtomicCollectors.at(-1)?.kind).toBe("pause"));
+      completeSeed(rig, nativeBootstrapLines(), "not-a-cursor");
+      expect(events.events.filter((e) => e.type === "fault")).toHaveLength(1);
+      expect(events.events.some((e) => e.type === "seed")).toBe(false);
+    } finally {
+      await rig.channel.dispose();
+    }
+  });
+
   it("does not extend the deadline across another layout crossing during replacement capture", async () => {
     const rig = await startedRig({ borderReply: "manual" });
     const events = collect();
@@ -2729,20 +2839,61 @@ describe("window viewport scope", () => {
     await rig.channel.dispose();
   });
 
-  it("clears window overrides when participation ends and permits a new fit", async () => {
+  it("reports the renderer's cell pixels with every viewport it fits", async () => {
+    const rig = await startedRig();
+    rig.channel.setGeometryParticipation(true);
+    rig.channel.fitViewport(90, 28);
+    const before = rig.sim.written.length;
+    rig.channel.setCellPixels(16, 34);
+    rig.channel.setCellPixels(16, 34);
+    rig.channel.fitWindowViewport("window.test.one", 120, 40);
+    rig.channel.setCellPixels(20, 40);
+    expect(() => rig.channel.setCellPixels(0, 34)).toThrow(RangeError);
+    expect(() => rig.channel.setCellPixels(16, 1025)).toThrow(RangeError);
+    expect(rig.sim.written.slice(before)).toEqual([
+      "refresh-client -C 90x28/16x34",
+      expect.stringContaining("if-shell -F -t '@1'"),
+      "refresh-client -C @1:120x40/16x34",
+      "refresh-client -C @1:120x40/20x40",
+    ]);
+    await rig.channel.dispose();
+  });
+
+  it("retains precise metrics across fits and forwards precision-only changes", async () => {
+    const rig = await startedRig();
+    rig.channel.setGeometryParticipation(true);
+    rig.channel.fitViewport(110, 34);
+    const before = rig.sim.written.length;
+    rig.channel.setCellPixels(17, 40, { width: 16860, height: 40000 });
+    rig.channel.setCellPixels(17, 40, { width: 16861, height: 40000 });
+    rig.channel.fitViewport(80, 24);
+    expect(rig.sim.written.slice(before)).toEqual([
+      "refresh-client -C 110x34/17x40/16860x40000",
+      "refresh-client -C 110x34/17x40/16861x40000",
+      expect.stringContaining("if-shell -F -t '$1'"),
+      "refresh-client -C 80x24/17x40/16861x40000",
+    ]);
+    for (const width of [0, 999, 1024001, Infinity, 16000.5])
+      expect(() => rig.channel.setCellPixels(17, 40, { width, height: 40000 })).toThrow(RangeError);
+    await rig.channel.dispose();
+  });
+
+  it("retains dormant overrides across participation changes and permits a new fit", async () => {
     const rig = await startedRig();
     rig.channel.setGeometryParticipation(true);
     const before = rig.sim.written.length;
     rig.channel.fitWindowViewport("window.test.one", 120, 40);
     rig.channel.setGeometryParticipation(false);
     rig.channel.setGeometryParticipation(false);
-    rig.channel.fitWindowViewport("window.test.one", 120, 40);
+    rig.channel.setGeometryParticipation(true);
+    rig.channel.fitWindowViewport("window.test.one", 121, 41);
     expect(rig.sim.written.slice(before)).toEqual([
       expect.stringContaining("if-shell -F -t '@1'"),
       "refresh-client -C @1:120x40",
-      "refresh-client -C @1:",
       "refresh-client -f ignore-size",
-      "refresh-client -C @1:120x40",
+      "refresh-client -f !ignore-size",
+      expect.stringContaining("if-shell -F -t '@1'"),
+      "refresh-client -C @1:121x41",
     ]);
     await rig.channel.dispose();
   });
@@ -3298,6 +3449,24 @@ describe("native bootstrap capability fallback", () => {
       expect(
         rig.sim.written.filter((command) => command.includes("capture-pane -p -R")),
       ).toHaveLength(2);
+    } finally {
+      await rig.channel.dispose();
+    }
+  });
+
+  it("seeds through stock capture when tmux 3.8 accepts -R with its text grid format", async () => {
+    const rig = await startedRig();
+    const first = collect();
+    try {
+      rig.channel.subscribePane("pane.alpha", first.onEvent, undefined, true);
+      rig.sim.reply(["G 100x50 (0/2000)", "\tL 0 (0) flags=NONE[0] 0/0"]);
+      expect(rig.armedAtomicCollectors.length).toBeGreaterThan(0);
+      completeSeed(rig, ["stock 3.8 content"], "0 0 100 50");
+      expect(bytesOf(first.events)).toEqual(["stock 3.8 content"]);
+      expect(first.events.some((event) => event.type === "fault")).toBe(false);
+      expect(
+        rig.sim.written.filter((command) => command.includes("capture-pane -p -R")),
+      ).toHaveLength(1);
     } finally {
       await rig.channel.dispose();
     }

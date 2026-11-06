@@ -1,7 +1,16 @@
 import { test } from "node:test";
 import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
-import { mkdtemp, realpath, writeFile, readFile, rm, lstat, symlink } from "node:fs/promises";
+import {
+  mkdtemp,
+  readdir,
+  realpath,
+  writeFile,
+  readFile,
+  rm,
+  lstat,
+  symlink,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -21,6 +30,7 @@ test("strict preview metadata generates exact safe plist fields; development def
     "tmux-ide-launcher",
     "CFBundleIconFile",
     "AppIcon.icns",
+    "CFBundleIconName",
   ])
     assert.ok(plist.includes(text));
   assert.match(bundlePlist(), /com\.tmux-ide\.gpui\.development/);
@@ -69,8 +79,6 @@ test("bounded metadata file rejects links/oversize; invalid explicit assembly me
             [
               fileURLToPath(new URL("./assemble-local-app.mjs", import.meta.url)),
               "/nonexistent-native",
-              "/nonexistent-node",
-              "/nonexistent-license",
               "/nonexistent-receipt",
               output,
               "--metadata",
@@ -86,17 +94,28 @@ test("bounded metadata file rejects links/oversize; invalid explicit assembly me
   }
 });
 
-test("packaged icon is bound to existing tmux-ide artwork and a complete ICNS container", async () => {
+test("packaged icon is bound to its source artwork and a complete ICNS container", async () => {
   const provenance = JSON.parse(
     await readFile(new URL("../assets/app-icon-source.json", import.meta.url), "utf8"),
   );
-  assert.equal(provenance.source, "docs/app/icon.png");
+  assert.equal(provenance.source, "apps/tmux-gpui/assets/AppIcon-1024.png");
   assert.equal(provenance.output, "AppIcon.icns");
-  const source = await readFile(new URL("../../../docs/app/icon.png", import.meta.url));
+  const source = await readFile(new URL("../assets/AppIcon-1024.png", import.meta.url));
   const icon = await readFile(new URL("../assets/AppIcon.icns", import.meta.url));
   const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
   assert.equal(hash(source), provenance.sourceSha256);
   assert.equal(hash(icon), provenance.outputSha256);
+  const iconRoot = new URL("../../../native/macos/notifier/AppIcon.icon/", import.meta.url);
+  const layers = (await readdir(new URL("Assets/", iconRoot)))
+    .filter((name) => name.endsWith(".svg"))
+    .map((name) => `Assets/${name}`);
+  const catalogSource = createHash("sha256");
+  for (const file of ["icon.json", ...layers.sort()])
+    catalogSource.update(`${file}\0`).update(await readFile(new URL(file, iconRoot)));
+  const catalog = await readFile(new URL("../assets/Assets.car", import.meta.url));
+  assert.equal(provenance.catalog.output, "Assets.car");
+  assert.equal(catalogSource.digest("hex"), provenance.catalog.sourceSha256);
+  assert.equal(hash(catalog), provenance.catalog.outputSha256);
   assert.equal(icon.toString("ascii", 0, 4), "icns");
   assert.equal(icon.readUInt32BE(4), icon.length);
   const representations = new Set();

@@ -1,5 +1,17 @@
 # Changes from the pinned upstream revision
 
+- Kitty graphics: `tmux_snapshot/kitty_graphics.rs` assembles bridge image
+  chunk lines into a bounded LRU and maps publication `graphics` placements onto
+  the existing painter graphics scene (`terminal_painter/images.rs` decodes and
+  paints). `browser.rs` accepts chunk lines beside publications and a
+  `kitty-missing` command; `decode.rs` still rejects replica placements;
+  `herdr-client` `SurfaceImages` gains `insert`/`remove` for incrementally
+  arriving images; `terminal_painter.rs` gains a test-only `painted_images()`
+  accessor. Kitty placeholder cells paint blank in `decode.rs`; deflated
+  `rgba-zlib`/`rgb-zlib` images are inflated with the existing `flate2`
+  dependency; placements keyed by program image swap in redraws without a
+  publication. See `KITTY-GRAPHICS.md`.
+
 - Native terminal web links: `tmux_snapshot/terminal_links.rs` reuses Herdr
   `terminal::link_at` HTTP(S) parsing and validation. Cmd/Ctrl-click resolves only
   the exact painted selected pane; canonical copy-region wrapping joins complete
@@ -41,13 +53,13 @@
   Shared icon buttons now render sidebar switch/theme/refresh controls with hints;
   their existing action listeners and ownership checks are retained.
 
-- `upstream/crates/herdr-gpui/src/main.rs`: thin upstream-reference entry.
+- `upstream/crates/tmux-ide-gpui/src/main.rs`: thin upstream-reference entry.
   Its original module composition and preview interception moved to new `lib.rs`.
-- `upstream/crates/herdr-gpui/Cargo.toml`: adds the dedicated `tmux-ide-gpui`
+- `upstream/crates/tmux-ide-gpui/Cargo.toml`: adds the dedicated `tmux-ide-gpui`
   binary as the package default run target. New `src/tmux_main.rs` and `src/tmux_cli.rs` dispatch exclusively to
   preview modes, never normal Herdr startup. New `tests/tmux_cli.rs` checks
   executable argument rejection, product identity and offline validation.
-- `upstream/crates/herdr-gpui/src/tmux_snapshot.rs` and `tmux_snapshot/`: new
+- `upstream/crates/tmux-ide-gpui/src/tmux_snapshot.rs` and `tmux_snapshot/`: new
   bounded JSON decoder, read-only window, latest-frame mailbox and regression tests.
   `bridge/` outside upstream owns the local TypeScript daemon connection.
 - New `tmux_snapshot/browser.rs`, `browser_ui.rs` and `browser_tests.rs` add
@@ -57,7 +69,7 @@
   interruption/re-arm behavior and deterministic native input regressions. The
   view, composition handler and browser UI share the gate; no daemon authority
   or upstream terminal protocol is changed.
-- `upstream/crates/herdr-gpui/src/terminal.rs`: makes the existing
+- `upstream/crates/tmux-ide-gpui/src/terminal.rs`: makes the existing
   `WheelRemainder` and its `add` method crate-visible for native tmux scroll
   handling. The accumulation behavior is unchanged.
 - `tmux_snapshot/pane_chrome.rs` and `hit_regions.rs` add a display-only selected
@@ -98,14 +110,11 @@ The sidebar row presentation additionally adapts the selected-row typography in
 It retains `sidebar::label_text`, with a bounded marker gutter and label area;
 window headings stay inert and selection continues through the tmux identity fence.
 
-The tmux-only `glass.rs` / `glass/macos.rs` boundary adds Apple's public
-`NSGlassEffectView` behind the GPUI Metal view using the raw-handle borrowing
-pattern from `browser/native.rs`. It owns only its inserted sibling and its
-accessibility observer. The member Cargo manifest enables existing objc2 AppKit
-and Foundation features; dependency versions and lockfile are unchanged. Sidebar
-chrome exposes the material only when the native boundary reports success;
-unsupported/accessibility modes and terminal content remain opaque. This is a
-new tmux adaptation, not a Liquid Glass implementation copied from Herdr.
+The window chrome is Bezel's (card #668): `bezel_ui::window::frame`, Bezel's title
+bar band, and the palette's behind-window blur, applied by the tmux-only
+`chrome.rs` owner. That owner keeps only the Reduce Transparency / Increase
+Contrast gate and its accessibility observer from the earlier `glass.rs`, whose
+`NSGlassEffectView` sibling is gone. Terminal panes stay opaque.
 
 The tmux-only divider gesture model adds fenced, release-time pane resizing,
 status-row-aware geometry, stale/focus cancellation and an input-interruption
@@ -132,7 +141,112 @@ as an additional reference for layering.
 - Native fleet preference controls add optional strict metadata and explicit
   favorite/collapse commands in the tmux-only browser boundary. Home cards reuse
   existing GPUI hover, tooltip, theme and chevron assets; new
-  `assets/icons/fleet-star.svg` and `fleet-star-filled.svg` are original tmux-ide
-  vector artwork. `icons.rs` embeds these assets. Preference state and persistence
+  `assets/icons/fleet-star.svg` and `fleet-star-filled.svg` were initially original
+  tmux-ide vector artwork and are now Heroicons assets (see below). `icons.rs` embeds these assets. Preference state and persistence
   remain owned by the existing local tmux-ide daemon resource. No Herdr protocol,
   dependency versions, upstream source hashes or terminal painter are changed.
+
+- Native polish replaces 19 shared interface SVG filenames with unchanged
+  Heroicons assets from tailwindlabs/heroicons commit
+  `616b7a4dbbf3d011760af8066262cd5c6b3868f3`. Exact mappings and SHA-256 values
+  are retained in `upstream/assets/icons/heroicons-provenance.json`; the MIT
+  license is in `LICENSE-heroicons` beside it. Shared filenames also affect
+  imported menu/settings/review glyphs. Agent brand artwork is unchanged.
+  The app assembler includes the license and provenance in Resources.
+- Home fleet layout uses explicit machine/server/session hierarchy and shared
+  connection controls. Default native chrome uses neutral backgrounds and
+  selection fills; shared tabs no longer use colored underline/divider styling.
+  Terminal cell colors and custom preset values remain canonical. Source and
+  package checks do not substitute for native visual qualification.
+- Shared titlebar spacing now follows native full-screen state: the leading
+  traffic-light reservation is removed in full screen and restored on exit.
+  Native-picker decoration uses the shared subtle separator and neutral active
+  fill; the applied theme icon has an explicit tint required by GPUI SVG paint.
+
+- The tmux-ide saved-machine editor uses dialog-local focus handles to include
+  Save and Cancel/Done in forward and reverse Tab navigation. Footer activation
+  reuses GPUI key-up clicks with captured form/request identity; submitted Save
+  leaves focus on Cancel. Terminal key routing and daemon mutation guards remain
+  at their existing owners.
+
+- The native tmux shell binds Control-Command-F to Herdr’s existing window-only
+  fullscreen action, including when terminal or picker inputs have focus. It does
+  not import the Herdr terminal/session keymap or change daemon authority.
+
+- The tmux shell uses one rectangular native AppKit glass view beneath the full
+  viewport and one root tint for continuous header/sidebar chrome. Navigation
+  bands inherit that material; the former rounded sidebar outline and corner
+  cutouts are removed. The rounded opaque workspace sits inside an 8px gutter,
+  with window/pane headers and a rectangular terminal canvas inset far enough
+  to avoid its corner silhouette. Home uses the same content treatment. The
+  shared navigation-header wrapper accepts a fill override; other Herdr
+  titlebar renderers keep their existing backgrounds. Accessibility and
+  unsupported-platform fallback remains opaque, using the same chrome color.
+
+- Saved-machine removal reuses the editor's dialog-local focus pattern for
+  Remove and Cancel/Done. Forward/reverse Tab and GPUI key-up activation retain
+  captured form/request identity; a submitted removal keeps Cancel reachable.
+  Registry revision/profile checks and the daemon mutation path are unchanged.
+
+- The Add-machine form reuses the saved-machine editor/removal dialog focus
+  pattern for its SSH target, Cancel and Save footer. GPUI key-up callbacks
+  retain form/request identity and composition guards. SSH validation and the
+  existing daemon connection path are unchanged.
+
+- Saved-machine removal feedback distinguishes an actually pending registry
+  operation from an unconfirmed result. The latter directs users to Cancel and
+  refresh; an uncorrelated registry error is not presented as proof that this
+  removal failed. Confirmed absence and existing mutation/admission guards are
+  unchanged.
+
+- Home/Terminals titlebar tabs use the shared control corner radius and a compact
+  height within the existing titlebar. Inactive tabs inherit the continuous
+  chrome instead of painting a separate surface, including on hover. Only the
+  selected tab receives a theme-derived highlight. Navigation and drag-region ownership are unchanged.
+
+- Selecting another pane of the painted window keeps that window's frame and
+  moves pane chrome to the clicked pane immediately; input stays gated until the
+  bridge publishes the new request. Selections outside the painted window still
+  clear and reload.
+
+- Bridge snapshots are kept as raw JSON (`serde_json` `raw_value`) and decoded
+  once into the painter frame and pointer modes, instead of a value tree that
+  was re-serialized and decoded again.
+
+- A divider drag draws its pointer target boundary locally and preserves the
+  terminal grid during motion. Begin captures the fenced target; release sends
+  one final boundary through the existing canonical-settlement protocol.
+  Cancellation and unchanged final boundaries do not mutate terminal geometry.
+  Same-window pane navigation carries its exact fitted viewport forward rather
+  than sending another fit solely because the navigation request changed.
+
+- Whole-window viewport fits retain one latest grid and physical cell size,
+  settling after 150 ms without geometry changes (the existing sibling window
+  policy). Initial fits remain immediate. The existing browser tick wakes the
+  final paint, so idle terminal output does not leave a resize pending. Focus,
+  navigation and invalid geometry discard pending fits. Keyboard input continues
+  to address the canonical pane while old content is clipped at its actual cell
+  size; pointer/copy hit testing uses the painted frame rather than speculative
+  scaled cells.
+
+- The browser transport negotiates bounded run-length snapshots and incremental
+  rows, including binary cell records and raw image chunks. Native decoding
+  validates the complete frame before changing its baseline; sequence gaps
+  request an explicit full snapshot. Delta application precedes display-mailbox
+  coalescing so dropping an intermediate paint cannot break the next delta.
+  Legacy JSON remains available for callers without negotiated capabilities.
+
+- Incomplete image assemblies share a 64 MiB reservation limit in addition to
+  their existing count limit. Replacing or retiring an assembly releases its
+  reservation; completed image-cache limits remain separate.
+
+## Application crate rename (2026-10-27)
+
+The tmux-ide application package and Rust namespace are now `tmux-ide-gpui` /
+`tmux_ide_gpui`; its source directory moved to `upstream/crates/tmux-ide-gpui`.
+The retained upstream reference executable remains explicitly named `herdr-gpui`.
+The client/protocol crate names, upstream repository attribution, licenses, and
+immutable `upstream-provenance.json` hashes are unchanged. For provenance lookup,
+map the new crate directory back to `crates/herdr-gpui` in the original manifest.
+Native build receipts, assembly notices, preview scripts, Cargo selectors and
+CI paths now reference the renamed application crate.

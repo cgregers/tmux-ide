@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/zenbu-labs/terminal-browser",
+  "commit": "660ec51e0ec0e5172338a2920e50089943882af4",
+  "patch": "native-surface.patch",
+  "patchSha256": "3d5e2523d0ce8f33225d68fd34e9ad3e4c4bc87d19c9dce43462247dabc7ca87",
+  "initialReference": {
+    "repository": "https://github.com/zenbu-labs/pixel",
+    "commit": "cdfdb9d6a424cb2c3774ccb258a9a6f9c4ceff0d"
+  },
+  "status": "development integration; native surfaces qualified locally; native controls and vendored distribution under qualification; unreleased"
+}
