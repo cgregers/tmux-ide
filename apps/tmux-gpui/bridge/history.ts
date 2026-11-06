@@ -1,3 +1,4 @@
+import { createHistoryRowByteSizer } from "./history-row-byte-size.ts";
 import { z } from "zod";
 import type {
   TerminalReplicaSnapshot,
@@ -10,15 +11,18 @@ const MAX_ROWS = 1000;
 const MAX_BYTES = 2 * 1024 * 1024;
 /** Retain canonical row identity locally; never infer identity from matching text. */
 export function createHistoryViewport() {
+  const rowByteSize = createHistoryRowByteSizer();
   let current: TerminalReplicaSnapshot | null = null;
   let history: TerminalReplicaRow[] = [];
   let anchor: TerminalReplicaRow | null = null;
   let offset = 0;
+  let sourceHistory: TerminalReplicaRow[] = [];
   function update(snapshot: TerminalReplicaSnapshot | null) {
     if (!snapshot || current?.cols !== snapshot.cols || snapshot.modes.alternateScreen) {
       anchor = null;
       offset = 0;
     }
+    sourceHistory = snapshot?.history ?? [];
     current = snapshot ? { ...snapshot, history: [] } : null;
     history = [];
     if (snapshot && !snapshot.modes.alternateScreen) {
@@ -29,7 +33,7 @@ export function createHistoryViewport() {
         i--
       ) {
         const row = snapshot.history[i]!;
-        bytes += Buffer.byteLength(JSON.stringify(row));
+        bytes += rowByteSize(row);
         if (bytes > MAX_BYTES) break;
         history.push(row);
       }
@@ -61,6 +65,18 @@ export function createHistoryViewport() {
     update,
     get offset() {
       return offset;
+    },
+    captureIndex(): number | null {
+      if (!anchor) return null;
+      const index = sourceHistory.indexOf(anchor);
+      return index >= 0 && index === sourceHistory.lastIndexOf(anchor) ? index : null;
+    },
+    restoreRow(row: TerminalReplicaRow): TerminalReplicaSnapshot | null {
+      const index = history.indexOf(row);
+      if (index < 0 || index !== history.lastIndexOf(row)) return null;
+      anchor = row;
+      offset = history.length - index;
+      return view();
     },
     scroll(lines: number) {
       offset = lines === 0 ? 0 : Math.max(0, Math.min(history.length, offset + lines));

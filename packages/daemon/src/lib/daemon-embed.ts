@@ -1,3 +1,7 @@
+import { createNativeBrowserResolver } from "./tmux-native-browser.ts";
+import { createNativeSurfaceContextResolver } from "./native-surface-context.ts";
+import { NativeSurfaceProviderRegistry } from "../terminal/graphics/native-surface-provider.ts";
+import { TmuxServerVersionSchemaZ } from "@tmux-ide/contracts";
 import {
   createNativeSplitCapabilityProbe,
   createNativeSplitReadiness,
@@ -7,7 +11,8 @@ import { createGuardedNativeSplitResize } from "./guarded-native-split-resize.ts
 import { WindowLinkTargetSchemaZ } from "@tmux-ide/contracts";
 import { WindowSplitLayoutUnavailable } from "../terminal/mirror/window-split-authority.ts";
 import { requireSupportedTmuxVersion } from "./tmux-version.ts";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { LocalImageOwner, cleanupLocalImageOwner } from "../terminal/graphics/local-image-owner.ts";
 import { createClaudeTeamMembershipReader } from "../terminal/attachments/claude-team-names.ts";
 import { PaneSourceDiscovery } from "./pane-source-discovery.ts";
 import { createBackgroundNativeCapture } from "./background-native-capture.ts";
@@ -112,7 +117,12 @@ import {
   resolveWorkspacePaneTmuxAuthority,
   WorkspacePaneCreationAuthority,
 } from "./workspace-pane-creation.ts";
-import { discoverLiveSessionSummaries, readAdoptedFleet } from "../command-center/discovery.ts";
+import {
+  discoverLiveSessionSummaries,
+  readAdoptedFleet,
+  type FleetSessionFacts,
+} from "../command-center/discovery.ts";
+import { readCatalogFleet } from "./catalog-fleet-read.ts";
 import { WorkspaceOpenAuthority } from "./workspace-open.ts";
 import { WorkspacePromotionAuthority } from "./workspace-promotion.ts";
 import { WorkspaceOpenHandoffCoordinator } from "./workspace-open-handoff.ts";
@@ -137,6 +147,7 @@ import {
   attachTerminalAttachmentWebSocket,
   type TerminalAttachmentWebSocketBoundary,
 } from "../server/terminal-attachment-upgrade.ts";
+import { attachNativeSurfaceProvider } from "../server/native-surface-provider-upgrade.ts";
 import {
   attachPaneStreamWebSocket,
   type PaneStreamWebSocketBoundary,
@@ -158,6 +169,7 @@ import { captureDaemonProvenance } from "./daemon-provenance.ts";
 import { registerLogSecret, setLogIdentity } from "./log.ts";
 import {
   canonicalDaemonUrl,
+  getCanonicalDaemonInfoPath,
   clearCanonicalDaemonInfoIfOwned,
   clearCanonicalDaemonInfoIfUnchanged,
   inspectCanonicalDaemonInfo,
@@ -914,6 +926,10 @@ async function startHttpServer({
       issue: (request, context) => getTerminalAttachmentRuntime().admission.issue(request, context),
     },
     paneStreamIssueBackend: paneStreamRuntime.coordinator,
+    nativeSurfaceProviderSupported: () =>
+      serverOwners.isDefaultCurrent() && paneStreamRuntime.nativeSurfaces !== undefined,
+    nativeSurfaceProviderAvailable: () =>
+      serverOwners.isDefaultCurrent() && paneStreamRuntime.nativeSurfaces?.available === true,
     applicationShellInventoryBackend: terminalInventoryRuntime,
     startupReadinessAttachmentBackend: terminalInventoryRuntime,
     catalogLiveSessions,
@@ -963,12 +979,26 @@ async function startHttpServer({
       (create ? getTerminalAttachmentRuntime() : peekTerminalAttachmentRuntime())?.admission ??
       null,
   );
-  const paneStreamBoundary = attachPaneStreamWebSocket(
+  const paneStreamSocketBoundary = attachPaneStreamWebSocket(
     server,
     paneStreamRuntime.coordinator,
     PANE_STREAM_REDEEM_PATH,
     () => serverOwners.isDefaultCurrent(),
   );
+  const nativeProviderBoundary = paneStreamRuntime.nativeSurfaces
+    ? attachNativeSurfaceProvider(
+        server,
+        paneStreamRuntime.nativeSurfaces,
+        localBypassToken ?? null,
+        () => serverOwners.isDefaultCurrent(),
+      )
+    : null;
+  const paneStreamBoundary: PaneStreamWebSocketBoundary = {
+    async close() {
+      nativeProviderBoundary?.close();
+      await paneStreamSocketBoundary.close();
+    },
+  };
   serverOwners.attach(server);
 
   try {
@@ -1393,8 +1423,10 @@ async function startEmbeddedDaemonGeneration(
     };
     let terminalAttachmentRuntime: NativeTerminalAttachmentRuntime | null = null;
     let paneStreamRuntime: PaneStreamRuntime | null = null;
+    let localImages: LocalImageOwner | undefined;
     let serverOwners: Awaited<ReturnType<typeof createEmbeddedTmuxServerOwners>> | null = null;
     let defaultEditorContextRetired = false;
+    const defaultDiagnosticsLifetime = new AbortController();
     const defaultSessionCreator = createNativeTmuxSessionCreator({
       generation: instanceId,
       registry: workspaceRegistry,
@@ -1516,6 +1548,8 @@ async function startEmbeddedDaemonGeneration(
         externalInteractionObserver.setDiagnostics(diagnostics);
         setFleetFactsObserverDiagnostics(diagnostics);
       }
+      const nativeSurfaces =
+        process.platform === "darwin" ? new NativeSurfaceProviderRegistry(instanceId) : undefined;
       sessionRuntimeRegistry = new SessionRuntimeRegistry({
         generation: instanceId,
         ...(runtimeObservability ? { observability: runtimeObservability } : {}),
@@ -1551,6 +1585,8 @@ async function startEmbeddedDaemonGeneration(
           publishResourceChange: (change) => broadcastResourceChanged(change, instanceId),
         },
         mirror: {
+          onNativeClientPresence: (session, present) =>
+            nativeSurfaces?.demand.presence(session, present),
           splitLayoutEpoch: () => observationSelector?.nativeServerEpoch ?? null,
           splitLayoutPrepare: createNativeSplitReadiness({
             observation: () => observationSelector ?? null,
@@ -1725,7 +1761,35 @@ async function startEmbeddedDaemonGeneration(
       };
       const peekTerminalAttachmentRuntime = (): NativeTerminalAttachmentRuntime | null =>
         terminalAttachmentRuntime;
+      // The held canonical claim has already proven and hardened this private root.
+      // Local images are optional: unavailable storage retains inline graphics.
+      if (process.platform !== "win32") {
+        const root = dirname(getCanonicalDaemonInfoPath());
+        try {
+          if (existingCanonical.status === "valid") {
+            await cleanupLocalImageOwner({
+              root,
+              owner: {
+                generation: existingCanonical.info.instanceId,
+                pid: existingCanonical.info.pid,
+                startedAt: existingCanonical.info.startedAt,
+              },
+              proveDead: () => isCanonicalDaemonRecordOwnerProvenDead(existingCanonical),
+            });
+          }
+          localImages = await LocalImageOwner.create({
+            root,
+            generation: instanceId,
+            pid: process.pid,
+            startedAt,
+          });
+        } catch {
+          localImages = undefined;
+        }
+      }
       paneStreamRuntime = createPaneStreamRuntime({
+        nativeSurfaces,
+        localImages,
         daemonInstanceId: instanceId,
         webSocketUrl: paneStreamWebSocketUrl(bindHostname, port),
         sessionRuntimeRegistry,
@@ -1751,6 +1815,7 @@ async function startEmbeddedDaemonGeneration(
       });
       await externalInteractionObserver.start();
       serverOwners = await createEmbeddedTmuxServerOwners({
+        localImages,
         environmentId,
         onDefaultScope: async (scope) => {
           interactionEvidence = new InteractionEvidenceAuthority(environmentId, scope);
@@ -1800,6 +1865,29 @@ async function startEmbeddedDaemonGeneration(
         stateDirectory: resolveRuntimeNamespace().runtimeDir,
         webSocketBaseUrl: canonicalDaemonUrl("ws", bindHostname, port),
         defaultOwner: {
+          readServerVersion: async (signal?: AbortSignal) => {
+            const assertCurrent = () => {
+              if (
+                defaultEditorContextRetired ||
+                serverOwners?.defaultRetired ||
+                !initialNativeServerIdentity
+              )
+                throw new Error("Default tmux diagnostics owner is unavailable");
+            };
+            assertCurrent();
+            const combined = AbortSignal.any([
+              defaultDiagnosticsLifetime.signal,
+              ...(signal ? [signal] : []),
+            ]);
+            combined.throwIfAborted();
+            const output = await fleetFactsTmuxRunner(
+              ["display-message", "-p", "#{version}"],
+              combined,
+            );
+            combined.throwIfAborted();
+            assertCurrent();
+            return TmuxServerVersionSchemaZ.parse(output.trim());
+          },
           get interactionObservation() {
             return interactionObservation;
           },
@@ -1819,6 +1907,22 @@ async function startEmbeddedDaemonGeneration(
             return grant ? interactionEvidence.captureSourceBinding(grant) : null;
           },
           interactionReceipts,
+          resolveNativeSurfaceContext: createNativeSurfaceContextResolver({
+            generation: instanceId,
+            registry: workspaceRegistry,
+            catalog: createNativeTmuxServerCatalog(workspaceRegistry, fleetFactsTmuxRunner),
+            inventory: terminalInventoryRuntime,
+            run: (args, signal) => fleetFactsTmuxRunner(args, signal),
+            assertOpen: () => {
+              if (
+                defaultEditorContextRetired ||
+                serverOwners?.defaultRetired ||
+                !initialNativeServerIdentity ||
+                terminalInventoryRuntime?.lifecycleState() !== "ready"
+              )
+                throw new Error("Default native surface context owner is unavailable");
+            },
+          }),
           resolvePaneEditorContext: createPaneEditorContextResolver({
             generation: instanceId,
             registry: workspaceRegistry,
@@ -1832,6 +1936,22 @@ async function startEmbeddedDaemonGeneration(
                 terminalInventoryRuntime?.lifecycleState() !== "ready"
               )
                 throw new Error("Default tmux editor context owner is unavailable");
+            },
+          }),
+          nativeBrowser: createNativeBrowserResolver({
+            generation: instanceId,
+            run: fleetFactsTmuxRunner,
+            registry: workspaceRegistry,
+            catalog: createNativeTmuxServerCatalog(workspaceRegistry, fleetFactsTmuxRunner),
+            inventory: terminalInventoryRuntime,
+            assertOpen: () => {
+              if (
+                defaultEditorContextRetired ||
+                serverOwners?.defaultRetired ||
+                !initialNativeServerIdentity ||
+                terminalInventoryRuntime?.lifecycleState() !== "ready"
+              )
+                throw new Error("Default native browser owner is unavailable");
             },
           }),
           catalog: createNativeTmuxServerCatalog(workspaceRegistry, fleetFactsTmuxRunner),
@@ -1908,6 +2028,7 @@ async function startEmbeddedDaemonGeneration(
           paneStreamRuntime,
           dispose: async () => {
             defaultEditorContextRetired = true;
+            defaultDiagnosticsLifetime.abort();
             sessionMonitor?.stop();
             paneSourceCredentials.dispose();
             const transportResults = await Promise.allSettled([
@@ -1982,18 +2103,28 @@ async function startEmbeddedDaemonGeneration(
         paneStreamRuntime,
         catalogLiveSessions: () => discoverLiveSessionSummaries(catalogTmuxRunner),
         catalogFleet: async () => {
-          const fleet = readAdoptedFleet(
+          const endpoint = (sessionName: string, pane: FleetSessionFacts["panes"][number]) =>
+            pane.semanticPaneId
+              ? (interactionEvidence?.captureInventoryEndpoint(
+                  sessionName,
+                  pane.runtimePaneId,
+                  pane.semanticPaneId,
+                ) ?? null)
+              : null;
+          const epoch = () => observationSelector?.nativeServerEpoch ?? null;
+          // Same pinned server generation either way. Outside a session
+          // mutation the read must not block the event loop: every concurrent
+          // catalog request queued behind its spawnSync (#709). Inside one,
+          // keep the fenced synchronous runner the mutation relies on.
+          const fleet = await readCatalogFleet(
             workspaceRegistry,
-            nativeGenerationTmuxRunner,
-            (sessionName, pane) =>
-              pane.semanticPaneId
-                ? (interactionEvidence?.captureInventoryEndpoint(
-                    sessionName,
-                    pane.runtimePaneId,
-                    pane.semanticPaneId,
-                  ) ?? null)
-                : null,
-            () => observationSelector?.nativeServerEpoch ?? null,
+            {
+              fence: sessionMutationFence,
+              fencedSync: nativeGenerationTmuxRunner,
+              generationFencedAsync: (args) => fleetFactsTmuxRunner(args),
+            },
+            endpoint,
+            epoch,
           );
           if (!fleet) return null;
           const names = await readTeamMemberships(
@@ -2044,7 +2175,10 @@ async function startEmbeddedDaemonGeneration(
       // The pane-stream coordinator may still hold runtime consumers while it
       // drains. Preserve the normal shutdown order on startup rollback too:
       // transports first, then the one session/control authority.
-      await Promise.allSettled([sessionRuntimeRegistry?.dispose() ?? Promise.resolve()]);
+      await Promise.allSettled([
+        sessionRuntimeRegistry?.dispose() ?? Promise.resolve(),
+        localImages?.dispose() ?? Promise.resolve(),
+      ]);
       throw error;
     }
     const {
@@ -2077,6 +2211,7 @@ async function startEmbeddedDaemonGeneration(
         )),
         ...(await retirePaneStreamTransport()),
       ];
+      await localImages?.dispose();
       terminalInventoryRuntime.dispose();
       const paneDisposal = Promise.resolve().then(() => workspacePaneCreation.dispose());
       const workspaceOpenDisposal = Promise.resolve().then(() => workspaceOpen.dispose());
@@ -2344,6 +2479,7 @@ async function startEmbeddedDaemonGeneration(
               )),
             );
             failures.push(...(await retirePaneStreamTransport()));
+            await capture(() => localImages?.dispose());
             await capture(() => terminalInventoryRuntime.dispose());
             await capture(() => workspacePaneCreation.dispose());
             await capture(() => workspaceOpen.dispose());

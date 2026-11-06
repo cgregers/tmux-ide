@@ -79,6 +79,8 @@ export interface MirrorServiceOptions {
   /** `tmux -f <file>` — tests pass /dev/null. */
   configFile?: string;
   pauseAfterSeconds?: number;
+  /** Enable kitty graphics acknowledgements on attach (default: on unless TMUX_IDE_KITTY_GRAPHICS=0). */
+  kittyGraphics?: boolean;
   /** Explicit capture tail override. Omitted preserves native retained history. */
   historyLines?: number;
   internalReadHookEmission?: SessionChannelOptions["internalReadHookEmission"];
@@ -90,6 +92,8 @@ export interface MirrorServiceOptions {
   controlModeOwnershipRegistry?: ControlModeOwnershipRegistry;
   /** Emitted only after an event-triggered list-clients proof of a native client. */
   onNativeClientActivity?: (session: string) => void;
+  /** Proven native viewer presence; null preserves fallback while unknown. */
+  onNativeClientPresence?: (session: string, present: boolean | null) => void;
   captureInputWrite?: (
     session: string,
     ...args: Parameters<NonNullable<SessionChannelOptions["captureInputWrite"]>>
@@ -235,14 +239,31 @@ export class MirrorService {
     }
   }
 
-  async describeSessionAuthority(session: string): Promise<{
+  async describeSessionAuthority(
+    session: string,
+    expectedSemanticPaneIds?: readonly string[],
+  ): Promise<{
     readonly description: MirrorSessionDescription;
     readonly runtimeSessionId: string;
   }> {
     const entry = await this.acquire(session);
     try {
       const identity = await entry.channel.attachedSessionIdentity();
-      return { description: entry.channel.describe(), runtimeSessionId: identity.runtimeSessionId };
+      let description = entry.channel.describe();
+      if (
+        expectedSemanticPaneIds?.some(
+          (id) => !description.panes.some((pane) => pane.semanticPaneId === id),
+        )
+      ) {
+        // A mutation receipt and fresh catalog can precede debounced mirror
+        // discovery. Join the verified native inventory before declaring a
+        // requested pane absent; never substitute receipt IDs for tmux truth.
+        await entry.channel.describeTrustedInventory(identity.runtimeSessionId, true);
+        description = entry.channel.describe();
+      }
+      if (this.disposed || entry.retired || this.channels.get(session) !== entry)
+        throw new Error("Mirror authority retired during description");
+      return { description, runtimeSessionId: identity.runtimeSessionId };
     } finally {
       this.release(session, entry);
     }
@@ -563,6 +584,17 @@ export class MirrorService {
     entry.channel.fitWindowViewport(semanticWindowId, cols, rows);
   }
 
+  setCellPixels(
+    session: string,
+    width: number,
+    height: number,
+    precise?: { width: number; height: number },
+  ): void {
+    const entry = this.channels.get(session);
+    if (!entry || entry.retired) return;
+    entry.channel.setCellPixels(width, height, precise);
+  }
+
   clearWindowViewports(session: string): void {
     const entry = this.channels.get(session);
     if (entry && !entry.retired) entry.channel.clearWindowViewports();
@@ -737,6 +769,7 @@ export class MirrorService {
               nativeServerIdentity: this.opts.nativeServerIdentity,
               configFile: this.opts.configFile,
               pauseAfterSeconds: this.opts.pauseAfterSeconds,
+              kittyGraphics: this.opts.kittyGraphics ?? process.env.TMUX_IDE_KITTY_GRAPHICS !== "0",
               nowMicros: this.opts.nowMicros,
               nativeViewer: ownedViewer?.controlOptions(),
               nativeViewerReady: ownedViewer
@@ -782,6 +815,9 @@ export class MirrorService {
             }
           },
           onNativeClientActivity: () => this.opts.onNativeClientActivity?.(session),
+          onNativeClientPresence: this.opts.onNativeClientPresence
+            ? (present) => this.opts.onNativeClientPresence?.(session, present)
+            : undefined,
           captureInputWrite: (action, semanticPaneId) =>
             this.opts.captureInputWrite?.(session, action, semanticPaneId),
           onInputWrite: (action, startedAtMicros, endedAtMicros, pendingBeforeSend) =>

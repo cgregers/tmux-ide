@@ -44,6 +44,31 @@ import {
   cellsEqual,
   type CausalCellLedgerResult,
 } from "./causal-cell-ledger.ts";
+import {
+  KITTY_PLACEMENT_OSC,
+  KittyApcScanner,
+  KittyImageStore,
+  type KittyCommand,
+  type KittyImageBudget,
+} from "../graphics/kitty-graphics.ts";
+import type { TerminalGraphicsState } from "@tmux-ide/contracts";
+
+// Bound parser work per turn without changing byte-stream semantics. This is a
+// batch bound, not a producer queue cap: upstream pressure must preserve bytes.
+const MAX_INGEST_BATCH_BYTES = 256 * 1024;
+type PendingWrite = {
+  data: Uint8Array;
+  offset: number;
+  resolve: () => void;
+  reject: (error: unknown) => void;
+};
+type WriteGroup = {
+  entries: PendingWrite[];
+  bytes: number;
+  scheduled: boolean;
+  flushQueued: boolean;
+  trace: SessionRuntimeTraceContext | null;
+};
 
 type CloseReason = "pane-closed" | "session-restarted" | "runtime-disposed";
 export type TerminalReplicaInterpreterOperation =
@@ -115,6 +140,8 @@ export interface TerminalReplicaInterpreterOptions {
   readonly observability?: SessionRuntimeObservability;
   /** Parser implementation only; SessionRuntime remains the sole state authority. */
   readonly backendFactory?: TerminalInterpreterBackendFactory;
+  /** Shared kitty image byte quotas; defaults to the daemon-wide budget. */
+  readonly kittyImageBudget?: KittyImageBudget;
 }
 
 export interface TerminalReplicaInterpreterStats {
@@ -157,14 +184,15 @@ export class TerminalReplicaInterpreter {
   #needsSeed = true;
   #closed = false;
   #walkCount = 0;
-  #pendingWrites: Array<{
-    data: Uint8Array;
-    trace: SessionRuntimeTraceContext | null;
-    resolve: () => void;
-    reject: (error: unknown) => void;
-  }> = [];
-  #writeFlushScheduled = false;
+  #pendingWrites: WriteGroup | null = null;
   #widgetGate = false;
+  // kitty graphics: images outlive reseeds; the scanner owns split APCs.
+  readonly #kittyScanner = new KittyApcScanner();
+  readonly #kitty: KittyImageStore;
+  readonly #kittyPending = new Map<number, KittyCommand>();
+  readonly #graphicsListeners = new Set<(state: TerminalGraphicsState) => void>();
+  #graphics: TerminalGraphicsState | null = null;
+  #graphicsKey = "";
   #markerTail = "";
   #pendingResize: { cols: number; rows: number } | null = null;
   // null: no unpublished writes; undefined: a write requires full projection.
@@ -208,6 +236,10 @@ export class TerminalReplicaInterpreter {
       rows: options.rows,
       scrollback: this.#scrollback,
     });
+    this.#kitty = new KittyImageStore(
+      options.kittyImageBudget ? { budget: options.kittyImageBudget } : {},
+    );
+    this.#attachKitty(this.#backend);
     this.#snapshot = blankTerminalReplicaSnapshot(options.cols, options.rows);
     this.#seedReady = new Promise((resolve, reject) => {
       this.#resolveSeedReady = resolve;
@@ -231,18 +263,27 @@ export class TerminalReplicaInterpreter {
     if (operation.type === "write") {
       const data = operation.data.slice();
       const trace = operation.trace ?? null;
-      const pendingTrace = this.#pendingWrites[0]?.trace ?? null;
       if (
-        this.#pendingWrites.length > 0 &&
-        (pendingTrace?.traceId ?? null) !== (trace?.traceId ?? null)
+        this.#pendingWrites &&
+        (this.#pendingWrites.trace?.traceId ?? null) !== (trace?.traceId ?? null)
       )
         this.#flushWrites();
-      const promise = new Promise<void>((resolve, reject) => {
-        this.#pendingWrites.push({ data, trace, resolve, reject });
+      const group = (this.#pendingWrites ??= {
+        entries: [],
+        bytes: 0,
+        scheduled: false,
+        flushQueued: false,
+        trace,
       });
-      if (!this.#writeFlushScheduled) {
-        this.#writeFlushScheduled = true;
-        this.#scheduler.microtask(() => this.#flushWrites());
+      const promise = new Promise<void>((resolve, reject) => {
+        group.entries.push({ data, offset: 0, resolve, reject });
+        group.bytes += data.length;
+      });
+      // Leave this group open while the parser awaits its callback. Scheduling
+      // it once on the FIFO lets later arrivals join the next bounded batch.
+      if (!group.scheduled && !group.flushQueued) {
+        group.flushQueued = true;
+        this.#scheduler.microtask(() => this.#scheduleWriteGroup(group));
       }
       return promise;
     }
@@ -400,6 +441,18 @@ export class TerminalReplicaInterpreter {
       }
       const previous = this.#backend;
       this.#backend = replacement;
+      this.#attachKitty(replacement);
+      // A capture replay does not erase graphics already observed by this owner.
+      // Keep anchors only when both backends agree on their coordinate basis;
+      // reflow, history replacement and authoritative stream resets are ambiguous.
+      const sameGraphicsBasis =
+        operation.bootstrap === "painted-capture" &&
+        previous.cols === replacement.cols &&
+        previous.rows === replacement.rows &&
+        previous.graphicsViewportTop?.() !== undefined &&
+        previous.graphicsViewportTop?.() === replacement.graphicsViewportTop?.() &&
+        previous.modes().alternateScreen === replacement.modes().alternateScreen;
+      if (!sameGraphicsBasis) this.#kitty.dropCursorPlacements();
       this.#nativeReseedRequested = false;
       this.#scrollback = scrollback;
       this.#bootstrap = {
@@ -421,6 +474,7 @@ export class TerminalReplicaInterpreter {
         this.#nativeSeedBackingCandidate = undefined;
       }
       previous.dispose();
+      this.#publishGraphics();
       return;
     }
     if (operation.type === "cursor") {
@@ -434,6 +488,8 @@ export class TerminalReplicaInterpreter {
       return;
     }
     if (operation.type === "resize") {
+      if (operation.cols !== this.#backend.cols || operation.rows !== this.#backend.rows)
+        this.#kitty.dropCursorPlacements();
       this.#causalCell?.fail("geometry-drift");
       if (this.#backend.modes().synchronizedOutput) {
         // Geometry is part of the admitted FIFO even while publication is
@@ -445,6 +501,7 @@ export class TerminalReplicaInterpreter {
       }
       this.#backend.resize(operation.cols, operation.rows);
       this.#commit(false);
+      this.#publishGraphics();
       return;
     }
     const baseRevision = this.#revision;
@@ -462,6 +519,7 @@ export class TerminalReplicaInterpreter {
     };
     this.#revision = revision;
     this.#closed = true;
+    this.#kitty.dispose();
     this.#causalCell?.fail("transport-closed");
     this.#clearSyncRecovery();
     if (this.#needsSeed)
@@ -479,8 +537,38 @@ export class TerminalReplicaInterpreter {
     this.#admitRaw(data);
     this.#stats.parseBatches += 1;
     this.#observeMarkerBytes(data);
+    const scanned = this.#kittyScanner.scan(data);
+    for (const command of scanned.commands) this.#kittyPending.set(command.marker, command);
     const parseStarted = this.#observability.enabled ? this.#observability.nowMicros() : 0;
-    await this.#writeToBackend(this.#backend, data);
+    // Always forward the scanner's output: tmux splits %output (~2 KiB) inside
+    // kitty APCs (~4 KiB chunks), so a chunk with no completed command can still
+    // be all image payload that must never reach the VT parser as text.
+    // A chunk entirely inside image payload changes nothing the parser can
+    // see. Skipping it matters: every parser write settles on a later timer
+    // turn, so a frame split into dozens of %output chunks would otherwise
+    // serialize dozens of turns and fall behind a 30 fps image stream.
+    if (scanned.forward.byteLength === 0) return;
+    // Scanning can prepend an escape retained from the previous chunk. Bound
+    // the actual parser calls too, and union damage across every fragment.
+    for (let offset = 0; offset < scanned.forward.length; offset += MAX_INGEST_BATCH_BYTES) {
+      await this.#writeToBackend(
+        this.#backend,
+        scanned.forward.subarray(offset, offset + MAX_INGEST_BATCH_BYTES),
+      );
+      // The parser resets its dirty tracker per write. Synchronized output and
+      // bounded fragments can both span writes before canonical publication.
+      const dirty = this.#backend.dirtyRange();
+      const pending = this.#pendingWriteDirty;
+      this.#pendingWriteDirty =
+        pending === null
+          ? dirty
+          : pending === undefined || dirty === undefined
+            ? undefined
+            : {
+                start: Math.min(pending.start, dirty.start),
+                end: Math.max(pending.end, dirty.end),
+              };
+    }
     if (this.#observability.enabled)
       this.#observability.recordSpan(
         "parse",
@@ -489,19 +577,6 @@ export class TerminalReplicaInterpreter {
         this.#observability.nowMicros(),
         trace,
       );
-    // The parser resets its dirty tracker per write. Synchronized output may
-    // span many writes before publication, so retain their union until commit.
-    const dirty = this.#backend.dirtyRange();
-    const pending = this.#pendingWriteDirty;
-    this.#pendingWriteDirty =
-      pending === null
-        ? dirty
-        : pending === undefined || dirty === undefined
-          ? undefined
-          : {
-              start: Math.min(pending.start, dirty.start),
-              end: Math.max(pending.end, dirty.end),
-            };
     // DEC synchronized-output is atomic: no intermediate frame leaks.
     if (this.#backend.requiresNativeReseed()) {
       this.#commit(false);
@@ -519,12 +594,14 @@ export class TerminalReplicaInterpreter {
     } else {
       this.#commit(false, this.#backend.dirtyRange(), trace);
     }
+    this.#publishGraphics();
   }
 
   #scheduleSyncRecovery(): void {
     if (this.#syncRecovery || this.#closed) return;
     this.#syncRecovery = this.#scheduler.timer(() => {
       this.#syncRecovery = null;
+      this.#flushWrites();
       const run = this.#tail.then(async () => {
         if (this.#closed || !this.#backend.modes().synchronizedOutput) return;
         // Recovery is synthetic parser maintenance, not pane output caused by
@@ -719,6 +796,55 @@ export class TerminalReplicaInterpreter {
     });
   }
 
+  /** The pane's kitty image store (bytes for the graphics side channel). */
+  kittyImages(): KittyImageStore {
+    return this.#kitty;
+  }
+
+  /** Latest graphics state, or null while the pane has never held an image. */
+  currentGraphics(): TerminalGraphicsState | null {
+    return this.#graphics;
+  }
+
+  onGraphics(listener: (state: TerminalGraphicsState) => void): () => void {
+    this.#graphicsListeners.add(listener);
+    return () => this.#graphicsListeners.delete(listener);
+  }
+
+  /** Publish graphics state when the store or the viewport-relative placements moved. */
+  #publishGraphics(): void {
+    if (this.#graphics === null && this.#kitty.revision === 0) return;
+    const state = this.#kitty.state(
+      this.#backend.graphicsViewportTop?.() ?? 0,
+      this.#backend.rows,
+      this.#backend.cols,
+      this.#backend.modes().alternateScreen,
+    );
+    const key = JSON.stringify([state.revision, state.placements]);
+    if (key === this.#graphicsKey) return;
+    this.#graphicsKey = key;
+    this.#graphics = state;
+    for (const listener of this.#graphicsListeners) {
+      try {
+        listener(state);
+      } catch {
+        // Renderer callbacks never poison the authoritative parser FIFO.
+      }
+    }
+  }
+
+  #attachKitty(backend: TerminalInterpreterBackend): void {
+    // Minimal test backends omit the OSC seam; they simply never place images.
+    if (typeof backend.registerOscHandler !== "function") return;
+    backend.registerOscHandler(KITTY_PLACEMENT_OSC, (data) => {
+      const command = this.#kittyPending.get(Number(data));
+      if (!command) return true;
+      this.#kittyPending.delete(Number(data));
+      this.#kitty.apply(command, backend.graphicsCursor?.() ?? null);
+      return true;
+    });
+  }
+
   #currentSnapshotHash(): string {
     return (this.#snapshotHash ??= hashTerminalReplicaSnapshot(this.#snapshot));
   }
@@ -761,24 +887,54 @@ export class TerminalReplicaInterpreter {
     }
   }
 
+  /** Seal the current group at every trace, control and idle barrier. */
   #flushWrites(): void {
-    this.#writeFlushScheduled = false;
-    if (this.#pendingWrites.length === 0) return;
-    const pending = this.#pendingWrites.splice(0);
-    const length = pending.reduce((total, entry) => total + entry.data.length, 0);
-    const data = new Uint8Array(length);
-    let offset = 0;
-    for (const entry of pending) {
-      data.set(entry.data, offset);
-      offset += entry.data.length;
-    }
-    const trace = pending.find(({ trace }) => trace !== null)?.trace ?? null;
-    const run = this.#tail.then(() => this.#write(data, trace));
+    const group = this.#pendingWrites;
+    this.#pendingWrites = null;
+    if (group) this.#scheduleWriteGroup(group);
+  }
+
+  #scheduleWriteGroup(group: WriteGroup): void {
+    if (group.scheduled) return;
+    group.scheduled = true;
+    const run = this.#tail.then(async () => {
+      try {
+        while (group.entries.length > 0) {
+          const length = Math.min(group.bytes, MAX_INGEST_BATCH_BYTES);
+          const data = new Uint8Array(length);
+          const completed: PendingWrite[] = [];
+          let offset = 0;
+          for (const entry of group.entries) {
+            const take = Math.min(entry.data.length - entry.offset, length - offset);
+            data.set(entry.data.subarray(entry.offset, entry.offset + take), offset);
+            offset += take;
+            entry.offset += take;
+            if (entry.offset === entry.data.length) completed.push(entry);
+            else break;
+            if (offset === length && length > 0) break;
+          }
+          group.entries.splice(0, completed.length);
+          group.bytes -= length;
+          try {
+            await this.#write(data, group.trace);
+          } catch (error) {
+            for (const entry of completed) entry.reject(error);
+            throw error;
+          }
+          for (const entry of completed) entry.resolve();
+        }
+      } catch (error) {
+        // Reject every remaining fragment in the failed group; later FIFO
+        // controls (including recovery reseeds and close) still execute.
+        for (const entry of group.entries) entry.reject(error);
+        group.entries.length = 0;
+        group.bytes = 0;
+        throw error;
+      } finally {
+        if (this.#pendingWrites === group) this.#pendingWrites = null;
+      }
+    });
     this.#tail = run.catch(() => undefined);
-    void run.then(
-      () => pending.forEach((entry) => entry.resolve()),
-      (error) => pending.forEach((entry) => entry.reject(error)),
-    );
   }
 
   #observeMarkerBytes(data: Uint8Array): void {

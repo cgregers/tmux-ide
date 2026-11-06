@@ -2,7 +2,8 @@
 # curl -fsSL https://tmux-ide.com/install.sh | sh
 set -eu
 fail() { printf 'tmux-ide: %s\n' "$*" >&2; exit 1; }
-fetch() { curl -fLsS --retry 3 --connect-timeout 15 --max-time 180 "$1" -o "$2"; }
+# Give up on a stalled download, not a slow one: Node.js alone is over 50 MB.
+fetch() { curl -fLsS --retry 3 --retry-max-time 900 --connect-timeout 15 --speed-limit 1 --speed-time 30 --max-time 900 "$1" -o "$2"; }
 digest() {
   if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1"; else shasum -a 256 "$1"; fi | awk '{print $1}'
 }
@@ -10,6 +11,138 @@ if [ -t 1 ]; then step_mark=$(printf '\033[32m>\033[0m'); else step_mark='>'; fi
 step() { printf '  %s %s\n' "$step_mark" "$*"; }
 # Show captured tool output only when that step fails.
 show_log() { [ ! -s "$1" ] || tail -n 20 "$1" | sed 's/^/    /' >&2; }
+# Move an older daemon onto the active managed release: first repoint macOS
+# launchd jobs that start another tmux-ide copy (their KeepAlive would otherwise
+# relaunch it), then retire a running older daemon. tmux sessions keep running.
+reconcile_daemon() {
+  reconcile_root="$1/share/tmux-ide"
+  "$reconcile_root/current/node/bin/node" --input-type=module - "$reconcile_root" "$1" "$2" <<'JS'
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+const [root, prefix, upgrade] = process.argv.slice(2);
+const launcher = path.join(prefix, 'bin', 'tmux-ide');
+const onPath = (process.env.PATH || '').split(':').filter(Boolean)
+  .map(directory => path.join(path.resolve(directory), 'tmux-ide'))
+  .find(candidate => { try { fs.accessSync(candidate, fs.constants.X_OK); return true; } catch { return false; } });
+const command = onPath === launcher ? 'tmux-ide' : "'" + launcher.replaceAll("'", "'\\''") + "'";
+const version = JSON.parse(fs.readFileSync(path.join(root, 'current/npm/lib/node_modules/tmux-ide/package.json'), 'utf8')).version;
+const run = (file, args, timeout = 30000) => spawnSync(file, args, {encoding: 'utf8', timeout, stdio: ['ignore', 'pipe', 'pipe']});
+const sleep = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const note = message => console.log(`  > ${message}`);
+const warn = message => console.log(`  ! ${message}`);
+const infoDir = process.env.TMUX_IDE_DAEMON_INFO_DIR || process.env.TMUX_IDE_REGISTRY_DIR || process.env.TMUX_IDE_HOME || path.join(os.homedir(), '.tmux-ide');
+const infoPath = path.join(infoDir, 'daemon.json');
+const readInfo = () => { try { return JSON.parse(fs.readFileSync(infoPath, 'utf8')); } catch { return null; } };
+const alive = pid => { try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; } };
+const compare = (a, b) => {
+  const parse = value => /^(\d+)\.(\d+)\.(\d+)$/.exec(value)?.slice(1).map(Number);
+  const x = parse(a), y = parse(b);
+  if (!x || !y) return null;
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] > y[i] ? 1 : -1;
+  return 0;
+};
+if (process.platform === 'darwin') {
+  const agents = path.join(os.homedir(), 'Library', 'LaunchAgents');
+  let names = [];
+  try { names = fs.readdirSync(agents).filter(name => /^com\.tmux-ide\.[A-Za-z0-9._-]+\.plist$/.test(name)).sort(); } catch {}
+  for (const name of names) {
+    const file = path.join(agents, name);
+    const label = name.slice(0, -'.plist'.length);
+    const target = `gui/${process.getuid()}/${label}`;
+    let args;
+    try {
+      const parsed = run('/usr/bin/plutil', ['-convert', 'json', '-o', '-', '--', file]);
+      if (parsed.status === 0) args = JSON.parse(parsed.stdout).ProgramArguments;
+    } catch {}
+    if (!Array.isArray(args) || typeof args[0] !== 'string' || !path.isAbsolute(args[0]) || path.basename(args[0]) !== 'tmux-ide' || !args.includes('--headless') || args[0] === launcher) continue;
+    // Definitions owned by `tmux-ide daemon service` carry an ownership record; re-register them instead.
+    if (/^com\.tmux-ide\.[0-9a-f]{24}$/.test(label)) {
+      warn(`launchd service ${label} still starts ${args[0]}. Re-register it with: ${command} daemon service remove --yes && ${command} daemon service install ${JSON.stringify(launcher)}`);
+      continue;
+    }
+    const owner = run(args[0], ['--version'], 15000);
+    const ownerVersion = /^tmux-ide v(\S+)$/.exec(String(owner.stdout).trim())?.[1];
+    // A missing executable is stale by definition; never take a job from a newer or unrecognized copy.
+    if (owner.error?.code !== 'ENOENT') {
+      const order = ownerVersion ? compare(ownerVersion, version) : null;
+      if (order === null || order > 0) {
+        warn(`launchd job ${label} starts tmux-ide ${ownerVersion ?? '(unrecognized version)'} from ${args[0]}; left unchanged.`);
+        continue;
+      }
+    }
+    if (upgrade !== '1') {
+      warn(`launchd job ${label} still starts ${args[0]}${ownerVersion ? ` (${ownerVersion})` : ''}. Rerun the installer without --no-daemon-upgrade to move it to this installation.`);
+      continue;
+    }
+    const backups = path.join(root, 'service-backups');
+    const backup = path.join(backups, `${label}.${Date.now()}.plist`);
+    const next = `${file}.tmux-ide-next`;
+    try {
+      fs.mkdirSync(backups, {recursive: true, mode: 0o700});
+      fs.copyFileSync(file, backup);
+      fs.copyFileSync(file, next);
+      const edit = (...edit) => { if (run('/usr/bin/plutil', [...edit, next]).status !== 0) throw new Error('plutil'); };
+      // -replace inserts into arrays; swap the executable explicitly.
+      edit('-remove', 'ProgramArguments.0');
+      edit('-insert', 'ProgramArguments.0', '-string', launcher);
+      const environment = run('/usr/bin/plutil', ['-extract', 'EnvironmentVariables.PATH', 'raw', '-o', '-', next]);
+      if (environment.status === 0) {
+        const bin = path.join(prefix, 'bin');
+        edit('-replace', 'EnvironmentVariables.PATH', '-string', [bin, ...environment.stdout.trim().split(':').filter(entry => entry && entry !== bin)].join(':'));
+      }
+      // Leave tmux servers and panes running when launchd stops this job.
+      edit('-replace', 'AbandonProcessGroup', '-bool', 'YES');
+      edit('-lint');
+      fs.renameSync(next, file);
+    } catch {
+      fs.rmSync(next, {force: true});
+      warn(`Could not update launchd job ${label}; it still starts ${args[0]}.`);
+      continue;
+    }
+    const loaded = () => run('launchctl', ['print', target]).status === 0;
+    if (!loaded()) {
+      note(`launchd job ${label} now starts ${launcher}; it applies when the job next loads.`);
+      continue;
+    }
+    // bootout lets the daemon release ownership gracefully (SIGTERM).
+    run('launchctl', ['bootout', target], 60000);
+    for (let i = 0; i < 150 && loaded(); i++) sleep(200);
+    const supervised = args.indexOf('--supervised');
+    if (supervised > 0 && args[supervised + 1] && !fs.existsSync(infoPath))
+      run(launcher, ['daemon', 'reserve-supervisor', args[supervised + 1], '--json']);
+    if (loaded() || run('launchctl', ['bootstrap', `gui/${process.getuid()}`, file]).status !== 0) {
+      fs.copyFileSync(backup, file);
+      if (!loaded()) run('launchctl', ['bootstrap', `gui/${process.getuid()}`, file]);
+      warn(`Could not restart launchd job ${label}; restored its previous definition. Your sessions are safe.`);
+      continue;
+    }
+    let started = false;
+    for (let i = 0; i < 150 && !started; i++) {
+      const info = readInfo();
+      started = info?.productVersion === version && Number.isInteger(info.pid) && alive(info.pid);
+      if (!started) sleep(200);
+    }
+    note(`Moved launchd job ${label} from ${args[0]} to this installation (backup: ${backup}).`);
+    if (!started) warn(`Its daemon has not reported ${version} yet; check ${command} daemon info --json and the job's log.`);
+  }
+}
+const info = readInfo();
+if (info && Number.isInteger(info.pid) && typeof info.productVersion === 'string' && info.productVersion !== version && (alive(info.pid) || info.supervisionId)) {
+  if (upgrade !== '1') {
+    console.log(`\n  A tmux-ide ${info.productVersion} daemon is still running; your sessions are safe.\n  Move it to ${version}:  ${command} update --daemon --if-running`);
+  } else {
+    const result = run(launcher, ['update', '--daemon', '--if-running', '--json'], 120000);
+    let status;
+    try { status = JSON.parse(String(result.stdout).trim().split('\n').at(-1)); } catch {}
+    if (result.status === 0 && status?.status === 'ready') note(`Restarted the daemon on ${status.productVersion}; tmux sessions kept running.`);
+    else if (result.status !== 0 || status?.status !== 'not-running')
+      warn(`The tmux-ide ${info.productVersion} daemon could not be moved to ${version}; your sessions are safe. Retry: ${command} update --daemon`);
+  }
+}
+JS
+}
 main() {
   action=install
   confirmed=false
@@ -17,6 +150,8 @@ main() {
   prefix=${TMUX_IDE_INSTALL_PREFIX:-"$HOME/.local"}
   agent_teams=1
   [ "${TMUX_IDE_NO_CLAUDE_AGENT_TEAMS:-}" != 1 ] || agent_teams=0
+  daemon_upgrade=1
+  [ "${TMUX_IDE_NO_DAEMON_UPGRADE:-}" != 1 ] || daemon_upgrade=0
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --version|--prefix)
@@ -26,11 +161,13 @@ main() {
       --rollback|--uninstall|--prune) [ "$action" = install ] || fail 'Choose one action'; action=${1#--}; shift ;;
       --yes) confirmed=true; shift ;;
       --no-claude-agent-teams) agent_teams=0; shift ;;
-      --help) printf 'Usage: install.sh [--version VERSION|beta|latest] [--prefix ABSOLUTE_PATH] [--no-claude-agent-teams] [--rollback|--uninstall|--prune --yes]\nInstall enables Claude Code agent teams in ~/.claude/settings.json when Claude Code is present and you have not disabled them; opt out with --no-claude-agent-teams or TMUX_IDE_NO_CLAUDE_AGENT_TEAMS=1.\nPrune requires all tmux-ide processes and services to be stopped; it keeps current and previous releases.\nRollback needs a previous successful install. Uninstall removes the launcher, preserves sessions and data, and retains runtime files for running processes.\n'; return ;;
+      --no-daemon-upgrade) daemon_upgrade=0; shift ;;
+      --help) printf 'Usage: install.sh [--version VERSION|beta|latest] [--prefix ABSOLUTE_PATH] [--no-claude-agent-teams] [--no-daemon-upgrade] [--rollback|--uninstall|--prune --yes]\nInstall enables Claude Code agent teams in ~/.claude/settings.json when Claude Code is present and you have not disabled them; opt out with --no-claude-agent-teams or TMUX_IDE_NO_CLAUDE_AGENT_TEAMS=1.\nInstall moves a running older daemon, and macOS launchd jobs that start an older tmux-ide copy, to this installation; tmux sessions keep running. Opt out with --no-daemon-upgrade or TMUX_IDE_NO_DAEMON_UPGRADE=1.\nPrune requires all tmux-ide processes and services to be stopped; it keeps current and previous releases.\nRollback needs a previous successful install. Uninstall removes the launcher, preserves sessions and data, and retains runtime files for running processes.\n'; return ;;
       *) fail "Unknown option: $1" ;;
     esac
   done
   [ "$confirmed" = false ] || [ "$action" = prune ] || fail '--yes is only valid with --prune'
+  [ "$daemon_upgrade" = 1 ] || [ "$action" = install ] || fail '--no-daemon-upgrade is only valid when installing'
   [ "$action" != prune ] || [ "$confirmed" = true ] || fail 'Prune requires --yes after stopping all tmux-ide processes and services; ordinary tmux sessions may remain running'
   case "$prefix" in /*) ;; *) fail 'Install prefix must be absolute' ;; esac
   case "$version" in ''|*[!a-zA-Z0-9.+-]*) fail 'Invalid version or channel' ;; esac
@@ -200,7 +337,6 @@ JS
   node --input-type=module - "$root" "$prefix" "$stage" "$agent_teams" <<'JS'
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 const [root, prefix, stage, agentTeams] = process.argv.slice(2);
 const destination = path.join(root, 'releases', path.basename(stage).replace('.install.', 'install-'));
@@ -279,27 +415,30 @@ const command = firstOnPath === launcherPath ? 'tmux-ide' : quote(launcherPath);
 console.log(`\n  ✓ Installed successfully. tmux-ide ${version} is ready.\n\n  Start:   ${command} app\n  Update:  ${command} update`);
 if (firstOnPath === undefined)
   console.log(`\n  To run it as plain \`tmux-ide\`, add this line to your shell profile:\n    export PATH=${quote(bin)}:"$PATH"`);
-else if (firstOnPath !== launcherPath)
-  console.log(`\n  Another tmux-ide comes first on your PATH (${firstOnPath}).\n  Remove it, or add this line at the end of your shell profile:\n    export PATH=${quote(bin)}:"$PATH"`);
-// A daemon from an older release keeps running until explicitly moved.
-try {
-  const infoDir = process.env.TMUX_IDE_DAEMON_INFO_DIR || process.env.TMUX_IDE_REGISTRY_DIR || process.env.TMUX_IDE_HOME || path.join(os.homedir(), '.tmux-ide');
-  const info = JSON.parse(fs.readFileSync(path.join(infoDir, 'daemon.json'), 'utf8'));
-  if (Number.isInteger(info.pid) && info.productVersion !== version) {
-    process.kill(info.pid, 0);
-    console.log(`\n  A tmux-ide ${info.productVersion} daemon is still running; your sessions are safe.\n  Move it to ${version}:  ${command} update --daemon --if-running`);
-  }
-} catch {}
-console.log('');
+else if (firstOnPath !== launcherPath) {
+  // Name the shadowing copy without running it: a global npm package records its version.
+  let other = '', removal = '';
+  try {
+    const real = fs.realpathSync(firstOnPath);
+    if (/\/lib\/node_modules\/tmux-ide\/bin\/cli\.js$/.test(real)) {
+      other = ` ${JSON.parse(fs.readFileSync(path.join(path.dirname(real), '../package.json'), 'utf8')).version}`;
+      const npm = path.join(path.dirname(firstOnPath), 'npm');
+      if (fs.existsSync(npm)) removal = `\n    Remove it:  ${quote(npm)} uninstall -g tmux-ide`;
+    }
+  } catch {}
+  console.log(`\n  ! Another tmux-ide${other} comes first on your PATH (${firstOnPath}),\n    so \`tmux-ide\` still runs that copy instead of ${version}.${removal}\n    ${removal ? 'Or put' : 'Remove it, or put'} this installation first by adding this line at the end of your shell profile:\n      export PATH=${quote(bin)}:"$PATH"\n    Then open a new shell (or run: hash -r).`);
+}
 JS
   export PATH="$root/current/node/bin:$PATH"
   "$launcher" --version >/dev/null
+  reconcile_daemon "$prefix" "$daemon_upgrade" || printf '  ! Could not check the running daemon; your sessions are safe. Retry: %s update --daemon\n' "$launcher"
+  printf '\n'
 }
 # Native alpha is explicit; ordinary CLI installs keep their existing behavior.
 if [ "${1:-}" = --native-alpha ]; then
   shift
   if [ "${1:-}" = --help ]; then
-    printf '%s\n' 'Usage: install.sh --native-alpha [--prefix ABSOLUTE_NATIVE_ROOT] [--update|--rollback|--uninstall]' 'Apple Silicon macOS 26+. Bootstraps CLI 2.9.5; preserves qualified CLI 2.9.5 or 2.9.6 for native install/update; native actions preserve daemon and tmux processes.'
+    printf '%s\n' 'Usage: install.sh --native-alpha [--prefix ABSOLUTE_NATIVE_ROOT] [--update|--rollback|--uninstall]' 'Apple Silicon macOS 26+. Bootstraps CLI 2.9.17; upgrades older stable CLI versions and preserves 2.9.17; newer or unrecognized versions require explicit review; native actions preserve daemon and tmux processes.'
     exit 0
   fi
   [ "$(uname -s)" = Darwin ] && [ "$(uname -m)" = arm64 ] || fail 'Native alpha requires an Apple Silicon Mac'
@@ -326,21 +465,42 @@ if [ "${1:-}" = --native-alpha ]; then
     install|update)
       native_cli_version=''
       if [ -x "$HOME/.local/bin/tmux-ide" ]; then
-        native_cli_version=$("$HOME/.local/bin/tmux-ide" --version 2>/dev/null) || native_cli_version=''
+        native_cli_version=$("$HOME/.local/bin/tmux-ide" --version 2>/dev/null) || fail 'Existing CLI preserved: its version could not be read; repair or review it explicitly before continuing'
+        [ -n "$native_cli_version" ] || fail 'Existing CLI preserved: its version could not be read; repair or review it explicitly before continuing'
       fi
       case "$native_cli_version" in
-        'tmux-ide v2.9.5'|'tmux-ide v2.9.6') ;;
-        *) native_cli_needed=true ;;
+        'tmux-ide v2.9.17') ;;
+        '') native_cli_needed=true ;;
+        *)
+          # Only upgrade a recognized older stable release. Unknown/newer
+          # installations are never replaced by this pinned prerequisite.
+          if printf '%s\n' "$native_cli_version" | awk '
+            /^tmux-ide v(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)$/ {
+              sub(/^tmux-ide v/, ""); split($0, v, ".");
+              older = v[1] < 2 || (v[1] == 2 && (v[2] < 9 || (v[2] == 9 && v[3] < 17)));
+              count++;
+            }
+            END { exit !(count == 1 && NR == 1 && older) }
+          '; then
+            native_cli_needed=true
+          else
+            fail 'Existing CLI preserved: its version is not qualified for this pinned native bootstrap; review it explicitly before continuing'
+          fi ;;
       esac ;;
   esac
   if [ "$native_cli_needed" = true ]; then
-    (main --version 2.9.5 --prefix "$HOME/.local" --no-claude-agent-teams)
+    (main --version 2.9.17 --prefix "$HOME/.local" --no-claude-agent-teams)
+  elif [ "$native_action" = install ] || [ "$native_action" = update ]; then
+    # The pinned CLI is already current; still move a stale daemon or launchd job onto it.
+    native_upgrade=1
+    [ "${TMUX_IDE_NO_DAEMON_UPGRADE:-}" != 1 ] || native_upgrade=0
+    reconcile_daemon "$HOME/.local" "$native_upgrade" || printf '  ! Could not check the running daemon; your sessions are safe. Retry: %s update --daemon\n' "$HOME/.local/bin/tmux-ide"
   fi
   native_stage=$(mktemp -d "${TMPDIR:-/tmp}/tmux-native-bootstrap.XXXXXXXX")
   trap 'rm -rf "$native_stage"' 0
   trap 'exit 1' INT TERM
-  fetch https://github.com/wavyrai/tmux-ide/releases/download/native-alpha-2026101410/install-native-alpha-v2.sh "$native_stage/install.sh"
-  [ "$(digest "$native_stage/install.sh")" = 586cdd1b094169bbc07373bc36974a234893f3221fa85e3cc1584591857b20f4 ] || fail 'Native installer checksum mismatch'
+  fetch https://github.com/wavyrai/tmux-ide/releases/download/native-alpha-2026110402/install-native-alpha-v10.sh "$native_stage/install.sh"
+  [ "$(digest "$native_stage/install.sh")" = 416b12df5dcbc551279bec6c27fb83c537efa92a8f6d909f54d687bfe09bf493 ] || fail 'Native installer checksum mismatch'
   sh "$native_stage/install.sh" "$@"
 else
   main "$@"

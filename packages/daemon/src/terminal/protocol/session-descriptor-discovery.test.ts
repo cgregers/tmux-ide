@@ -57,7 +57,12 @@ describe("SessionDescriptorDiscovery", () => {
   });
 
   it("applies the native inventory value and reply bounds", () => {
-    expect(parseSessionPaneDescriptors([line("%1", "/repo", "x".repeat(1_025))])).toEqual([]);
+    // An overlong title (stock tmux titles panes with kitty graphics APCs) is
+    // ignored; the pane itself stays in the inventory.
+    expect(parseSessionPaneDescriptors([line("%1", "/repo", "x".repeat(1_025))])).toEqual([
+      expect.objectContaining({ runtimePaneId: "%1", title: null }),
+    ]);
+    expect(parseSessionPaneDescriptors([line("%1", "/x".repeat(2_049))])).toEqual([]);
     expect(parseSessionPaneDescriptors(Array.from({ length: 4_097 }, () => line("%1")))).toEqual(
       [],
     );
@@ -241,4 +246,17 @@ it("reads explicit name provenance without confusing it with a pane identity", (
   const result = parseSessionPaneDescriptors([`${line("%3")}\tmanual`]);
   expect(result[0]).toMatchObject({ runtimePaneId: "%3", name: "Shell", nameSource: "manual" });
   expect(parseSessionPaneDescriptors([`${line("%3")}\tuntrusted`])[0]?.nameSource).toBeNull();
+});
+
+it("carries live browser icon metadata without changing pane identity", () => {
+  const icon = "ff00807f".repeat(256);
+  const record = `${line("%3")}\tmanual\t${process.pid}:${icon}`;
+  expect(parseSessionPaneDescriptors([record])[0]).toMatchObject({
+    runtimePaneId: "%3",
+    browserIcon: icon,
+  });
+  expect(parseSessionPaneDescriptors([`${line("%3")}\tmanual\tbad`])[0]).toMatchObject({
+    runtimePaneId: "%3",
+    browserIcon: null,
+  });
 });

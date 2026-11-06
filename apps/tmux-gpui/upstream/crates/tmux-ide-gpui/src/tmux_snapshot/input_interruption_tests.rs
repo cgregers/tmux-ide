@@ -1,0 +1,395 @@
+#![allow(clippy::unwrap_used)]
+use super::*;
+use crate::tmux_snapshot::{decode, keys::Input, presence::Presence};
+use core::prelude::v1::test;
+use std::sync::{Arc, mpsc};
+
+fn make_view(
+    window: &mut Window,
+    cx: &mut Context<SnapshotView>,
+    sender: mpsc::SyncSender<browser::Command>,
+) -> SnapshotView {
+    crate::tmux_snapshot::fit_test_support::fixture_view(
+        window,
+        cx,
+        sender,
+        7,
+        browser::State {
+            surface: browser::Surface::Workspace,
+            input_ready: false,
+            ..Default::default()
+        },
+    )
+}
+fn key(value: &str) -> KeyDownEvent {
+    KeyDownEvent {
+        keystroke: Keystroke::parse(value).unwrap(),
+        is_held: false,
+        prefer_character_input: false,
+        layout: None,
+    }
+}
+#[gpui::test]
+fn interrupted_prefix_cannot_send_suffix_or_enter_after_authority_arrives(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    while receiver.try_recv().is_ok() {}
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.terminal_key(&key("e"), window, cx);
+            view.replace_text_in_range(None, "e", window, cx);
+            assert!(receiver.try_recv().is_err());
+            view.browser_state.input_ready = true;
+            view.replace_text_in_range(None, "WINDOW_ONE_OK", window, cx);
+            view.terminal_key(&key("enter"), window, cx);
+            assert!(
+                receiver.try_recv().is_err(),
+                "authority arrival must not admit an interrupted command suffix"
+            );
+        })
+    });
+}
+
+fn click(view: &mut SnapshotView, window: &mut Window, cx: &mut Context<SnapshotView>) {
+    view.input_geometry = Some((
+        Bounds::new(point(px(0.), px(0.)), size(px(500.), px(500.))),
+        Bounds::default(),
+    ));
+    view.input_cell_width = Some(10.);
+    view.painted_frame = view.frame.clone();
+    view.terminal_click(
+        &MouseDownEvent {
+            position: view.test_cell_point(0.5, 0.25),
+            button: MouseButton::Left,
+            ..Default::default()
+        },
+        window,
+        cx,
+    );
+}
+#[gpui::test]
+fn rejected_typing_requires_new_ready_click_and_never_replays(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    while receiver.try_recv().is_ok() {}
+    cx.update(|window,cx| view.update(cx, |view,cx| {
+        window.blur(cx);
+        view.presence.set_active(false);
+        click(view,window,cx);
+        assert!(view.terminal_focus.is_focused(window), "early click must expose keydown without text handler");
+        assert!(!view.input_interrupted, "clicking alone is not rejected input");
+        view.replace_text_in_range(None,"unverified-prefix",window,cx);
+        assert!(view.input_interrupted);
+        view.presence = Presence::new(true);
+        view.presence.flush(view.browser_commands.as_ref().unwrap());
+        view.presence.acknowledge(1);
+        view.browser_state.input_ready = true;
+        while receiver.try_recv().is_ok() {}
+        view.replace_text_in_range(None,"suffix",window,cx);
+        view.terminal_key(&key("enter"),window,cx);
+        view.terminal_key(&key("ctrl-c"),window,cx);
+        view.queue_input(Input::Paste("suffix".into()),cx);
+        assert!(receiver.try_recv().is_err());
+        // A stale painted frame cannot arm input.
+        view.painted_frame = None;
+        view.terminal_click(&MouseDownEvent { position:point(px(5.),px(5.)),button:MouseButton::Left,..Default::default() },window,cx);
+        view.replace_text_in_range(None,"still blocked",window,cx);
+        assert!(receiver.try_recv().is_err());
+        click(view,window,cx);
+        view.replace_text_in_range(None,"echo WHOLE",window,cx);
+        view.terminal_key(&key("enter"),window,cx);
+        assert!(matches!(receiver.try_recv().unwrap(),browser::Command::Input { input:Input::Text(t), .. } if t=="echo WHOLE"));
+        assert!(matches!(receiver.try_recv().unwrap(),browser::Command::Input { input:Input::Key(k), .. } if k=="Enter"));
+        assert!(receiver.try_recv().is_err(), "no rejected prefix or suffix is replayed");
+    }));
+}
+#[gpui::test]
+fn ready_click_and_application_shortcuts_do_not_interrupt_input(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    while receiver.try_recv().is_ok() {}
+    cx.update(|window,cx| view.update(cx, |view,cx| {
+        view.terminal_key(&key("cmd-q"),window,cx);
+        assert!(!view.input_interrupted, "application quit is not a terminal gesture");
+        view.browser_state.input_ready=true;
+        click(view,window,cx);
+        view.replace_text_in_range(None,"complete",window,cx);
+        assert!(matches!(receiver.try_recv().unwrap(),browser::Command::Input { input:Input::Text(t), .. } if t=="complete"));
+        assert!(receiver.try_recv().is_err());
+    }));
+}
+#[gpui::test]
+fn native_window_navigation_keeps_cards_but_cannot_send_text(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    while receiver.try_recv().is_ok() {}
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let native = crate::terminal_painter::NativeFrame {
+                width: 1,
+                height: 1,
+                cursor: None,
+                rows: vec![Arc::from([herdr_client::protocol::CellData {
+                    symbol: "x".into(),
+                    fg: 0,
+                    bg: 0,
+                    modifier: 0,
+                    skip: false,
+                    hyperlink: None,
+                }])],
+            };
+            view.frame = Some(crate::tmux_snapshot::display_frame::DisplayFrame::Native(
+                Arc::new(native),
+            ));
+            view.browser_state.frame = view.frame.clone();
+            view.browser_state.input_ready = true;
+            view.select(Selection::Pane("another-window-pane".into()), window, cx);
+            assert!(
+                view.frame.is_some(),
+                "navigation must not clear the outgoing pixels before the worker replies"
+            );
+            assert!(view.browser_state.retained_preview);
+            assert!(!view.browser_state.input_ready);
+            assert!(view.browser_state.input_targets.is_empty());
+            assert!(matches!(
+                receiver.try_recv().unwrap(),
+                browser::Command::Pane { .. }
+            ));
+            view.replace_text_in_range(None, "must-not-replay", window, cx);
+            assert!(receiver.try_recv().is_err());
+            assert!(view.pending_input.is_none());
+        })
+    });
+}
+#[gpui::test]
+fn interrupted_input_survives_target_and_readiness_changes_but_local_scroll_remains(
+    cx: &mut TestAppContext,
+) {
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    while receiver.try_recv().is_ok() {}
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view.replace_and_mark_text_in_range(None, "early", None, window, cx);
+            assert!(view.marked.is_empty());
+            let frame = view.frame.clone();
+            view.select(Selection::Pane("pane-b".into()), window, cx);
+            view.browser_state.selected_pane = Some("pane-b".into());
+            view.browser_state.input_ready = true;
+            view.frame = frame;
+            view.terminal_focus.focus(window, cx);
+            while receiver.try_recv().is_ok() {}
+            view.replace_text_in_range(None, "late", window, cx);
+            view.terminal_key(&key("enter"), window, cx);
+            assert!(receiver.try_recv().is_err());
+            view.terminal_key(&key("shift-end"), window, cx);
+            assert!(matches!(
+                receiver.try_recv().unwrap(),
+                browser::Command::Input {
+                    input: Input::Scroll(0),
+                    ..
+                }
+            ));
+            assert!(
+                view.input_interrupted,
+                "local history control cannot re-arm terminal input"
+            );
+        })
+    });
+}
+
+#[gpui::test]
+fn queue_recovery_cannot_send_suffix_after_a_dropped_terminal_command(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    while receiver.try_recv().is_ok() {}
+    cx.update(|window,cx| view.update(cx, |view,cx| {
+        view.browser_state.input_ready=true;
+        click(view,window,cx);
+        let sender=view.browser_commands.as_ref().unwrap();
+        for _ in 0..32 { sender.try_send(browser::Command::Presence { active:true, revision:1 }).unwrap(); }
+        view.replace_text_in_range(None,"lost prefix",window,cx);
+        while receiver.try_recv().is_ok() {}
+        view.browser_state.input_ready=true;
+        view.replace_text_in_range(None,"suffix",window,cx);
+        view.terminal_key(&key("enter"),window,cx);
+        assert!(receiver.try_recv().is_err());
+        click(view,window,cx);
+        view.replace_text_in_range(None,"new whole command",window,cx);
+        assert!(matches!(receiver.try_recv().unwrap(),browser::Command::Input { input:Input::Text(t), .. } if t=="new whole command"));
+        assert!(receiver.try_recv().is_err());
+    }));
+}
+#[gpui::test]
+fn focused_key_dispatch_observes_input_without_appkit_handler(cx: &mut TestAppContext) {
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    while receiver.try_recv().is_ok() {}
+    cx.simulate_keystrokes("e");
+    assert!(view.read_with(cx, |view, _| view.input_interrupted));
+    cx.update(|_, cx| view.update(cx, |view, _| view.browser_state.input_ready = true));
+    cx.simulate_keystrokes("enter ctrl-c cmd-v");
+    assert!(receiver.try_recv().is_err());
+}
+
+#[gpui::test]
+fn dropped_drag_prefix_stays_interrupted_after_release_until_ready_click(cx: &mut TestAppContext) {
+    use herdr_client::protocol::{CellData, FrameData};
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    receiver.try_iter().for_each(drop);
+    cx.update(|window, cx| view.update(cx, |view, cx| {
+        let frame = Arc::new(FrameData { width: 11, height: 9, cursor: None, hyperlinks: vec![], graphics: vec![],
+            cells: vec![CellData { symbol: " ".into(), fg: 0, bg: 0, modifier: 0, skip: false, hyperlink: None }; 99] });
+        view.frame = Some(crate::tmux_snapshot::display_frame::DisplayFrame::Legacy(frame.clone()));
+        view.browser_state.frame = Some(crate::tmux_snapshot::display_frame::DisplayFrame::Legacy(frame));
+        view.browser_state.request = 7;
+        view.browser_state.input_ready = true;
+        view.browser_state.selected_session = Some("session".into());
+        view.browser_state.resize_token = Some("312b2c16-a13d-4411-82e5-1fdb58adab92".into());
+        view.browser_state.regions = serde_json::from_str(r#"[{"id":"pane-a","left":0,"top":0,"width":5,"height":9},{"id":"pane-b","left":6,"top":0,"width":5,"height":9}]"#).unwrap();
+        view.browser_state.panes = ["pane-a", "pane-b"].into_iter().map(|id| browser::Choice { id:id.into(), label:id.into(), pane_count:None, window_id:Some("window".into()), browser_icon: None, window_label:None }).collect();
+        for offered in 0..3 {
+            click(view, window, cx);
+            assert!(!view.input_interrupted);
+            assert!(view.begin_divider(view.test_cell_point(5.5,1.), cx));
+            assert!(!view.input_interrupted, "starting resize alone is not dropped input");
+            match offered {
+                0 => view.terminal_key(&key("e"), window, cx),
+                1 => view.replace_text_in_range(None, "prefix", window, cx),
+                _ => view.queue_input(Input::Paste("prefix".into()), cx),
+            }
+            assert!(view.input_interrupted);
+            assert!(view.divider.is_some(), "input interruption must not cancel resize");
+            assert!(receiver.try_recv().is_err());
+            view.move_divider(view.test_cell_point(5.5,1.)+point(px(10.),px(0.)), true, cx);
+            assert!(matches!(receiver.try_recv().unwrap(), browser::Command::ResizePane { .. }));
+            view.replace_text_in_range(None, "suffix", window, cx);
+            view.terminal_key(&key("enter"), window, cx);
+            assert!(receiver.try_recv().is_err(), "release cannot admit the dropped command suffix");
+            click(view, window, cx);
+            view.replace_text_in_range(None, "whole", window, cx);
+            view.terminal_key(&key("enter"), window, cx);
+            assert!(matches!(receiver.try_recv().unwrap(), browser::Command::Input { input: Input::Text(text), .. } if text == "whole"));
+            assert!(matches!(receiver.try_recv().unwrap(), browser::Command::Input { input: Input::Key(key), .. } if key == "Enter"));
+            assert!(receiver.try_recv().is_err());
+        }
+        click(view, window, cx);
+        assert!(view.begin_divider(view.test_cell_point(5.5,1.), cx));
+        view.terminal_key(&key("cmd-q"), window, cx);
+        assert!(!view.input_interrupted);
+        view.terminal_key(&key("escape"), window, cx);
+        assert!(view.divider.is_none());
+        assert!(!view.input_interrupted, "local cancellation did not drop terminal input");
+        assert!(receiver.try_recv().is_err());
+    }));
+}
+
+#[path = "wheel_event_tests.rs"]
+mod wheel_event_tests;
+
+#[path = "historical_selection_tests.rs"]
+mod historical_selection_tests;
+
+#[path = "terminal_links/pointer_tests.rs"]
+mod terminal_link_pointer_tests;
+
+#[path = "input_interruption_tests/uncertain_pointer.rs"]
+mod uncertain_pointer;
+
+#[path = "pointer_event_tests.rs"]
+mod pointer_event_tests;
+#[path = "input_interruption_tests/retained_preview.rs"]
+mod retained_preview;
+
+#[path = "terminal_links/native_fixture_tests.rs"]
+mod native_link_fixture_tests;
+
+#[path = "history_page_tests.rs"]
+mod history_page_tests;
+
+#[path = "input_interruption_tests/pending_selection.rs"]
+mod pending_selection;
+
+#[path = "input_interruption_tests/focus_reclaim.rs"]
+mod focus_reclaim;
+
+#[path = "input_interruption_tests/viewport.rs"]
+mod viewport;
+
+#[gpui::test]
+fn native_browser_shortcuts_never_become_terminal_input(cx: &mut TestAppContext) {
+    use herdr_client::tmux_daemon::{BrowserAction, BrowserState};
+    let (sender, receiver) = mpsc::sync_channel(32);
+    let (view, cx) = cx.add_window_view(|window, cx| make_view(window, cx, sender));
+    receiver.try_iter().for_each(drop);
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            let state = BrowserState {
+                version: 1,
+                instance: "12345678-1234-4234-8234-123456789abc".into(),
+                pane: "%1".into(),
+                tab: 1,
+                revision: 7,
+                enabled: true,
+                url: "https://example.com".into(),
+                title: "Example".into(),
+                loading: false,
+                can_go_back: false,
+                can_go_forward: false,
+            };
+            view.browser_state.request = view.browser_request;
+            view.browser_state.input_ready = true;
+            view.browser_state.panes = ["pane-a", "pane-b"]
+                .into_iter()
+                .map(|id| browser::Choice {
+                    id: id.into(),
+                    label: id.into(),
+                    pane_count: None,
+                    window_id: Some("window-a".into()),
+                    window_label: None,
+                    browser_icon: None,
+                })
+                .collect();
+            view.browser_state
+                .browser_controls
+                .insert("pane-a".into(), state.clone());
+            // Focusing a terminal sibling keeps native chrome on the browser,
+            // while browser keyboard shortcuts still belong to the focused pane.
+            view.browser_state.selected_pane = Some("pane-b".into());
+            assert!(view.browser_header("pane-a", cx).is_some());
+            // Losing input authority must not replace native chrome with a title.
+            view.browser_state.input_ready = false;
+            view.browser_state.selected_pane = Some("pane-a".into());
+            assert!(view.browser_header("pane-a", cx).is_some());
+            assert!(!view.browser_shortcut_key(&key("cmd-r"), window, cx));
+            assert!(receiver.try_recv().is_err());
+            view.browser_state.input_ready = true;
+            view.browser_state.selected_pane = Some("pane-b".into());
+            assert!(!view.browser_shortcut_key(&key("cmd-r"), window, cx));
+            view.browser_state.panes[1].window_id = Some("other-window".into());
+            assert!(view.browser_header("pane-a", cx).is_none());
+            view.browser_state.selected_pane = Some("pane-a".into());
+            assert!(view.browser_shortcut_key(&key("cmd-r"), window, cx));
+            assert!(
+                matches!(receiver.try_recv().unwrap(), browser::Command::BrowserControls {
+            request: 7, id, command: Some(command)
+        } if id == "pane-a" && command.action == BrowserAction::Reload && command.revision == 7)
+            );
+            assert!(receiver.try_recv().is_err());
+            // A held command cannot replay while waiting for fresh state.
+            assert!(!view.browser_shortcut_key(&key("cmd-r"), window, cx));
+            view.browser_state
+                .browser_controls
+                .insert("pane-a".into(), state);
+            view.browser_state.retained_preview = true;
+            assert!(!view.browser_shortcut_key(&key("cmd-l"), window, cx));
+            assert!(view.browser_address.is_none());
+            view.browser_state.retained_preview = false;
+            assert!(view.browser_shortcut_key(&key("cmd-l"), window, cx));
+            assert!(view.browser_address.is_some());
+            assert!(!view.terminal_focus.is_focused(window));
+            assert!(receiver.try_recv().is_err());
+        })
+    });
+}

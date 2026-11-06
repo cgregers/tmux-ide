@@ -1,5 +1,5 @@
 // Execute the production publication owner, without launching a daemon or helper.
-// This isolates ACK ownership; actual helper retirement remains a live-fixture gate.
+// This isolates native ACK ownership; actual transport retirement remains a live-fixture gate.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -51,13 +51,17 @@ function fixture(overrides = {}) {
     selectedPane: null,
     panes: [{ semanticPaneId: "pane-a", liveSessionId: "session-a" }],
     layouts: [],
+    kittyPlacements: [],
     fleet: null,
     acceptSessionVisit: null,
     observingTabs: false,
     selectedFleet: null,
     homePhase: "live",
     status: "Choose a pane or window",
-    active: undefined,
+    currentDirectScope: null,
+    nativeReady: null,
+    nativePreviews: { scope: () => null, publication: () => null },
+    lastPublication: null,
     appliedPresenceRevision: 1,
     presenceRevision: 2,
     connection: "fixture",
@@ -72,7 +76,10 @@ function fixture(overrides = {}) {
     sessionCatalogComplete: true,
     initialPane: "pane-a",
     historySaveFailed: false,
+    historyOffset: 0,
     inputReady: false,
+    inputTargetRejected: false,
+    inputTargets: null,
     snapshot: null,
     splitGesture: null,
     resizeGesture: null,
@@ -80,6 +87,22 @@ function fixture(overrides = {}) {
     machines: null,
     machineMessage: null,
     MAX_FRAME: 8 * 1024 * 1024,
+    writePublication: (publication) => events.push(JSON.parse(publication.json)),
+    localCreateProof: null,
+    revokeLocalCreateOffer() {},
+    localSetup: null,
+    localSetupContext: () => false,
+    retainedFrames: { retain() {} },
+    historyDrains: new Map(),
+    historyDrainEpoch: 0,
+    retainedHistory: new Map(),
+    retainedPreview: null,
+    clearRetainedPreview() {},
+    frameProof: () => null,
+    diagnosticTmuxVersion: () => null,
+    homeRecovery: { publication: () => null },
+    homeAgentFilter: null,
+    selectionIdentity: null,
     blocked: false,
     pending: null,
     ...overrides,
@@ -94,62 +117,55 @@ function fixture(overrides = {}) {
   };
 }
 
-test("completed metadata Workspace acknowledges foreground after helper retirement without granting input", () => {
+test("completed metadata Workspace acknowledges foreground after native owner retirement without granting input", () => {
   const f = fixture({ foreground: false, presenceRevision: 1 });
   assert.equal(f.publish().presenceRevision, 1);
   f.context.foreground = true;
   f.context.presenceRevision = 2;
   const next = f.publish();
-  assert.equal(next.presenceRevision, 2, "no terminal helper exists to acknowledge this revision");
+  assert.equal(
+    next.presenceRevision,
+    2,
+    "no native terminal owner exists to acknowledge this revision",
+  );
   assert.equal(next.preferredPane, "pane-a");
   assert.equal(next.snapshot, null);
   assert.equal(next.selectedPane, null);
   assert.equal(next.inputReady, false);
 });
 
-test("metadata helper retirement boundary cannot leave completed Workspace acknowledgement stranded", () => {
-  const f = fixture({ active: { catalogOnly: true } });
-  assert.equal(f.publish().presenceRevision, 1, "helper still owned before retirement");
-  f.context.active = undefined;
+test("metadata native owner retirement boundary cannot leave completed Workspace acknowledgement stranded", () => {
+  const f = fixture({ currentDirectScope: { id: "fixture-scope", catalogOnly: true } });
+  assert.equal(f.publish().presenceRevision, 1, "native owner still bound before retirement");
+  f.context.currentDirectScope = null;
   assert.equal(f.publish().presenceRevision, 2, "retired metadata owner must acknowledge locally");
 });
 
-test("live terminal helper retains acknowledgement ownership until its own ACK", () => {
-  const f = fixture({ active: { catalogOnly: false }, selectedPane: "pane-a" });
+test("live native terminal retains acknowledgement ownership until its own ACK", () => {
+  const f = fixture({
+    currentDirectScope: { id: "fixture-scope", catalogOnly: false },
+    selectedPane: "pane-a",
+  });
   assert.equal(f.publish().presenceRevision, 1);
-  f.context.appliedPresenceRevision = 2; // Represents validated current helper ACK.
+  f.context.appliedPresenceRevision = 2; // Represents validated current native ACK.
   assert.equal(f.publish().presenceRevision, 2);
   assert.equal(f.publish().inputReady, false, "presence ACK alone never grants input");
 });
 
-test("Home without a helper already acknowledges local presence", () => {
+test("Home without a native owner already acknowledges local presence", () => {
   const f = fixture({ surface: "home", sessionCatalogComplete: false, selectedSession: null });
   assert.equal(f.publish().presenceRevision, 2);
 });
 
 test("completed catalog publishes its ACK after synchronously retiring the actual metadata owner", async () => {
-  let killed = false;
-  const f = fixture({
-    active: {
-      catalogOnly: true,
-      child: {
-        kill() {
-          killed = true;
-        },
-      },
-      done: Promise.resolve(),
+  let retired = false;
+  const f = fixture({ currentDirectScope: { id: "fixture-scope", catalogOnly: true } });
+  f.context.directTerminal = {
+    retire() {
+      retired = true;
+      f.context.currentDirectScope = null;
     },
-  });
-  const retire = parsed.statements.find(
-    (node) => ts.isFunctionDeclaration(node) && node.name?.text === "retire",
-  );
-  assert.ok(retire);
-  vm.runInContext(
-    ts.transpileModule(retire.getText(parsed), {
-      compilerOptions: { target: ts.ScriptTarget.ES2022 },
-    }).outputText,
-    f.context,
-  );
+  };
   let completion;
   function visit(node) {
     if (ts.isBlock(node)) {
@@ -167,8 +183,8 @@ test("completed catalog publishes its ACK after synchronously retiring the actua
   visit(parsed);
   assert.ok(completion, "actual completed catalog publication sequence exists");
   vm.runInContext(completion, f.context);
-  assert.equal(killed, true);
-  assert.equal(f.context.active, undefined);
+  assert.equal(retired, true);
+  assert.equal(f.context.currentDirectScope, null);
   assert.equal(
     f.context.appliedPresenceRevision,
     2,
@@ -177,15 +193,13 @@ test("completed catalog publishes its ACK after synchronously retiring the actua
   await Promise.resolve();
 });
 
-test("incomplete or authority-bearing Workspace cannot locally acknowledge presence", () => {
+test("incomplete or native-owned Workspace cannot locally acknowledge presence", () => {
   for (const overrides of [
     { sessionCatalogComplete: false },
     { catalog: null },
     { selectedSession: null },
     { selectedPane: "pane-a" },
-    { snapshot: {} },
-    { inputReady: true },
-    { active: { catalogOnly: false } },
+    { currentDirectScope: { id: "fixture-scope", catalogOnly: false } },
   ]) {
     const f = fixture({
       historyOffset: 0,
@@ -199,4 +213,44 @@ test("incomplete or authority-bearing Workspace cannot locally acknowledge prese
     });
     assert.equal(f.publish().presenceRevision, 1);
   }
+});
+
+test("broker publication cannot grant input or carry terminal state from stale globals", () => {
+  const f = fixture({
+    inputReady: true,
+    snapshot: { secret: "terminal-cell" },
+    inputTargets: [{ token: "stale" }],
+  });
+  const event = f.publish();
+  assert.equal(event.snapshot, null);
+  assert.equal(event.inputReady, false);
+  assert.deepEqual(event.inputTargets, []);
+  assert.equal(JSON.stringify(event).includes("terminal-cell"), false);
+});
+
+test("native diagnostics require matching current scope and presence without granting input", () => {
+  const bound = {
+    id: "scope",
+    request: 1,
+    config: { liveSessionId: "session-a", scope: { generation: "generation" } },
+  };
+  const ready = { id: "scope", request: 1, pane: "pane-a", presence: 2 };
+  const f = fixture({
+    currentDirectScope: bound,
+    nativeReady: ready,
+    selectedPane: "pane-a",
+    catalog: { diagnosticVersion: () => "2.9.10" },
+  });
+  const event = f.publish();
+  assert.equal(event.nativeDiagnostics.versions.daemonVersion, "2.9.10");
+  assert.equal(event.nativeDiagnostics.generation, "generation");
+  assert.equal(event.inputReady, false);
+  assert.equal(event.snapshot, null);
+  for (const change of [{ id: "old" }, { request: 0 }, { pane: "other" }, { presence: 1 }]) {
+    f.context.nativeReady = { ...ready, ...change };
+    assert.equal(f.publish().nativeDiagnostics, null);
+  }
+  f.context.nativeReady = ready;
+  f.context.foreground = false;
+  assert.equal(f.publish().nativeDiagnostics, null);
 });

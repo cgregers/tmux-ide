@@ -1,4 +1,7 @@
+import { registerVerifiedVersion } from "./diagnostic-versions.ts";
 import { randomUUID } from "node:crypto";
+import { realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
   getCanonicalDaemonInfoPath,
   inspectCanonicalDaemonInfoPath,
@@ -19,14 +22,41 @@ export interface LocalPreviewHostProof {
   verify(signal?: AbortSignal): Promise<void>;
 }
 // Provenance is process-private. Parsing a host file or copying its fields cannot mint it.
+const identityVersions = new WeakMap<object, string>();
 const localHosts = new WeakMap<PreviewHost, LocalPreviewHostProof>();
+const localImages = new WeakMap<
+  LocalPreviewHostProof,
+  {
+    host: PreviewHost;
+    root: string;
+    generation: string;
+  }
+>();
 export function localPreviewHostProof(host: PreviewHost): LocalPreviewHostProof | null {
   return localHosts.get(host) ?? null;
 }
 
+/** File access is derived from discovery provenance, never a loopback URL or peer path. */
+export function localPreviewImageAccess(
+  proof: LocalPreviewHostProof | null,
+  host: PreviewHost,
+): { root: string; generation: string } | null {
+  if (!proof || process.platform === "win32") return null;
+  const bound = localImages.get(proof);
+  if (
+    !bound ||
+    bound.host.baseUrl !== host.baseUrl ||
+    bound.host.ownerToken !== host.ownerToken ||
+    bound.host.scope.serverId !== host.scope.serverId ||
+    bound.host.scope.generation !== host.scope.generation
+  )
+    return null;
+  proof.assertCurrent();
+  return { root: bound.root, generation: bound.generation };
+}
+
 const discoveryMessages = Object.freeze({
-  "no-daemon":
-    "No usable local daemon was found. If tmux-ide is installed, run tmux-ide --headless in a terminal and keep it running, then Refresh sessions.",
+  "no-daemon": "Local sessions are not connected yet. Use setup or refresh sessions to continue.",
   unavailable:
     "The local daemon could not be reached. Check the tmux-ide daemon, then Refresh sessions.",
   "no-server":
@@ -96,6 +126,7 @@ export async function discoverPreviewDaemon(
   const current = inspectCanonicalDaemonInfoPath(path);
   if (current.status !== "valid" || JSON.stringify(current.info) !== JSON.stringify(info))
     throw new DaemonDiscoveryError("record-changed");
+  identityVersions.set(info, identity.productVersion);
   return info;
 }
 
@@ -149,7 +180,7 @@ export async function discoverPreviewHost(
       throw new DaemonDiscoveryError("unavailable");
     }
   };
-  localHosts.set(host, {
+  const proof: LocalPreviewHostProof = {
     assertCurrent,
     async verify(signal) {
       assertCurrent();
@@ -174,6 +205,13 @@ export async function discoverPreviewHost(
       signal?.throwIfAborted();
       assertCurrent();
     },
+  };
+  localHosts.set(host, proof);
+  localImages.set(proof, {
+    host: structuredClone(host),
+    root: join(realpathSync(dirname(resolve(path))), `local-images-${info.instanceId}`),
+    generation: info.instanceId,
   });
+  registerVerifiedVersion(host, identityVersions.get(info), assertCurrent);
   return host;
 }

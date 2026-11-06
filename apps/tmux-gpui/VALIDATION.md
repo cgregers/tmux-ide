@@ -11,9 +11,9 @@ GPUI 0.3.6. This does not qualify full tmux parity.
 - `cargo test --locked --workspace --all-features`: 2,717 passed, 17 existing
   opt-in tests ignored. No Linux or Windows execution is implied.
 - Canonical TypeScript `TerminalReplicaSnapshotSchemaZ` accepts the synthetic fixture.
-- `cargo test --locked --release -p herdr-gpui --test cli`: all 10 CLI smoke
+- `cargo test --locked --release -p tmux-ide-gpui --test cli`: all 10 CLI smoke
   tests passed.
-- `cargo build --locked --release -p herdr-gpui` passed; the optimized executable
+- `cargo build --locked --release -p tmux-ide-gpui` passed; the optimized executable
   also validates the snapshot fixture successfully.
 - Debug executable accepts the fixture through `--tmux-snapshot FILE --validate-only`.
 - Executable rejects missing arguments, malformed JSON and files larger than 8 MiB.
@@ -111,6 +111,7 @@ only the preview dispatcher. Original module composition moved into `src/lib.rs`
 the upstream `herdr-gpui` binary remains an explicit reference target. Development
 launchers select the dedicated binary. No dependency, lockfile, painter or protocol
 change is involved; this does not yet remove inherited build dependencies.
+(Mac app cleanup, 30 Oct: #655 removed the `herdr-gpui` binary and its modules.)
 
 Three new executable tests cover product help/version, rejection of upstream and
 malformed options, and canonical fixture validation with no state files created.
@@ -466,7 +467,7 @@ invalid delivery retires the connection, and disconnect clears all surfaces.
 Interactive publications add history-stripped surfaces. The 8 MiB publication
 limit is preserved; it is not a claim about total canonical-history memory.
 
-New isolated `bridge/multipane-smoke.mjs` splits one owned tmux window, observes
+New isolated [`bridge/multipane-smoke.mjs`](https://github.com/wavyrai/tmux-ide/blob/a0cff52add18dfdf9d4acbf3ec40a44c7542b7cd/apps/tmux-gpui/bridge/multipane-smoke.mjs) splits one owned tmux window, observes
 two distinct seeds, verifies one pane's update leaves its sibling unchanged, and
 checks all surfaces clear on daemon stop. Passed `/tmp/gpui-multipane-smoke.log`.
 Bridge typecheck, four replica regression tests, read-only single-pane live smoke
@@ -822,7 +823,7 @@ retain their original chronological scope.
 | Distribution                | Receipt-bound development app, artifact checks, authenticated download/extraction and install/update/rollback/recovery components                                                                                                                                  | Trusted Apple signing identity, signed/notarized artifact, clean-machine install/update/rollback and public download verification                                                                                                                                                                                                            |
 | Release                     | Reviewed source checkpoints and scoped evidence are committed through `4876fa44`                                                                                                                                                                                   | Current-main integration check, impacted terminal release gates and published preview receipt; no public-release claim                                                                                                                                                                                                                       |
 
-Evidence directory names above are relative to `evidence/`. These scoped passes
+Evidence directory names above are relative to [`evidence/`](https://github.com/wavyrai/tmux-ide/tree/a0cff52add18dfdf9d4acbf3ec40a44c7542b7cd/apps/tmux-gpui/evidence). These scoped passes
 do not establish full TUI parity or close all GP01–GP11 acceptance requirements.
 
 The human's Selection Trace app remains open for testing. Its fixture watchdog
@@ -842,7 +843,7 @@ Run preparation with a new absolute evidence directory:
 
 ```bash
 TMUX_GPUI_VISUAL_DIR=/tmp/gpui-visual-new \
-  node --import tsx apps/tmux-gpui/bridge/native-visual-smoke.mjs --prepare-only
+  node --import tsx apps/tmux-gpui/bridge/manual/native-visual-smoke.mjs --prepare-only
 ```
 
 For native inspection, omit `--prepare-only` and set `TMUX_GPUI_TEST_APP` to
@@ -1190,7 +1191,7 @@ unmerged and unreleased.
 ## Optimized CLI and npm boundary verified — 9 October 2026
 
 The existing release-profile job completed with exit 0: `cargo test --locked
---release -p herdr-gpui --test tmux_cli` passed all 3 tests (product identity,
+--release -p tmux-ide-gpui --test tmux_cli` passed all 3 tests (product identity,
 argument rejection and offline snapshot validation). The prior running-job
 statement above is superseded by this result. This is executable CLI evidence,
 not a physical GUI acceptance result.
@@ -1398,10 +1399,36 @@ Physical native recovery and signed clean-machine installation remain open.
 
 Reviewed branch commit `f7db40ca` fixes the public terminal-delivery address at its owner. Each connection captures the trusted validated workspace address before subscription; raw tmux session names remain exact for canonical/native identity. Envelopes and ACK/NACK now use that same address throughout. No schema weakening, trimming, or global aliasing.
 
-The identical real source regression for a Unicode/spaced/trailing-space session failed with Pane unavailable before the fix and passes afterward with a real frame plus input readiness. Packaged Node/browser against the isolated source-built daemon also passes, as does ordinary-name source opening. Exact native name retention and fixture cleanup pass. 162 focused daemon tests, daemon typechecks, scoped lint/format and independent review passed. Evidence: `apps/tmux-gpui/evidence/delivery-address-2026-10-10/`.
+The identical real source regression for a Unicode/spaced/trailing-space session failed with Pane unavailable before the fix and passes afterward with a real frame plus input readiness. Packaged Node/browser against the isolated source-built daemon also passes, as does ordinary-name source opening. Exact native name retention and fixture cleanup pass. 162 focused daemon tests, daemon typechecks, scoped lint/format and independent review passed. Evidence: [`apps/tmux-gpui/evidence/delivery-address-2026-10-10/`](https://github.com/wavyrai/tmux-ide/tree/a0cff52add18dfdf9d4acbf3ec40a44c7542b7cd/apps/tmux-gpui/evidence/delivery-address-2026-10-10).
 
 A fresh isolated user demo is open with Side by side and Stacked windows; both first-window terminals visibly rendered and keyboard readiness appeared. This is not the missing long-label narrow native marker-routing proof, which remains open. Existing demos were preserved. Local branch only; no merge or release. CI38080028723 remains live in macOS release-executable build; pushes held to avoid cancelling it.
 
 Native follow-up: the separately identified Navigation Trace QA app (unchanged native/Node/live bytes; metadata-only browser relay) opened the exact long-label session, automatically selected its pane with active presence revision 2, rendered frames and accepted `echo WINDOW_ONE_OK`, then tab selection plus `echo WINDOW_TWO_OK`. The fixture verified both exact source outputs and no crossed targets. Screenshot and redacted metadata trace are included. No narrow-size checkpoint was written: CUA drag gestures left the screenshot at 2002×1300 pixels. Operator closed QA normally; the fixture correctly exits1 with App closed before narrow observation and runs isolated cleanup. This is positive native stream/input/routing evidence, not full narrow-layout or source-survives-close qualification. The user's three demo controllers were untouched.
 
 Full bridge gate: 263 passed, 0 failed, 5 optional-app skips.
+
+## Node out of the default bundle — 29 October 2026
+
+The default app no longer bundles Node 24, its license or the Node-run bridge;
+`assemble-local-app.mjs --node NODE24 --node-license LICENSE` builds a development
+app that keeps them. On macOS ARM64 the default app measured 28 MB (`du -sh`)
+against 159 MB for the development app, which has the previous layout. Launched with
+no arguments, the default app's launcher started `tmux-ide-gpui --tmux-native-local`
+and opened its window with no `Resources/node` present. Its legacy private-host
+route exits 1 with one line naming the missing runtime and the development-only
+route. `check-packaged-app.sh` now checks both apps: 4 of 4 package tests on the
+default app, 10 passed and 1 skipped (the no-Node check) on the development app.
+That run replaced cargo-about notice generation with a stub in a scratch copy,
+because cargo-about 0.9.2 was not installed; notice generation was not qualified.
+The preview signer and the installer's app verifier now sign and verify `Resources/node`
+only when it is present; a present Node must still be a signed regular file. Neither
+was run against real Apple tools.
+
+The terminal browser payload no longer needs `Resources/node` (30 October): its
+launcher runs `browser-launch.mjs` on the browser engine in Node mode
+(`ELECTRON_RUN_AS_NODE=1`), so `--browser-payload` works without `--node`. With the
+28 October managed payload in an app layout with no Node, the launcher printed its
+version on first launch (about 5 s, unpacking a private engine copy) and from the
+installed cache (about 0.4 s). Started in a detached tmux pane, `terminal-browser open`
+ran on the cached engine and queried the terminal for graphics support; a detached
+pane cannot answer that query, so the page itself was not rendered there.

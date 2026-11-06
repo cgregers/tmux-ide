@@ -1,3 +1,4 @@
+import type { HistoryAnchorRequest, HistoryAnchorResult } from "@tmux-ide/contracts";
 import { StockCaptureTabUnavailableError } from "./stock-capture-fidelity.ts";
 import type { OwnedNativePlanCompletion } from "../../lib/owned-native-interaction-bindings.ts";
 import type {
@@ -29,6 +30,7 @@ import {
   type CanonicalTerminalReplicaUpdate,
   type CausalCellFailureReasonV1,
   type CausalCellProbeV1,
+  type PaneStreamInputLifetime,
   type TerminalDeliveryAck,
   type TerminalDeliveryNack,
   type TerminalDeliveryOffer,
@@ -243,6 +245,7 @@ export interface SessionRuntimeConsumer {
     performanceTraceId?: string,
     causalProbe?: CausalCellProbeV1,
     onCausalResult?: (result: CausalCellLedgerResult) => void,
+    expectedLifetime?: PaneStreamInputLifetime,
   ): void;
   failCausalCellProbe(
     semanticPaneId: string,
@@ -255,6 +258,8 @@ export interface SessionRuntimeConsumer {
     rows: number,
     semanticWindowId?: string,
   ): void;
+  /** Renderer cell size in device pixels, forwarded to tmux. */
+  setCellPixels?(width: number, height: number, precise?: { width: number; height: number }): void;
   fitViewportWithAuthority(
     lease: SessionRuntimeAuthorityLease,
     cols: number,
@@ -875,6 +880,12 @@ export class SessionRuntimeRegistry implements PaneStreamMirror {
     return await this.#runtime(session).describe();
   }
 
+  historyAnchor(session: string, request: HistoryAnchorRequest): HistoryAnchorResult {
+    const runtime = this.#sessions.get(session);
+    if (this.#disposed || !runtime) return { status: "unavailable" };
+    return runtime.historyAnchor(request);
+  }
+
   async captureNativeBacking(
     session: string,
     semanticPaneId: string,
@@ -887,13 +898,16 @@ export class SessionRuntimeRegistry implements PaneStreamMirror {
     return result;
   }
 
-  async describeSessionAuthority(session: string): Promise<{
+  async describeSessionAuthority(
+    session: string,
+    expectedSemanticPaneIds?: readonly string[],
+  ): Promise<{
     readonly description: MirrorSessionDescription;
     readonly runtimeSessionId: string;
   }> {
     const runtime = this.#runtime(session);
     await runtime.whenReady();
-    const authority = await this.#mirror.describeSessionAuthority(session);
+    const authority = await this.#mirror.describeSessionAuthority(session, expectedSemanticPaneIds);
     if (this.#disposed || this.#sessions.get(session) !== runtime) {
       const error = new Error(`session runtime ${session} changed topology`);
       error.name = "MirrorTopologyChangedError";
@@ -1295,7 +1309,6 @@ class SessionRuntime {
       scheduler,
       nativeGeometryHysteresisMs,
       onGeometryAuthorityChanged: (clientId) => {
-        this.#mirror.clearWindowViewports(this.session);
         this.#mirror.setGeometryParticipation(this.session, clientId !== null);
       },
       onNativeGeometryYieldExpired: () => this.#publishAuthority(),
@@ -1581,6 +1594,7 @@ class SessionRuntime {
     performanceTraceId?: string,
     rawCausalProbe?: CausalCellProbeV1,
     onCausalResult?: (result: CausalCellLedgerResult) => void,
+    expectedLifetime?: PaneStreamInputLifetime,
   ): void {
     this.assertController(lease, clientId);
     const inputLease = this.#authority.leaseFor(clientId, "input");
@@ -1618,7 +1632,10 @@ class SessionRuntime {
           })
         : null;
     const started = this.#observability.enabled ? this.#observability.nowMicros() : 0;
-    const replicaOwner = this.#terminalReplicaOwner(semanticPaneId);
+    const replicaOwner = expectedLifetime
+      ? this.#terminalReplicas.get(semanticPaneId)
+      : this.#terminalReplicaOwner(semanticPaneId);
+    if (!replicaOwner) throw new Error("Input target lifetime unavailable");
     if (causalProbe) {
       this.#activeCausalCellProbes += 1;
       let settled = false;
@@ -1641,6 +1658,15 @@ class SessionRuntime {
       this.#outputTraces.arm(semanticPaneId, trace);
     }
     try {
+      // Synchronous final admission: never create a new owner to satisfy a stale
+      // held-input fence, and never await between this check and mirror dispatch.
+      if (
+        expectedLifetime &&
+        (expectedLifetime.generation !== this.generation ||
+          this.#terminalReplicas.get(semanticPaneId) !== replicaOwner ||
+          replicaOwner.inputAdmissionIncarnation() !== expectedLifetime.incarnation)
+      )
+        throw new Error("Input target lifetime changed");
       if (input.kind === "text")
         this.#mirror.sendText(
           this.session,
@@ -1758,6 +1784,17 @@ class SessionRuntime {
         "The client does not own this geometry authority lease.",
       );
     }
+  }
+
+  /** Renderer cell size in device pixels; benign, so any connected client may set it. */
+  setCellPixels(
+    clientId: string,
+    width: number,
+    height: number,
+    precise?: { width: number; height: number },
+  ): void {
+    this.#assertConnected(clientId);
+    this.#mirror.setCellPixels?.(this.session, width, height, precise);
   }
 
   fitViewportWithAuthority(
@@ -1878,6 +1915,18 @@ class SessionRuntime {
       await owner.dispose("session-restarted");
       throw error;
     }
+  }
+
+  historyAnchor(request: HistoryAnchorRequest): HistoryAnchorResult {
+    if (this.#disposed) return { status: "unavailable" };
+    const owner = this.#terminalReplicas.get(request.proof.semanticPaneId);
+    if (!owner) return { status: "unavailable" };
+    if (request.operation.kind === "capture") {
+      if (!("revision" in request.proof) || !("stateHash" in request.proof))
+        return { status: "stale" };
+      return owner.captureHistoryAnchor(request.proof, request.operation.historyIndex);
+    }
+    return owner.resolveHistoryAnchor(request.proof, request.operation.token);
   }
 
   async captureNativeBacking(
@@ -2292,6 +2341,7 @@ class SessionRuntimeConsumerImpl implements SessionRuntimeConsumer {
     performanceTraceId?: string,
     causalProbe?: CausalCellProbeV1,
     onCausalResult?: (result: CausalCellLedgerResult) => void,
+    expectedLifetime?: PaneStreamInputLifetime,
   ): void {
     this.#assertOpen();
     this.#runtime.sendInput(
@@ -2302,6 +2352,7 @@ class SessionRuntimeConsumerImpl implements SessionRuntimeConsumer {
       performanceTraceId,
       causalProbe,
       onCausalResult,
+      expectedLifetime,
     );
   }
 
@@ -2321,6 +2372,11 @@ class SessionRuntimeConsumerImpl implements SessionRuntimeConsumer {
   ): void {
     this.#assertOpen();
     this.#runtime.fitViewport(this.clientId, lease, cols, rows, semanticWindowId);
+  }
+
+  setCellPixels(width: number, height: number, precise?: { width: number; height: number }): void {
+    this.#assertOpen();
+    this.#runtime.setCellPixels(this.clientId, width, height, precise);
   }
 
   fitViewportWithAuthority(
@@ -2416,6 +2472,8 @@ class SessionRuntimeConsumerImpl implements SessionRuntimeConsumer {
       negotiation: upstream.negotiation,
       closed: upstream.closed,
       ack: (ack: TerminalDeliveryAck) => upstream.ack(ack),
+      ...(upstream.projectionReceipt ? { projectionReceipt: upstream.projectionReceipt } : {}),
+      ...(upstream.materialize ? { materialize: upstream.materialize } : {}),
       nack: (nack: TerminalDeliveryNack) => upstream.nack(nack),
       setVisibility: (visibility: TerminalDeliveryVisibility) => upstream.setVisibility(visibility),
       close: async () => {
@@ -2424,6 +2482,7 @@ class SessionRuntimeConsumerImpl implements SessionRuntimeConsumer {
         this.#deliveryConnections.delete(connection);
         await upstream.close();
       },
+      ...(upstream.graphics ? { graphics: upstream.graphics } : {}),
     };
     this.#deliveryConnections.add(connection);
     return connection;

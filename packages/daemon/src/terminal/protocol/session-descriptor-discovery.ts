@@ -1,4 +1,7 @@
+import { browserIcon } from "./browser-icon.ts";
+
 export interface SessionPaneDescriptor {
+  browserIcon?: string | null;
   nativePaneBirthId?: string | null;
   sessionName: string;
   runtimePaneId: string;
@@ -52,6 +55,7 @@ export const SESSION_PANE_DESCRIPTOR_FORMAT = [
   "#{session_windows}",
   "#{pane_birth_id}",
   "#{qa:@tmux_ide_name_source}",
+  "#{qa:@tmux_ide_browser_icon}",
 ].join("\t");
 
 /** Decode the escapes emitted by tmux's `qa` format modifier. */
@@ -131,7 +135,7 @@ export function parseSessionPaneDescriptorReply(
       continue;
     }
     const encoded = utf8Line.split("\t");
-    if (encoded.length !== 21 && encoded.length !== 22) continue;
+    if (encoded.length !== 21 && encoded.length !== 22 && encoded.length !== 23) continue;
     const [
       runtimePaneId = "",
       semanticPaneId = "",
@@ -155,6 +159,7 @@ export function parseSessionPaneDescriptorReply(
       sessionWindowCountRaw = "",
       nativePaneBirthId = "",
       nameSource = "",
+      browserIconRaw = "",
     ] = encoded.map(decodeTmuxArgument);
     if (!/^%(?:0|[1-9][0-9]*)$/u.test(runtimePaneId) || runtimePaneId.length > 32) continue;
     if (!/^\$(?:0|[1-9][0-9]*)$/u.test(runtimeSessionId) || runtimeSessionId.length > 32) continue;
@@ -183,7 +188,6 @@ export function parseSessionPaneDescriptorReply(
       !bounded(type, 256) ||
       !bounded(currentCommand, 512) ||
       !bounded(cwd, 4_096) ||
-      !bounded(title, 1_024) ||
       !bounded(windowName, 1_024) ||
       !bounded(name, 256) ||
       !bounded(missionStamp, 256) ||
@@ -195,6 +199,7 @@ export function parseSessionPaneDescriptorReply(
       continue;
     }
     descriptors.push({
+      browserIcon: browserIcon(browserIconRaw),
       sessionName,
       runtimePaneId,
       runtimeSessionId,
@@ -203,7 +208,9 @@ export function parseSessionPaneDescriptorReply(
       type: nonempty(type),
       currentCommand: nonempty(currentCommand),
       cwd: nonempty(cwd),
-      title: nonempty(title),
+      // Stock tmux turns any APC, including kitty graphics payloads, into the
+      // pane title; an overlong title names nothing and must not drop the pane.
+      title: bounded(title, 1_024) ? nonempty(title) : null,
       windowIndex,
       windowName: nonempty(windowName),
       windowId: /^@(?:0|[1-9][0-9]*)$/u.test(windowId) ? windowId : null,

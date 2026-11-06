@@ -1,5 +1,12 @@
 import {
   PANE_STREAM_ISSUE_PATH,
+  decodeTerminalDeliveryBinaryChunk,
+  decodeTerminalGraphicsBinary,
+  TERMINAL_DELIVERY_BINARY_CAPABILITY_VERSION,
+  TERMINAL_DELIVERY_BINARY_LOCAL_CAPABILITY_VERSION,
+  PANE_STREAM_INPUT_BYTES_CAPABILITY_VERSION,
+  PaneStreamInputLifetimeSchemaZ,
+  type PaneStreamInputLifetime,
   PANE_STREAM_PROTOCOL_VERSION,
   PaneStreamClientFrameSchemaZ,
   PaneStreamIssueMutationRequestSchemaZ,
@@ -33,6 +40,9 @@ import {
   type TerminalDeliveryVisibility,
   type WorkspaceMultiplexerMutationResult,
   type WindowLinkTopology,
+  TERMINAL_GRAPHICS_MAX_REQUEST_DIGESTS,
+  type TerminalGraphicsBlob,
+  type TerminalGraphicsState,
 } from "@tmux-ide/contracts";
 import {
   calibratePaneStreamClocks,
@@ -113,6 +123,7 @@ function createRuntimeTimer(callback: () => void, delayMs: number): RuntimeTimer
 
 export interface PaneStreamClientSocket {
   readonly readyState: number;
+  binaryType?: string;
   /** Optional native/socket queue watermark in bytes. */
   readonly bufferedAmount?: number;
   addEventListener(type: SocketEventType, listener: SocketListener): void;
@@ -270,6 +281,14 @@ export interface OpenPaneStreamClientOptions {
   readonly onClockCalibrationOutcome?: (outcome: PaneStreamClockCalibrationOutcome) => void;
   readonly diagnosticNextTurn?: (callback: () => void) => () => void;
   readonly onLayout?: (frame: Extract<PaneStreamServerFrame, { type: "layout" }>) => void;
+  /** Kitty graphics state; only sent when the offer carried the graphics capability. */
+  readonly onTerminalGraphics?: (pane: string, state: TerminalGraphicsState) => void;
+  /** One chunk of requested image bytes (`blob.offset` into `blob.total`). */
+  readonly onTerminalGraphicsBlob?: (
+    pane: string,
+    blob: TerminalGraphicsBlob,
+    bytes: Uint8Array,
+  ) => void;
   readonly onLayoutSnapshot?: (
     frame: Extract<PaneStreamServerFrame, { type: "layout-snapshot" }>,
   ) => void;
@@ -313,6 +332,8 @@ export type ConnectIssuedPaneStreamRuntimeClientOptions = Pick<
   | "onClockCalibrationOutcome"
   | "diagnosticNextTurn"
   | "onLayout"
+  | "onTerminalGraphics"
+  | "onTerminalGraphicsBlob"
   | "onLayoutSnapshot"
   | "onInputAck"
   | "onCausalCellProof"
@@ -330,6 +351,8 @@ export interface PaneStreamRuntimeClient {
   readonly effectiveViewerMode: PaneStreamIssueDescriptor["effectiveViewerMode"];
   readonly authoritySnapshot: SessionRuntimeAuthoritySnapshot | null;
   readonly connectionClientId: string | null;
+  readonly supportsInputLifetime?: boolean;
+  readonly supportsInputBytes?: boolean;
   ownsConnectionAuthority(authority: SessionRuntimeAuthorityKind): boolean;
   connectionAuthorityClientId(authority: SessionRuntimeAuthorityKind): string | null;
   setPresence(state: SessionRuntimePresenceState): void;
@@ -345,6 +368,7 @@ export interface PaneStreamRuntimeClient {
     input: SessionRuntimeTerminalInput,
     performanceTraceId?: string,
     causalProbe?: CausalCellProbeRequestV1,
+    expectedLifetime?: PaneStreamInputLifetime,
   ): Promise<SessionRuntimeTerminalInputResult>;
   sendText(pane: string, text: string, performanceTraceId?: string): void;
   sendKey(pane: string, key: string, performanceTraceId?: string): void;
@@ -369,6 +393,14 @@ export interface PaneStreamRuntimeClient {
     operationId: string,
     intent: SessionRuntimeSemanticIntent,
   ): Promise<WorkspaceMultiplexerMutationResult | null>;
+  /** Pull image bytes announced in graphics state; the daemon sends each once per request. */
+  requestTerminalGraphics(pane: string, digests: readonly string[]): void;
+  /** Renderer cell size in device pixels; only after state carried `cellPixels`. */
+  setTerminalCellPixels(
+    width: number,
+    height: number,
+    precise?: { width: number; height: number },
+  ): void;
   close(): void;
 }
 
@@ -431,6 +463,7 @@ export async function connectIssuedPaneStreamRuntimeClient(
     "X-Tmux-Ide-Host-Client-Id": options.hostClientId,
     "X-Tmux-Ide-Request-Id": descriptor.requestId,
   });
+  socket.binaryType = "arraybuffer";
   options.onConnectionDiagnostic?.("socket-created", { requestId: descriptor.requestId });
   const releaseSocketResource = acquireRuntimeResource("pane-stream-socket");
   const releaseSocketListenerResources = acquireRuntimeResource("socket-listener", 4);
@@ -449,6 +482,13 @@ export async function connectIssuedPaneStreamRuntimeClient(
   };
   let closed = false;
   let verified = false;
+  const binaryPanes = new Set<string>();
+  const binaryGraphicsPanes = new Set<string>();
+  const offeredBinary = options.stream.terminalDelivery.protocolVersions.some(
+    (version) =>
+      version === TERMINAL_DELIVERY_BINARY_CAPABILITY_VERSION ||
+      version === TERMINAL_DELIVERY_BINARY_LOCAL_CAPABILITY_VERSION,
+  );
   let layoutTopologyEpoch = -1;
   let windowLinks: WindowLinkTopology | null = null;
   let resolveReady!: (client: PaneStreamRuntimeClient) => void;
@@ -963,13 +1003,24 @@ export async function connectIssuedPaneStreamRuntimeClient(
     connectionAuthorityReleases.set(authority, release);
     return release;
   };
+  let supportsInputLifetime = false;
+  let supportsInputBytes = false;
   const sendTerminalInput = (
     target: TerminalReplicaAddress,
     rawInput: SessionRuntimeTerminalInput,
     performanceTraceId?: string,
     causalProbeRequest?: CausalCellProbeRequestV1,
+    expectedLifetime?: PaneStreamInputLifetime,
   ): Promise<SessionRuntimeTerminalInputResult> => {
+    if (expectedLifetime && !supportsInputLifetime)
+      return Promise.reject(new Error("Input lifetime capability unavailable"));
+    const lifetime =
+      expectedLifetime === undefined
+        ? undefined
+        : PaneStreamInputLifetimeSchemaZ.parse(expectedLifetime);
     const input = SessionRuntimeTerminalInputSchemaZ.parse(rawInput);
+    if (input.kind === "bytes" && !supportsInputBytes)
+      return Promise.reject(new Error("Byte input capability unavailable"));
     const pane = target.semanticPaneId;
     if (!descriptor.panes.includes(pane)) {
       return Promise.reject(
@@ -1066,6 +1117,7 @@ export async function connectIssuedPaneStreamRuntimeClient(
             seq: sequence,
             ...(performanceTraceId ? { performanceTraceId } : {}),
             ...(causalProbe ? { causalProbe } : {}),
+            ...(lifetime ? { expectedLifetime: lifetime } : {}),
           },
           Boolean(transportStage),
         );
@@ -1213,7 +1265,41 @@ export async function connectIssuedPaneStreamRuntimeClient(
     );
   };
   const onMessage: SocketListener = (event) => {
-    if (closed || typeof event.data !== "string") return fail("Pane-stream frame was not text");
+    if (closed) return;
+    if (typeof event.data !== "string") {
+      if (!verified) return fail("Binary pane-stream frame before readiness");
+      const data =
+        event.data instanceof ArrayBuffer
+          ? new Uint8Array(event.data)
+          : event.data instanceof Uint8Array
+            ? event.data
+            : null;
+      if (!data) return fail("Unsupported binary pane-stream data");
+      try {
+        if (data[0] === 84 && data[1] === 68 && data[2] === 67 && data[3] === 49) {
+          const { header, bytes } = decodeTerminalDeliveryBinaryChunk(data);
+          if (!descriptor.panes.includes(header.pane) || !binaryPanes.has(header.pane))
+            return fail("Unnegotiated binary terminal delivery");
+          options.onTerminalDelivery(header.pane, {
+            type: "terminal.delivery.chunk",
+            transactionId: header.transactionId,
+            index: header.index,
+            bytes:
+              bytes.buffer instanceof ArrayBuffer
+                ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+                : bytes.slice(),
+          });
+        } else {
+          const { header, bytes } = decodeTerminalGraphicsBinary(data);
+          if (!descriptor.panes.includes(header.pane) || !binaryGraphicsPanes.has(header.pane))
+            return fail("Unnegotiated binary graphics delivery");
+          options.onTerminalGraphicsBlob?.(header.pane, header.blob, bytes);
+        }
+      } catch {
+        return fail("Invalid binary pane-stream frame");
+      }
+      return;
+    }
     const arrivedAtMicros = options.onTerminalFrameArrival
       ? Math.floor(performance.now() * 1_000)
       : 0;
@@ -1264,6 +1350,12 @@ export async function connectIssuedPaneStreamRuntimeClient(
       )
         return fail("Pane-stream peer client identity did not match the redeemed connection");
       connectionClientId = frame.connectionClientId ?? null;
+      supportsInputLifetime = frame.inputLifetime === true;
+      supportsInputBytes =
+        frame.inputBytes === true &&
+        options.stream.terminalDelivery.protocolVersions.includes(
+          PANE_STREAM_INPUT_BYTES_CAPABILITY_VERSION,
+        );
       verified = true;
       options.onConnectionDiagnostic?.("ready-frame", {
         requestId: descriptor.requestId,
@@ -1349,7 +1441,21 @@ export async function connectIssuedPaneStreamRuntimeClient(
       options.onCausalCellFailure?.(frame.failure);
       return;
     }
+    if (frame.type === "terminal-graphics") {
+      if (!descriptor.panes.includes(frame.pane)) return fail("Unissued graphics pane");
+      if (frame.state.binaryBlobs === true) binaryGraphicsPanes.add(frame.pane);
+      else binaryGraphicsPanes.delete(frame.pane);
+    }
     if (frame.type === "terminal-delivery-ready") {
+      if (!descriptor.panes.includes(frame.pane)) return fail("Unissued terminal pane");
+      binaryPanes.delete(frame.pane);
+      if (
+        frame.negotiation.accepted &&
+        frame.negotiation.negotiated.encoding === "semantic-binary-v1"
+      ) {
+        if (!offeredBinary) return fail("Unsolicited binary terminal negotiation");
+        binaryPanes.add(frame.pane);
+      }
       if (frame.negotiation.accepted) {
         negotiatedDeliveries.set(frame.pane, {
           generation: frame.negotiation.negotiated.generation,
@@ -1532,6 +1638,12 @@ export async function connectIssuedPaneStreamRuntimeClient(
       send({ type: "activity", generation: descriptor.daemonInstanceId, activity }),
     requestAuthority,
     releaseAuthority,
+    get supportsInputBytes() {
+      return supportsInputBytes;
+    },
+    get supportsInputLifetime() {
+      return supportsInputLifetime;
+    },
     sendTerminalInput,
     sendText: (pane, text, performanceTraceId) => {
       void sendTerminalInput(
@@ -1590,6 +1702,16 @@ export async function connectIssuedPaneStreamRuntimeClient(
     nack: (nack) => send({ type: "terminal-delivery-nack", nack }),
     setVisibility: (address, visibility) =>
       send({ type: "terminal-delivery-visibility", ...address, visibility }),
+    setTerminalCellPixels: (width, height, precise) =>
+      send({ type: "terminal-cell-pixels", width, height, ...(precise ? { precise } : {}) }),
+    requestTerminalGraphics: (pane, digests) => {
+      for (let start = 0; start < digests.length; start += TERMINAL_GRAPHICS_MAX_REQUEST_DIGESTS)
+        send({
+          type: "terminal-graphics-request",
+          pane,
+          digests: digests.slice(start, start + TERMINAL_GRAPHICS_MAX_REQUEST_DIGESTS),
+        });
+    },
     submitIntent: (operationId, intent) =>
       new Promise<WorkspaceMultiplexerMutationResult | null>((resolve, reject) => {
         const timer = createRuntimeTimer(() => {
@@ -1650,6 +1772,12 @@ function routeFrame(
       return;
     case "layout":
       options.onLayout?.(frame);
+      return;
+    case "terminal-graphics":
+      options.onTerminalGraphics?.(frame.pane, frame.state);
+      return;
+    case "terminal-graphics-blob":
+      options.onTerminalGraphicsBlob?.(frame.pane, frame.blob, decodeBase64(frame.data));
       return;
     case "layout-snapshot":
       options.onLayoutSnapshot?.(frame);

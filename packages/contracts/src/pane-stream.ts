@@ -1,3 +1,17 @@
+import {
+  TerminalSurfaceWatchSchemaZ,
+  TerminalSurfaceReceiverSchemaZ,
+  TerminalSurfaceAvailableSchemaZ,
+  TerminalSurfacePeerSchemaZ,
+  TerminalSurfaceOfferSchemaZ,
+  TerminalSurfaceRetiredSchemaZ,
+  TerminalSurfaceFallbackSchemaZ,
+} from "./terminal-surfaces.ts";
+import {
+  TerminalProjectionEnvelopeSchemaZ,
+  TerminalProjectionReceiptSchemaZ,
+  TerminalProjectionMaterializeSchemaZ,
+} from "./terminal-projection.ts";
 import { z } from "zod";
 import { isTmuxServerPaneStreamPath } from "./tmux-server-scope.ts";
 import {
@@ -18,6 +32,13 @@ import {
   TerminalAttachmentSemanticWindowIdSchemaZ,
 } from "./semantic-identity.ts";
 import { TerminalAttachmentViewerModeSchemaZ } from "./terminal-attachments.ts";
+import {
+  TERMINAL_GRAPHICS_BLOB_CHUNK_BYTES,
+  TERMINAL_GRAPHICS_MAX_REQUEST_DIGESTS,
+  TerminalGraphicsBlobSchemaZ,
+  TerminalGraphicsDigestSchemaZ,
+  TerminalGraphicsStateSchemaZ,
+} from "./terminal-graphics.ts";
 import { WorkspaceIdSchemaZ } from "./workspace-state.ts";
 import {
   TerminalDeliveryAckSchemaZ,
@@ -38,6 +59,7 @@ import {
   SessionRuntimePresenceStateSchemaZ,
   SessionRuntimeSemanticIntentSchemaZ,
   SessionRuntimeTerminalKeyInputSchemaZ,
+  SessionRuntimeTerminalBytesInputSchemaZ,
   SessionRuntimeTerminalKeyNameSchemaZ,
   SessionRuntimeTerminalTextInputSchemaZ,
 } from "./session-runtime.ts";
@@ -223,6 +245,20 @@ export type PaneStreamRedeemFrame = z.infer<typeof PaneStreamRedeemFrameSchemaZ>
 /** @deprecated Import SessionRuntimeTerminalKeyNameSchemaZ for new code. */
 export const PaneStreamKeyNameSchemaZ = SessionRuntimeTerminalKeyNameSchemaZ;
 
+/** Negotiated only with callers offering this additive delivery capability. */
+export const PANE_STREAM_INPUT_LIFETIME_CAPABILITY_VERSION = 105;
+/** Exact hex bytes require explicit offer + ready acknowledgement; older daemons may omit it. */
+export const PANE_STREAM_INPUT_BYTES_CAPABILITY_VERSION = 106;
+/** Bundles zlib capability 102 and optional browser icon metadata; fixed 16×16 RGBA hex, empty means browser fallback. */
+export const PANE_STREAM_BROWSER_ICON_CAPABILITY_VERSION = 117;
+export const PaneStreamInputLifetimeSchemaZ = z
+  .object({
+    generation: z.string().min(1).max(256),
+    incarnation: z.string().min(1).max(256),
+  })
+  .strict();
+export type PaneStreamInputLifetime = z.infer<typeof PaneStreamInputLifetimeSchemaZ>;
+
 const PaneStreamInputFrameMetadataShape = {
   type: z.literal("input"),
   pane: PaneStreamSemanticPaneIdSchemaZ,
@@ -230,12 +266,14 @@ const PaneStreamInputFrameMetadataShape = {
   /** Opt-in controlled next-output probe; not a general causal assertion. */
   performanceTraceId: z.uuid().optional(),
   causalProbe: CausalCellProbeV1SchemaZ.optional(),
+  expectedLifetime: PaneStreamInputLifetimeSchemaZ.optional(),
 } as const;
 
 export const PaneStreamInputFrameSchemaZ = z
   .discriminatedUnion("kind", [
     SessionRuntimeTerminalTextInputSchemaZ.extend(PaneStreamInputFrameMetadataShape),
     SessionRuntimeTerminalKeyInputSchemaZ.extend(PaneStreamInputFrameMetadataShape),
+    SessionRuntimeTerminalBytesInputSchemaZ.extend(PaneStreamInputFrameMetadataShape),
   ])
   .superRefine((value, context) => {
     if (!value.causalProbe) return;
@@ -260,6 +298,18 @@ export type PaneStreamConsumedFrame = z.infer<typeof PaneStreamConsumedFrameSche
 
 export const PaneStreamTerminalDeliveryAckFrameSchemaZ = z
   .object({ type: z.literal("terminal-delivery-ack"), ack: TerminalDeliveryAckSchemaZ })
+  .strict();
+export const PaneStreamTerminalProjectionReceiptFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-projection-receipt"),
+    receipt: TerminalProjectionReceiptSchemaZ,
+  })
+  .strict();
+export const PaneStreamTerminalProjectionMaterializeFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-projection-materialize"),
+    request: TerminalProjectionMaterializeSchemaZ,
+  })
   .strict();
 export const PaneStreamTerminalDeliveryNackFrameSchemaZ = z
   .object({ type: z.literal("terminal-delivery-nack"), nack: TerminalDeliveryNackSchemaZ })
@@ -341,10 +391,50 @@ export const PaneStreamClockProbeFrameSchemaZ = z
   })
   .strict();
 
+/** Ask for image bytes by digest; only after the daemon sent graphics state. */
+export const PaneStreamTerminalGraphicsRequestFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-graphics-request"),
+    preferInline: z.literal(true).optional(),
+    pane: PaneStreamSemanticPaneIdSchemaZ,
+    digests: z
+      .array(TerminalGraphicsDigestSchemaZ)
+      .min(1)
+      .max(TERMINAL_GRAPHICS_MAX_REQUEST_DIGESTS),
+  })
+  .strict();
+
+export const PaneStreamTerminalGraphicsLocalReleaseFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-graphics-local-release"),
+    pane: PaneStreamSemanticPaneIdSchemaZ,
+    generation: z.uuid(),
+    leaseId: z.uuid(),
+  })
+  .strict();
+
+/** The renderer's terminal cell size in device pixels (see capability 103). */
+export const PaneStreamTerminalCellPixelsFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-cell-pixels"),
+    width: z.number().int().min(1).max(1024),
+    height: z.number().int().min(1).max(1024),
+    precise: z
+      .object({
+        width: z.number().int().min(1000).max(1024000),
+        height: z.number().int().min(1000).max(1024000),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 export const PaneStreamClientFrameSchemaZ = z.union([
   PaneStreamInputFrameSchemaZ,
   PaneStreamConsumedFrameSchemaZ,
   PaneStreamTerminalDeliveryAckFrameSchemaZ,
+  PaneStreamTerminalProjectionReceiptFrameSchemaZ,
+  PaneStreamTerminalProjectionMaterializeFrameSchemaZ,
   PaneStreamTerminalDeliveryNackFrameSchemaZ,
   PaneStreamTerminalDeliveryVisibilityFrameSchemaZ,
   PaneStreamSemanticIntentFrameSchemaZ,
@@ -354,6 +444,13 @@ export const PaneStreamClientFrameSchemaZ = z.union([
   PaneStreamAuthorityRequestFrameSchemaZ,
   PaneStreamAuthorityReleaseFrameSchemaZ,
   PaneStreamClockProbeFrameSchemaZ,
+  PaneStreamTerminalGraphicsRequestFrameSchemaZ,
+  PaneStreamTerminalGraphicsLocalReleaseFrameSchemaZ,
+  PaneStreamTerminalCellPixelsFrameSchemaZ,
+  TerminalSurfaceWatchSchemaZ,
+  TerminalSurfaceReceiverSchemaZ,
+  TerminalSurfaceRetiredSchemaZ,
+  TerminalSurfaceFallbackSchemaZ,
 ]);
 export type PaneStreamClientFrame = z.infer<typeof PaneStreamClientFrameSchemaZ>;
 
@@ -372,6 +469,8 @@ const CellCoordinateSchemaZ = z.number().int().min(0).max(PANE_STREAM_MAX_GRID_C
 export const PaneStreamReadyFrameSchemaZ = z
   .object({
     type: z.literal("ready"),
+    inputLifetime: z.literal(true).optional(),
+    inputBytes: z.literal(true).optional(),
     protocolVersion: z.literal(PANE_STREAM_PROTOCOL_VERSION),
     daemonInstanceId: BoundedIdentitySchemaZ,
     requestId: z.uuid(),
@@ -461,6 +560,11 @@ export const PaneStreamLayoutFrameSchemaZ = z
             /** Optional for compatibility with an older daemon during reconnect. */
             displayName: BoundedDisplayNameSchemaZ.nullable().optional(),
             displayNameSource: PaneDisplayNameSourceSchemaZ.nullable().optional(),
+            browserIcon: z
+              .string()
+              .regex(/^(?:[0-9a-f]{2048})?$/u)
+              .nullable()
+              .optional(),
             left: CellCoordinateSchemaZ,
             top: CellCoordinateSchemaZ,
             width: GridCellSchemaZ,
@@ -629,6 +733,13 @@ export const PaneStreamTerminalDeliveryEnvelopeFrameSchemaZ = z
     envelope: TerminalDeliveryEnvelopeSchemaZ,
   })
   .strict();
+export const PaneStreamTerminalProjectionEnvelopeFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-projection-envelope"),
+    pane: PaneStreamSemanticPaneIdSchemaZ,
+    envelope: TerminalProjectionEnvelopeSchemaZ,
+  })
+  .strict();
 export const PaneStreamTerminalDeliveryChunkFrameSchemaZ = z
   .object({
     type: z.literal("terminal-delivery-chunk"),
@@ -645,6 +756,37 @@ export const PaneStreamTerminalDeliveryFaultFrameSchemaZ = z
     fault: TerminalDeliveryFaultSchemaZ,
   })
   .strict();
+export const PaneStreamTerminalGraphicsFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-graphics"),
+    pane: PaneStreamSemanticPaneIdSchemaZ,
+    state: TerminalGraphicsStateSchemaZ,
+  })
+  .strict();
+export const PaneStreamTerminalGraphicsBlobFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-graphics-blob"),
+    pane: PaneStreamSemanticPaneIdSchemaZ,
+    blob: TerminalGraphicsBlobSchemaZ,
+    data: Base64SchemaZ(Math.ceil(TERMINAL_GRAPHICS_BLOB_CHUNK_BYTES / 3) * 4).min(4),
+  })
+  .strict();
+export const PaneStreamTerminalGraphicsLocalFrameSchemaZ = z
+  .object({
+    type: z.literal("terminal-graphics-local"),
+    pane: PaneStreamSemanticPaneIdSchemaZ,
+    generation: z.uuid(),
+    leaseId: z.uuid(),
+    path: z
+      .string()
+      .min(1)
+      .max(4096)
+      .refine((path) => path.startsWith("/") && !path.includes("\0")),
+    expiresAt: z.number().int().positive().safe(),
+    blob: TerminalGraphicsBlobSchemaZ.extend({ offset: z.literal(0) }),
+  })
+  .strict();
+
 export const PaneStreamSemanticIntentAckFrameSchemaZ = z
   .object({
     type: z.literal("semantic-intent-ack"),
@@ -733,6 +875,10 @@ export const PaneStreamErrorFrameSchemaZ = z
   .strict();
 
 export const PaneStreamServerFrameSchemaZ = z.discriminatedUnion("type", [
+  TerminalSurfaceAvailableSchemaZ,
+  TerminalSurfacePeerSchemaZ,
+  TerminalSurfaceOfferSchemaZ,
+  TerminalSurfaceFallbackSchemaZ,
   PaneStreamReadyFrameSchemaZ,
   PaneStreamSeedBatchFrameSchemaZ,
   PaneStreamOutputFrameSchemaZ,
@@ -747,8 +893,12 @@ export const PaneStreamServerFrameSchemaZ = z.discriminatedUnion("type", [
   PaneStreamCausalCellFailureFrameSchemaZ,
   PaneStreamTerminalDeliveryReadyFrameSchemaZ,
   PaneStreamTerminalDeliveryEnvelopeFrameSchemaZ,
+  PaneStreamTerminalProjectionEnvelopeFrameSchemaZ,
   PaneStreamTerminalDeliveryChunkFrameSchemaZ,
   PaneStreamTerminalDeliveryFaultFrameSchemaZ,
+  PaneStreamTerminalGraphicsFrameSchemaZ,
+  PaneStreamTerminalGraphicsBlobFrameSchemaZ,
+  PaneStreamTerminalGraphicsLocalFrameSchemaZ,
   PaneStreamSemanticIntentAckFrameSchemaZ,
   PaneStreamViewportAckFrameSchemaZ,
   PaneStreamAuthoritySnapshotFrameSchemaZ,

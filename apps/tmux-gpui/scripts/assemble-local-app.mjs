@@ -8,33 +8,60 @@ import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { verifyNativeBuildReceipt } from "./native-build-receipt.mjs";
 import { readBundleMetadata, bundlePlist } from "./app-bundle-metadata.mjs";
+import { copyBrowserPayload, assertCurrentBrowserLauncher } from "./browser-payload.mjs";
 const run = promisify(execFile);
-if (
-  process.platform !== "darwin" ||
-  ![7, 9].includes(process.argv.length) ||
-  (process.argv.length === 9 && process.argv[7] !== "--metadata")
-)
+const flags = process.argv.slice(5);
+const options = new Map();
+for (let i = 0; i < flags.length; i += 2) {
+  if (
+    !["--metadata", "--browser-payload", "--node", "--node-license"].includes(flags[i]) ||
+    !flags[i + 1] ||
+    options.has(flags[i])
+  )
+    throw new Error("Invalid or duplicate app assembly option");
+  options.set(flags[i], resolve(flags[i + 1]));
+}
+if (process.platform !== "darwin" || process.argv.length < 5)
   throw new Error(
-    "macOS only: assemble-local-app.mjs NATIVE_BINARY NODE24_BINARY NODE_LICENSE BUILD_RECEIPT.json NEW_APP.app [--metadata METADATA.json]",
+    "macOS only: assemble-local-app.mjs NATIVE_BINARY BUILD_RECEIPT.json NEW_APP.app [--metadata METADATA.json] [--node NODE24_BINARY --node-license NODE_LICENSE] [--browser-payload PREPARED_DIRECTORY]",
   );
-const [native, node, nodeLicense, receipt, output] = process.argv
-  .slice(2, 7)
-  .map((p) => resolve(p));
+// The default bundle has no Node: the native app never starts it, and the browser
+// payload runs on its engine's Node mode. --node opts a development bundle into the
+// legacy helper routes.
+if (options.has("--node") !== options.has("--node-license"))
+  throw new Error("--node and --node-license must be given together");
+const node = options.get("--node"),
+  nodeLicense = options.get("--node-license");
+const [native, receipt, output] = process.argv.slice(2, 5).map((p) => resolve(p));
 if (!output.endsWith(".app")) throw new Error("Output must be a new .app directory");
-const metadata =
-  process.argv.length === 9 ? await readBundleMetadata(resolve(process.argv[8])) : undefined;
+const metadata = options.has("--metadata")
+  ? await readBundleMetadata(options.get("--metadata"))
+  : undefined;
+// Before any supplied binary runs; copyBrowserPayload later pins every file's digest.
+if (options.has("--browser-payload"))
+  assertCurrentBrowserLauncher(
+    await readFile(join(resolve(options.get("--browser-payload")), "terminal-browser"), "utf8"),
+  );
 const project = fileURLToPath(new URL("../", import.meta.url));
-// Verify local source/binary consistency before executing the supplied native binary.
+// Verify source/binary consistency before executing either supplied binary.
 await verifyNativeBuildReceipt(receipt, native, join(project, "upstream"));
-const version = (await run(node, ["--version"])).stdout.trim();
-if (!/^v24\./.test(version)) throw new Error("Node 24 is required");
+// Check build-time palette parity without starting a runtime metadata helper.
+await run(
+  process.execPath,
+  ["--import", "tsx", join(project, "scripts/generate-native-appearance.ts"), "--check"],
+  { cwd: join(project, "../..") },
+);
+const version = node && (await run(node, ["--version"])).stdout.trim();
+if (node && !/^v24\./.test(version)) throw new Error("Node 24 is required");
 const identity = (await run(native, ["--version"])).stdout.trim();
 if (!identity.startsWith("tmux-ide-gpui "))
   throw new Error("Expected dedicated tmux-ide executable");
-const license = await readFile(nodeLicense, "utf8");
-if (!license.includes("Node.js is licensed for use as follows:"))
+if (
+  node &&
+  !(await readFile(nodeLicense, "utf8")).includes("Node.js is licensed for use as follows:")
+)
   throw new Error("Supply Node's complete LICENSE file");
-for (const binary of [native, node]) {
+for (const binary of node ? [native, node] : [native]) {
   if ((await run("/usr/bin/lipo", ["-archs", binary])).stdout.trim() !== "arm64")
     throw new Error("Local preview requires ARM64 binaries");
   const libraries = (await run("/usr/bin/otool", ["-L", binary])).stdout
@@ -51,6 +78,7 @@ try {
   await mkdir(macos, { recursive: true });
   await mkdir(resources, { recursive: true });
   await copyFile(join(project, "assets/AppIcon.icns"), join(resources, "AppIcon.icns"));
+  await copyFile(join(project, "assets/Assets.car"), join(resources, "Assets.car"));
   await copyFile(native, join(macos, "tmux-ide-gpui"));
   await copyFile(receipt, join(resources, "native-build-receipt.json"));
   await verifyNativeBuildReceipt(
@@ -58,20 +86,24 @@ try {
     join(macos, "tmux-ide-gpui"),
     join(project, "upstream"),
   );
-  await copyFile(node, join(resources, "node"));
   await chmod(join(macos, "tmux-ide-gpui"), 0o755);
-  await chmod(join(resources, "node"), 0o755);
-  await copyFile(nodeLicense, join(resources, "NODE-LICENSE"));
+  if (node) {
+    await copyFile(node, join(resources, "node"));
+    await chmod(join(resources, "node"), 0o755);
+    await copyFile(nodeLicense, join(resources, "NODE-LICENSE"));
+  }
+  await copyFile(join(project, "BEZEL-NOTICE.md"), join(resources, "BEZEL-NOTICE.md"));
   await copyFile(join(project, "upstream/LICENSE"), join(resources, "HERDR-LICENSE"));
   await copyFile(join(project, "upstream/NOTICE"), join(resources, "HERDR-NOTICE"));
   await copyFile(resolve(project, "../../LICENSE"), join(resources, "TMUX-IDE-LICENSE"));
   // Preserve upstream's supplemental attribution even when a feature is not exposed.
   const supplementalNotices = {
+    "APPEARANCE-LICENSE": "crates/tmux-ide-gpui/src/tmux_snapshot/appearance/catalog.LICENSE",
     "HERDR-PROTOCOL-LICENSE": "crates/herdr-protocol/LICENSE-APACHE",
     "HERDR-PROTOCOL-NOTICE": "crates/herdr-protocol/NOTICE.md",
-    "HERDR-SOUND-NOTICE": "crates/herdr-gpui/SOUND-NOTICE.md",
-    "HERDR-GITHUB-NOTICE": "crates/herdr-gpui/GITHUB-NOTICE.md",
     "OCTICONS-LICENSE": "assets/icons/LICENSE-octicons",
+    "HEROICONS-LICENSE": "assets/icons/LICENSE-heroicons",
+    "HEROICONS-PROVENANCE.json": "assets/icons/heroicons-provenance.json",
   };
   for (const [name, source] of Object.entries(supplementalNotices)) {
     await copyFile(join(project, "upstream", source), join(resources, name));
@@ -81,10 +113,12 @@ try {
     join(project, "upstream/scripts/release/generate-notices.py"),
     join(resources, "RUST-THIRD-PARTY-NOTICES.txt"),
   ]);
-  await run(process.execPath, [
-    join(project, "scripts/build-bridge.mjs"),
-    join(resources, "bridge"),
-  ]);
+  // The bridge payload runs only on Node, so it ships only beside it.
+  if (node)
+    await run(process.execPath, [
+      join(project, "scripts/build-bridge.mjs"),
+      join(resources, "bridge"),
+    ]);
   await writeFile(
     join(macos, "tmux-ide-launcher"),
     `#!/bin/sh
@@ -96,10 +130,16 @@ if [ "$#" -gt 1 ]; then
   echo 'Usage: tmux-ide-launcher [private-host.json]' >&2
   exit 2
 fi
-exec "$resources/node" "$resources/bridge/preview-launcher.bundle.mjs" "$app_macos/tmux-ide-gpui" "\${1:---local}" --browse
+if [ "$#" -eq 0 ]; then
+  exec "$app_macos/tmux-ide-gpui" --tmux-native-local
+fi
+exec "$app_macos/tmux-ide-gpui" --tmux-browser-helper "$resources/node" "$resources/bridge/browser.bundle.mjs" "\${1:---local}"
 `,
     { mode: 0o755 },
   );
+  const browserFiles = options.has("--browser-payload")
+    ? await copyBrowserPayload(options.get("--browser-payload"), join(resources, "browser"))
+    : undefined;
   await writeFile(join(output, "Contents/Info.plist"), bundlePlist(metadata));
   const digest = async (path) =>
     createHash("sha256")
@@ -111,19 +151,35 @@ exec "$resources/node" "$resources/bridge/preview-launcher.bundle.mjs" "$app_mac
       {
         version: 1,
         distribution: false,
+        ...(browserFiles
+          ? {
+              browser: {
+                files: browserFiles,
+                scope: "development payload; separate browser qualification required",
+              },
+            }
+          : {}),
         ...(metadata ? { metadata, scope: "pre-signing assembly; not a qualified release" } : {}),
         signing: "not-qualified",
         nativeIdentity: identity,
-        nodeVersion: version,
+        ...(node ? { nodeVersion: version } : {}),
         nativeSha256: await digest(join(macos, "tmux-ide-gpui")),
         nativeBuild: {
           file: "native-build-receipt.json",
           sha256: await digest(join(resources, "native-build-receipt.json")),
           scope: "local source/binary consistency; not trusted build attestation",
         },
-        icon: { file: "AppIcon.icns", sha256: await digest(join(resources, "AppIcon.icns")) },
-        nodeSha256: await digest(join(resources, "node")),
-        nodeLicenseSha256: await digest(join(resources, "NODE-LICENSE")),
+        icon: {
+          file: "AppIcon.icns",
+          sha256: await digest(join(resources, "AppIcon.icns")),
+          catalog: { file: "Assets.car", sha256: await digest(join(resources, "Assets.car")) },
+        },
+        ...(node
+          ? {
+              nodeSha256: await digest(join(resources, "node")),
+              nodeLicenseSha256: await digest(join(resources, "NODE-LICENSE")),
+            }
+          : {}),
         rustNotices: {
           file: "RUST-THIRD-PARTY-NOTICES.txt",
           sha256: await digest(join(resources, "RUST-THIRD-PARTY-NOTICES.txt")),

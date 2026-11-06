@@ -4,6 +4,7 @@ import { Inter, Plus_Jakarta_Sans } from "next/font/google";
 import { GeistMono } from "geist/font/mono";
 import { GeistPixelSquare } from "geist/font/pixel";
 import { Analytics } from "@vercel/analytics/next";
+import { WebMcpTools } from "@/components/webmcp-tools";
 import type { Metadata, Viewport } from "next";
 import {
   CURRENT_RELEASE_PATH,
@@ -67,8 +68,13 @@ export const metadata: Metadata = {
   publisher: PUBLISHER_NAME,
   category: "Developer Tools",
   alternates: { canonical: "/" },
+  // public/favicon.ico stays a fallback for clients that ask for it by path; a file in
+  // app/ would add an unconditional link that outranks the media-specific ones.
   icons: {
-    icon: "/icon.png",
+    icon: [
+      { url: "/icon.png", sizes: "256x256", media: "(prefers-color-scheme: light)" },
+      { url: "/icon-dark-256.png", sizes: "256x256", media: "(prefers-color-scheme: dark)" },
+    ],
     apple: "/apple-icon.png",
   },
   openGraph: {
@@ -182,6 +188,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             server component provider-light; page content remains statically rendered. */}
         <RootProvider>{children}</RootProvider>
         <Analytics />
+        <WebMcpTools />
       </body>
     </html>
   );

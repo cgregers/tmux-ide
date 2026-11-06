@@ -1,3 +1,5 @@
+import { createServerDiagnosticVersion } from "./server-diagnostic-version.ts";
+import { verifiedVersion } from "./diagnostic-versions.ts";
 import type { TmuxAgentOpenRequest } from "../../../packages/contracts/src/tmux-agent-open.ts";
 import { TmuxServerSessionsResourceSchemaZ } from "../../../packages/contracts/src/tmux-server-scope.ts";
 import { catalogStage, CatalogStageError } from "./catalog-errors.ts";
@@ -8,6 +10,8 @@ import type { HomeAgentCatalogSession } from "../../../packages/presentation/src
 import { localPreviewHostProof } from "./discovery.ts";
 
 export function createPreviewCatalog(hostInput: PreviewHost) {
+  let disposed = false;
+  const serverDiagnostics = createServerDiagnosticVersion(hostInput);
   const localProof = localPreviewHostProof(hostInput);
   const host = hostSchema.parse(hostInput);
   const client = createTmuxServerClient(
@@ -16,6 +20,8 @@ export function createPreviewCatalog(hostInput: PreviewHost) {
   );
   return {
     localProof,
+    diagnosticTmuxVersion: (onChanged: () => void) => serverDiagnostics.get(onChanged),
+    diagnosticVersion: () => (disposed ? null : verifiedVersion(hostInput)),
     openAgent(liveSessionId: string, target: TmuxAgentOpenRequest) {
       return client.openAgent(liveSessionId, target);
     },
@@ -30,7 +36,11 @@ export function createPreviewCatalog(hostInput: PreviewHost) {
         signal,
       );
     },
-    dispose: () => client.dispose(),
+    dispose: () => {
+      disposed = true;
+      serverDiagnostics.dispose();
+      client.dispose();
+    },
     async homeSessions(): Promise<HomeAgentCatalogSession[]> {
       const list = await catalogStage("list-sessions", () => client.sessions());
       return list.sessions.map((session) => ({
@@ -85,31 +95,33 @@ export function createPreviewCatalog(hostInput: PreviewHost) {
       return (await catalogStage("list-sessions", () => client.sessions())).sessions;
     },
     async workspacePanes(liveSessionId: string, workspaceName: string) {
-      const list = await client.sessions();
+      const list = await catalogStage("list-sessions", () => client.sessions());
       if (
         !list.sessions.some(
           (session) =>
             session.liveSessionId === liveSessionId && session.workspaceName === workspaceName,
         )
       )
-        throw new Error("Workspace session changed");
-      const inventory = await client.inventory(workspaceName);
-      const current = await client.sessions();
+        throw new CatalogStageError("list-sessions", undefined, true);
+      const inventory = await catalogStage("inventory", () => client.inventory(workspaceName));
+      const current = await catalogStage("revalidate-sessions", () => client.sessions());
       if (
         !current.sessions.some(
           (session) =>
             session.liveSessionId === liveSessionId && session.workspaceName === workspaceName,
         )
       )
-        throw new Error("Workspace session changed");
-      return inventory.resource.semanticPaneIds.map((semanticPaneId) =>
-        connectionSchema.parse({
-          ...host,
-          workspaceName,
-          liveSessionId,
-          semanticPaneId,
-          visiblePaneIds: inventory.resource.semanticPaneIds,
-        }),
+        throw new CatalogStageError("revalidate-sessions", undefined, true);
+      return catalogStage("connection-validation", () =>
+        inventory.resource.semanticPaneIds.map((semanticPaneId) =>
+          connectionSchema.parse({
+            ...host,
+            workspaceName,
+            liveSessionId,
+            semanticPaneId,
+            visiblePaneIds: inventory.resource.semanticPaneIds,
+          }),
+        ),
       );
     },
     async panes(liveSessionId: string) {

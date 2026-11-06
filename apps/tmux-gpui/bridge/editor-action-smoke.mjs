@@ -1,3 +1,4 @@
+import { startNativeJourney } from "./native-journey-fixture.mjs";
 // Real browser command routing on an explicit private host: editor launch must stay unavailable.
 // No native window or editor is launched; source sessions are disposable.
 import assert from "node:assert/strict";
@@ -31,13 +32,15 @@ const run = (...args) =>
     encoding: "utf8",
     timeout: 5000,
   }).trim();
-let daemon, browser, latest, fatal, result;
-let buffer = "",
-  stderr = "";
+let daemon, browser, native, latest, fatal, result;
+let stderr = "";
+let awaitingEditorResult = false;
+let editorUnavailable = false;
 const failures = [];
 async function until(predicate) {
   const deadline = Date.now() + 25000;
   for (;;) {
+    native?.assertHealthy();
     if (fatal) throw fatal;
     if (predicate()) return;
     if (browser && (browser.exitCode !== null || browser.signalCode !== null))
@@ -52,7 +55,7 @@ try {
   );
   assert.equal(windows.length, 2);
   run("select-window", "-t", windows[1]);
-  const activeRuntime = run("display-message", "-p", "-t", windows[1], "#{pane_id}");
+  let activeRuntime = run("display-message", "-p", "-t", windows[1], "#{pane_id}");
   daemon = await startDaemon(fleet);
   const options = {
     baseUrl: daemon.baseUrl + "/",
@@ -92,30 +95,44 @@ try {
   browser.stderr.on("data", (chunk) => {
     stderr = (stderr + chunk).slice(-4096);
   });
-  browser.stdout.on("data", (chunk) => {
-    try {
-      buffer += chunk.toString();
-      let end;
-      while ((end = buffer.indexOf("\n")) >= 0) {
-        assert.ok(end <= 8 * 1024 * 1024);
-        latest = JSON.parse(buffer.slice(0, end));
-        buffer = buffer.slice(end + 1);
-      }
-      assert.ok(buffer.length <= 8 * 1024 * 1024);
-    } catch (error) {
-      fatal ??= error;
-    }
+  native = startNativeJourney(browser, {
+    worker: true,
+    onState: (state) => {
+      latest = state;
+      // Action feedback can be followed by a terminal frame in the same pipe read.
+      // Observe every publication instead of polling only the last frame's status.
+      if (
+        awaitingEditorResult &&
+        state.request === 4 &&
+        state.presenceRevision === 42 &&
+        state.status === "Open folder requires verified local daemon discovery"
+      )
+        editorUnavailable = true;
+    },
   });
-  const send = (command) => browser.stdin.write(JSON.stringify(command) + "\n");
+  const send = (command) => native.send(command);
   await until(() => latest?.sessions.length === 1);
   const session = latest.sessions[0].id;
+  send({ type: "presence", active: true, revision: 1 });
   send({ type: "session", request: 1, id: session });
   await until(() => latest?.request === 1 && latest.status === "Choose a pane or window");
   assert.equal(latest.sessionCatalogComplete, true);
   assert.equal(latest.snapshot, null);
   assert.equal(latest.inputReady, false);
   assert.equal(latest.selectedPane, null);
-  const expected = run("show-options", "-p", "-v", "-t", activeRuntime, "@tmux_ide_pane_id");
+  // Native topology is keyed by semantic window identity, not creation order.
+  // Select the actual last catalog choice so this scenario is deterministic.
+  const expected = latest.panes.at(-1).id;
+  const nativeRow = run("list-panes", "-a", "-F", "#{pane_id}|#{@tmux_ide_pane_id}")
+    .split("\n")
+    .find((row) => row.split("|")[1] === expected);
+  assert.ok(nativeRow);
+  activeRuntime = nativeRow.split("|")[0];
+  send({ type: "home", request: 2 });
+  await until(() => latest?.request === 2 && latest.surface === "home");
+  run("select-window", "-t", activeRuntime);
+  send({ type: "session", request: 3, id: session });
+  await until(() => latest?.request === 3 && latest.sessionCatalogComplete);
   assert.ok(expected);
   assert.notEqual(latest.panes[0].id, expected, "active window must not be first inventory choice");
   assert.equal(
@@ -123,27 +140,28 @@ try {
     expected,
     "metadata must identify authoritative current-window active pane",
   );
-  send({ type: "pane", request: 2, id: latest.preferredPane });
-  await until(() => latest?.request === 2 && latest.snapshot && latest.inputReady);
+  send({ type: "pane", request: 4, id: latest.preferredPane });
+  await until(() => latest?.request === 4 && latest.snapshot && latest.inputReady);
   assert.equal(latest.selectedPane, expected);
   assert.equal(latest.preferredPane, null);
   assert.ok(latest.paneActions?.token);
-  const action = { type: "open-editor", request: 2, id: expected, token: latest.paneActions.token };
+  const action = { type: "open-editor", request: 4, id: expected, token: latest.paneActions.token };
   const before = run("capture-pane", "-p", "-t", activeRuntime);
   send({ ...action, request: 1 });
   send({ type: "presence", active: true, revision: 42 });
   await until(() => latest?.presenceRevision === 42 && latest.inputReady && latest.paneActions);
   action.token = latest.paneActions.token;
   assert.notEqual(latest.status, "Open folder requires verified local daemon discovery");
+  awaitingEditorResult = true;
   send(action);
-  await until(() => latest?.status === "Open folder requires verified local daemon discovery");
+  await until(() => editorUnavailable);
   assert.equal(latest.selectedPane, expected);
   assert.equal(latest.inputReady, true);
   assert.equal(run("capture-pane", "-p", "-t", activeRuntime), before);
   // Replayed command must not disturb navigation or escalate a private host to local authority.
   send(action);
-  send({ type: "home", request: 3 });
-  await until(() => latest?.request === 3 && latest.surface === "home");
+  send({ type: "home", request: 5 });
+  await until(() => latest?.request === 5 && latest.surface === "home");
   result = {
     passed: true,
     runtime: app ? "packaged-node-and-browser" : "source",
@@ -157,6 +175,7 @@ try {
   failures.push(error);
 } finally {
   for (const cleanup of [
+    () => native?.stop(),
     () => stopFixtureChild(browser),
     () => daemon?.stop(),
     () => fleet.dispose(),

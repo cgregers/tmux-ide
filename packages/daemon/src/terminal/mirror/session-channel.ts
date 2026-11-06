@@ -10,6 +10,7 @@ import {
 import { boundedTmuxInteractionAppendCommand } from "../../lib/tmux-interaction-retention.ts";
 import {
   decodeNativeGridCapture,
+  isStockRawGridCapture,
   isNativeBootstrapCapture,
   type NativeGridCapture,
 } from "./native-grid-capture.ts";
@@ -212,7 +213,10 @@ function nativeBootstrapUnsupported(
   native: NativeGridCapture | null,
 ): boolean {
   if (ok)
-    return native !== null && (native.version !== 2 || native.currentAttributes === undefined);
+    return (
+      isStockRawGridCapture(lines) ||
+      (native !== null && (native.version !== 2 || native.currentAttributes === undefined))
+    );
   return lines.some((line) =>
     /^(?:parse error: )?(?:command capture-pane: )?unknown flag -R$/.test(line.trim()),
   );
@@ -268,6 +272,8 @@ export interface SessionChannelOptions {
   onExit?: () => void;
   /** Event-driven proof that a non-control tmux client is actively attached. */
   onNativeClientActivity?: () => void;
+  /** null means unproven: consumers must preserve ordinary terminal output. */
+  onNativeClientPresence?: (present: boolean | null) => void;
   /** Optional diagnostic capture before dispatch; completion must not affect input. */
   captureInputWrite?: (
     action: InputAction,
@@ -345,6 +351,7 @@ interface SnapshotLease {
   cancelFence: (() => void) | null;
   cleanup?: () => void;
   ownsPause?: boolean;
+  attemptCharged?: boolean;
 }
 
 interface RecoveryRecord {
@@ -502,11 +509,15 @@ export class SessionChannel {
   private readonly fittedWindows = new Map<string, { cols: number; rows: number }>();
   private cancelSync: (() => void) | null = null;
   private syncOrdinal = 0;
+  private identityJoinOrdinal = 0;
+  private trustedInventoryJoinsMissing = false;
   private completedSyncOrdinal = 0;
   private lastDisplayNameSyncAtMs = 0;
   private disposed = false;
   private readonly nativeGrid: NativeGridCaptureReader;
   private nativeClientProbePending = false;
+  private nativeClientProbeDirty = false;
+  private nativeClientProbeClosed = false;
   // Native captures fence every geometry event; inventory fences identity only.
   private windowAuthorityOrdinal = 0;
   private readonly layoutNotificationOrdinals = new Map<string, number>();
@@ -738,13 +749,14 @@ export class SessionChannel {
   async start(): Promise<void> {
     await this.io.start();
     await this.captureAttachedSessionIdentity();
+    this.io.send("refresh-client -B 'tmux-ide-browser-icon:%*:#{@tmux_ide_browser_icon}'");
     // Changing border placement can resize PTYs without changing the layout
     // string, so tmux emits no layout-change. Subscribe to this window option.
     this.io.send("refresh-client -B 'tmux-ide-pane-borders:@*:#{pane-border-status}'");
     this.io.send("refresh-client -B 'tmux-ide-copy-keys:@*:#{mode-keys}'");
     this.io.send("refresh-client -B 'tmux-ide-pane-history:%*:#{history_size}'");
     this.io.send("refresh-client -B 'tmux-ide-scroll-on-clear:%*:#{scroll-on-clear}'");
-    if (this.opts.onNativeClientActivity) {
+    if (this.opts.onNativeClientActivity || this.opts.onNativeClientPresence) {
       // tmux does not guarantee `%client-attached` is broadcast to an
       // existing control client. A format subscription is the documented,
       // event-driven observation seam; its notification only schedules the
@@ -753,6 +765,7 @@ export class SessionChannel {
     }
     await this.syncNow();
     await this.firstJoin;
+    if (this.opts.onNativeClientPresence) this.probeNativeClientActivity();
   }
 
   // ── Public surface (semantic ids only) ──────────────────────────────────
@@ -794,22 +807,36 @@ export class SessionChannel {
 
   /**
    * Strict daemon-internal inventory from this channel's current tmux truth.
-   * Unlike the background discovery path, this query awaits descriptor
-   * reconciliation before projecting and rejects incomplete identity rather
-   * than returning the previous descriptor snapshot.
+   * Unlike background discovery, this query verifies current native membership
+   * before projecting and rejects incomplete identity. Stream admission may
+   * explicitly join missing pane records after that verification; ordinary
+   * inventory readers retain their existing fail-closed no-join contract.
    */
   describeTrustedInventory(
     expectedRuntimeSessionId: string,
+    joinMissingPanes = false,
   ): Promise<TrustedMirrorSessionInventory> {
     if (this.disposed) {
       return Promise.reject(new Error(`mirror session ${this.opts.session} is disposed`));
     }
     if (this.trustedInventoryFlight) {
+      // A default read can fail precisely because it does not join new panes.
+      // Preserve that failure for its caller, then qualify admission separately.
+      if (
+        joinMissingPanes &&
+        !this.trustedInventoryJoinsMissing &&
+        this.trustedInventoryFlightSessionId === expectedRuntimeSessionId
+      )
+        return this.trustedInventoryFlight.then(
+          () => this.describeTrustedInventory(expectedRuntimeSessionId, true),
+          () => this.describeTrustedInventory(expectedRuntimeSessionId, true),
+        );
       return this.trustedInventoryFlightSessionId === expectedRuntimeSessionId
         ? this.trustedInventoryFlight
         : Promise.reject(new Error(`trusted inventory identity changed for ${this.opts.session}`));
     }
-    const flight = this.refreshTrustedInventory(expectedRuntimeSessionId)
+    this.trustedInventoryJoinsMissing = joinMissingPanes;
+    const flight = this.refreshTrustedInventory(expectedRuntimeSessionId, 0, joinMissingPanes)
       .catch((error) => {
         this.windowLinkAuthority?.invalidate();
         this.latestWindowStage = null;
@@ -1304,7 +1331,66 @@ export class SessionChannel {
     this.input.flush();
     this.clearWindowViewports();
     this.restoreWindowSizing(this.attachedIdentity?.runtimeSessionId ?? `=${this.opts.session}`);
-    this.io.send(`refresh-client -C ${cols}x${rows}`);
+    this.io.send(`refresh-client -C ${cols}x${rows}${this.cellPixelSuffix()}`);
+    this.clientViewport = { cols, rows };
+  }
+
+  private clientViewport: { cols: number; rows: number } | null = null;
+  private cellPixels: {
+    width: number;
+    height: number;
+    precise?: { width: number; height: number };
+  } | null = null;
+
+  /** "/WxH" for tmux's refresh-client -C (patched tmux; stock ignores it). */
+  private cellPixelSuffix(): string {
+    if (!this.cellPixels) return "";
+    const { width, height, precise } = this.cellPixels;
+    return `/${width}x${height}` + (precise ? `/${precise.width}x${precise.height}` : "");
+  }
+
+  /**
+   * The renderer's cell size in device pixels. tmux answers CSI 14t/16t and
+   * sets TIOCGWINSZ pixels from it, so image programs render 1:1 for the
+   * window. Re-applies the current viewport when the size changes.
+   */
+  setCellPixels(width: number, height: number, precise?: { width: number; height: number }): void {
+    if (
+      !Number.isSafeInteger(width) ||
+      !Number.isSafeInteger(height) ||
+      width < 1 ||
+      height < 1 ||
+      width > 1024 ||
+      height > 1024
+    )
+      throw new RangeError("cell pixel size out of range");
+    if (
+      precise &&
+      [precise.width, precise.height].some(
+        (value) => !Number.isSafeInteger(value) || value < 1000 || value > 1024000,
+      )
+    )
+      throw new RangeError("precise cell pixel size out of range");
+    if (
+      this.cellPixels?.width === width &&
+      this.cellPixels.height === height &&
+      this.cellPixels.precise?.width === precise?.width &&
+      this.cellPixels.precise?.height === precise?.height
+    )
+      return;
+    this.cellPixels = { width, height, ...(precise ? { precise } : {}) };
+    if (!this.geometryParticipating) return;
+    this.input.flush();
+    if (this.fittedWindows.size > 0) {
+      for (const [runtimeId, size] of this.fittedWindows)
+        if (this.windowsByRuntime.has(runtimeId))
+          this.io.send(
+            `refresh-client -C ${runtimeId}:${size.cols}x${size.rows}${this.cellPixelSuffix()}`,
+          );
+    } else if (this.clientViewport)
+      this.io.send(
+        `refresh-client -C ${this.clientViewport.cols}x${this.clientViewport.rows}${this.cellPixelSuffix()}`,
+      );
   }
 
   private restoreWindowSizing(target: string): void {
@@ -1354,11 +1440,11 @@ export class SessionChannel {
     if (previous?.cols === cols && previous.rows === rows) return;
     this.input.flush();
     this.restoreWindowSizing(window.runtimeId);
-    this.io.send(`refresh-client -C ${window.runtimeId}:${cols}x${rows}`);
+    this.io.send(`refresh-client -C ${window.runtimeId}:${cols}x${rows}${this.cellPixelSuffix()}`);
     this.fittedWindows.set(window.runtimeId, { cols, rows });
   }
 
-  /** Must also run on geometry-owner handoff, before the next owner fits. */
+  /** Remove scoped overrides when a fresh global viewport supersedes them. */
   clearWindowViewports(): void {
     if (!this.fittedWindows.size) return;
     this.input.flush();
@@ -1371,7 +1457,9 @@ export class SessionChannel {
 
   /** Toggle whether the retained control client participates in tmux sizing. */
   setGeometryParticipation(active: boolean): void {
-    if (!active) this.clearWindowViewports();
+    // Keep dormant per-window sizes while excluded. Even an ignored client's
+    // refresh-client -C window: clear can shrink a detached window to 80x24.
+    // Fresh viewport fits replace these sizes; a global fit clears them.
     if (this.geometryParticipating === active) return;
     this.geometryParticipating = active;
     this.input.flush();
@@ -1407,6 +1495,7 @@ export class SessionChannel {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    this.opts.onNativeClientPresence?.(null);
     this.snapshotActive?.cleanup?.();
     this.snapshotActive?.cancelFence?.();
     this.snapshotActive = null;
@@ -1959,6 +2048,7 @@ export class SessionChannel {
       return;
     }
     recovery.attempts += 1;
+    lease.attemptCharged = true;
     recovery.stage = "stock-pause";
     recovery.stock = new StockPaneSnapshot(this.snapshotContext(pane));
     // These rows were received before this pause and belong to the new seed,
@@ -2135,6 +2225,7 @@ export class SessionChannel {
       return;
     }
     recovery.attempts += 1;
+    lease.attemptCharged = true;
     const ordinal = ++recovery.reseedOrdinal;
     const participants = [...pane.subs]
       .filter((sub) => !sub.closed && !sub.frozen)
@@ -2793,6 +2884,10 @@ export class SessionChannel {
       name === "sessions-changed"
     )
       this.opts.onWindowTopologyChanged?.();
+    if (name === "subscription-changed" && rest.startsWith("tmux-ide-browser-icon ")) {
+      this.scheduleSync();
+      return;
+    }
     if (name === "subscription-changed") {
       const policy =
         /^tmux-ide-scroll-on-clear\s+\$[0-9]+\s+@[0-9]+\s+[0-9]+\s+(%[0-9]+)\s+:\s+([01])\s*$/u.exec(
@@ -2867,7 +2962,7 @@ export class SessionChannel {
     // before the once-per-second subscription notification. The inventory
     // (not either notification) remains the proof.
     if (
-      this.opts.onNativeClientActivity &&
+      (this.opts.onNativeClientActivity || this.opts.onNativeClientPresence) &&
       (NATIVE_CLIENT_NOTIFICATIONS.has(name) || name === "layout-change")
     ) {
       this.probeNativeClientActivity();
@@ -2924,6 +3019,12 @@ export class SessionChannel {
         if (pane.windowRuntimeId !== change.windowId) continue;
         const recovery = this.recoveries.get(pane.runtimeId);
         if (recovery?.lease && !recovery.lease.retired) {
+          // A newer layout cancels this capture; it is not a failed snapshot.
+          // Refund only this lease, retaining earlier failures and the original deadline.
+          if (recovery.lease.attemptCharged) {
+            recovery.lease.attemptCharged = false;
+            recovery.attempts -= 1;
+          }
           this.awaitSnapshotLayout(recovery);
           this.retrySnapshot(recovery);
         }
@@ -3052,23 +3153,36 @@ export class SessionChannel {
   }
 
   private probeNativeClientActivity(): void {
-    if (this.nativeClientProbePending || this.disposed) return;
+    if (this.disposed || this.nativeClientProbeClosed) return;
+    this.opts.onNativeClientPresence?.(null);
+    if (this.nativeClientProbePending) {
+      this.nativeClientProbeDirty ||= this.opts.onNativeClientPresence !== undefined;
+      return;
+    }
     this.nativeClientProbePending = true;
+    this.nativeClientProbeDirty = false;
     void this.io
       .request(
         `list-clients -t "${this.opts.session}" -F "#{client_control_mode}\t#{client_activity}"`,
       )
       .then((lines) => {
-        // The daemon's own mirror is a control-mode client. Only a tmux-owned
-        // attached client (control mode = 0) is honest evidence for yielding
-        // geometry; notification names alone can include our own lifecycle.
-        if (lines.some((line) => /^0\t\d+$/u.test(line.trim()))) {
-          this.opts.onNativeClientActivity?.();
-        }
+        if (this.disposed || this.nativeClientProbeClosed || this.nativeClientProbeDirty) return;
+        // Control-mode clients include our own mirrors. Only complete valid
+        // inventory proves absence; malformed replies must preserve fallback.
+        const valid = lines.every((line) => /^[01]\t\d+$/u.test(line.trim()));
+        const present = lines.some((line) => /^0\t\d+$/u.test(line.trim()));
+        this.opts.onNativeClientPresence?.(present ? true : valid ? false : null);
+        if (present) this.opts.onNativeClientActivity?.();
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (!this.disposed && !this.nativeClientProbeClosed)
+          this.opts.onNativeClientPresence?.(null);
+      })
       .finally(() => {
         this.nativeClientProbePending = false;
+        // An attach/detach while the query ran invalidated its answer. Keep one
+        // follow-up request, rather than dropping the event or growing a queue.
+        if (this.nativeClientProbeDirty) this.probeNativeClientActivity();
       });
   }
 
@@ -3190,6 +3304,7 @@ export class SessionChannel {
           semanticPaneId: pane?.semanticId ?? null,
           displayName: display?.name ?? null,
           displayNameSource: display?.source ?? null,
+          browserIcon: pane?.descriptor?.browserIcon ?? null,
           left: leaf.left,
           top: leaf.top,
           width: leaf.width,
@@ -3313,6 +3428,7 @@ export class SessionChannel {
   private async refreshTrustedInventory(
     expectedRuntimeSessionId: string,
     attempt = 0,
+    joinMissingPanes = false,
   ): Promise<TrustedMirrorSessionInventory> {
     const authorityOrdinal = this.windowIdentityOrdinal;
     const beforeLines = await this.io.request(
@@ -3412,7 +3528,11 @@ export class SessionChannel {
     ) {
       if (attempt >= 1)
         throw new Error(`trusted inventory for ${this.opts.session} did not settle`);
-      return await this.refreshTrustedInventory(expectedRuntimeSessionId, attempt + 1);
+      return await this.refreshTrustedInventory(
+        expectedRuntimeSessionId,
+        attempt + 1,
+        joinMissingPanes,
+      );
     }
     if (this.disposed) throw new Error(`mirror session ${this.opts.session} is disposed`);
     const activeWindowId = activeWindowIds.values().next().value;
@@ -3447,7 +3567,28 @@ export class SessionChannel {
       stagedPaneIds.size !== descriptors.length ||
       [...computedWindowCounts.keys()].some(
         (runtimeWindowId) => !confirmedWindowStage.windows.has(runtimeWindowId),
-      ) ||
+      )
+    )
+      throw new Error(`trusted inventory for ${this.opts.session} lacks verified identity`);
+    // Fresh native inventory can beat background discovery after window creation.
+    // Join verified stable membership before projecting semantic records.
+    if (
+      joinMissingPanes &&
+      descriptors.some(
+        (pane) => this.panesByRuntime.get(pane.runtimePaneId)?.semanticId !== pane.semanticPaneId,
+      )
+    ) {
+      this.discovery.invalidate();
+      await this.reconcileIdentity(
+        descriptors,
+        runtimePaneIds,
+        () => authorityOrdinal === this.windowIdentityOrdinal,
+        false,
+      );
+    }
+    if (this.disposed || authorityOrdinal !== this.windowIdentityOrdinal)
+      throw new Error(`trusted inventory for ${this.opts.session} changed during identity join`);
+    if (
       descriptors.some((descriptor) => {
         const pane = this.panesByRuntime.get(descriptor.runtimePaneId);
         const window = confirmedWindowStage.windows.get(descriptor.windowId!);
@@ -3860,7 +4001,10 @@ export class SessionChannel {
   private async reconcileIdentity(
     descriptors: readonly SessionPaneDescriptor[],
     listed: ReadonlySet<string>,
+    current: () => boolean = () => true,
+    publish = true,
   ): Promise<boolean> {
+    const joinOrdinal = ++this.identityJoinOrdinal;
     if (this.disposed) return false;
     if (this.opts.hasSharedWindowConflict?.()) {
       this.settleFirstJoin();
@@ -3899,7 +4043,8 @@ export class SessionChannel {
           ),
       ),
     );
-    if (this.disposed) return plan.stampEffects.length > 0;
+    if (this.disposed || !current() || joinOrdinal !== this.identityJoinOrdinal)
+      return plan.stampEffects.length > 0;
     const reconciliation = finalizeWorkspaceTmuxReconciliation(plan, outcomes);
     const descriptorByRuntime = new Map(descriptors.map((d) => [d.runtimePaneId, d]));
     for (const verified of reconciliation.panes) {
@@ -4006,8 +4151,10 @@ export class SessionChannel {
      * without this the new pane stays invisible until something else happens to
      * move a layout, and a split looks like it did not reach the view.
      */
-    for (const runtimeId of this.layoutByWindow.keys()) this.emitLayout(runtimeId);
-    this.emitLayoutAuthority();
+    if (publish) {
+      for (const runtimeId of this.layoutByWindow.keys()) this.emitLayout(runtimeId);
+      this.emitLayoutAuthority();
+    }
     this.settleFirstJoin();
     return plan.stampEffects.length > 0;
   }
@@ -4087,6 +4234,8 @@ export class SessionChannel {
 
   private onChannelExit(): void {
     if (this.disposed) return;
+    this.nativeClientProbeClosed = true;
+    this.opts.onNativeClientPresence?.(null);
     this.snapshotActive?.cancelFence?.();
     this.snapshotActive = null;
     this.snapshotQueue.clear();
